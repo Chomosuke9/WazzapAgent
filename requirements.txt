@@ -1,0 +1,4 @@
+groq
+dotenv
+python-dotenv
+websockets

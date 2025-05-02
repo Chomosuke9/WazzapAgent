@@ -1,0 +1,161 @@
+// Impor modul Baileys yang diperlukan
+// Ini seperti "import" di Python, tapi format JavaScript menggunakan require()
+const { default: makeWASocket, useMultiFileAuthState } = require('baileys');
+const fs = require('fs');
+
+// Folder untuk menyimpan data sesi WhatsApp
+// Data ini memungkinkan bot untuk terhubung kembali tanpa scan QR code setiap kali
+const AUTH_FOLDER = './auth_data';
+
+/**
+ * Fungsi utama untuk menjalankan bot WhatsApp
+ * Fungsi ini menggunakan async/await, mirip dengan Python's async/await
+ * Async menandakan fungsi asynchronous yang bisa menunggu operasi tanpa memblokir eksekusi
+ */
+async function startWhatsAppBot() {
+    // Membuat folder auth jika belum ada
+    // Ini seperti "os.makedirs()" di Python
+    if (!fs.existsSync(AUTH_FOLDER)) {
+        fs.mkdirSync(AUTH_FOLDER, { recursive: true });
+    }
+
+    // Mengambil state autentikasi dari folder
+    // await adalah keyword untuk menunggu sebuah Promise selesai, mirip "await" di Python
+    const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
+
+    // Membuat koneksi WhatsApp
+    // Ini seperti membuat instance dari sebuah class di Python
+    const sock = makeWASocket({
+        printQRInTerminal: true, // Menampilkan QR code di terminal untuk scan
+        auth: state // Menggunakan data autentikasi yang sudah ada atau akan dibuat baru
+    });
+
+    // Simpan credentials saat ada update
+    // Ini seperti menambahkan event listener di Python
+    sock.ev.on('creds.update', saveCreds);
+
+    // Event handler untuk update koneksi
+    // sock.ev.on adalah cara JS untuk mendengarkan event, mirip dengan konsep event di Python
+    sock.ev.on('connection.update', (update) => {
+        // Destructuring assignment - cara JS untuk mengekstrak nilai dari objek
+        // Di Python: connection, lastDisconnect = update['connection'], update['lastDisconnect']
+        const { connection, lastDisconnect } = update;
+
+        if (connection === 'close') {
+            console.log('Koneksi terputus, mencoba menghubungkan kembali...');
+            // Coba hubungkan kembali
+            startWhatsAppBot();
+        } else if (connection === 'open') {
+            console.log('Bot WhatsApp berhasil terhubung');
+        }
+    });
+
+    // Event handler untuk pesan masuk
+    // Ini akan dijalankan setiap kali ada pesan baru
+    sock.ev.on('messages.upsert', async (messagesUpdate) => {
+        // Mengembalikan data mentah (raw) pesan yang masuk
+        console.log('Pesan Masuk (Raw):', JSON.stringify(messagesUpdate, null, 2));
+
+        // Jika ingin mengakses pesan pertama (untuk reference saja)
+        if (messagesUpdate.messages && messagesUpdate.messages[0]) {
+            const firstMessage = messagesUpdate.messages[0];
+            console.log('Pesan pertama:', firstMessage);
+
+            // Disini kita tidak melakukan pemrosesan apapun pada pesan
+            // Sesuai permintaan untuk mengembalikan data mentah
+        }
+        if
+    });
+
+    /**
+     * Fungsi untuk mengirim pesan teks sederhana
+     * @param {string} jid - ID tujuan (nomor telepon atau ID grup)
+     * @param content
+     *
+     * Cara penggunaan:
+     * sendMessage('628123456789@s.whatsapp.net', 'Halo!')
+     * sendMessage('1234567890-123456@g.us', 'Pesan ke grup')
+     */
+    async function sendMessage(jid, content) {
+        try {
+            // Kirim pesan teks sederhana
+            // Ini mirip dengan memanggil fungsi di Python, tapi menggunakan Promise
+            const message = typeof content === 'string' ? { text: content } : content;
+
+            await sock.sendMessage(jid, message);
+            console.log('Pesan berhasil dikirim ke', jid);
+            return true;
+        } catch (error) {
+            console.error('Gagal mengirim pesan:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Fungsi untuk mendapatkan daftar anggota grup dalam bentuk raw
+     * @param {string} groupId - ID grup WhatsApp (format: 'xxxxx-xxxxx@g.us')
+     *
+     * Cara penggunaan:
+     * getGroupMembers('1234567890-123456@g.us')
+     */
+    async function getGroupMembers(groupId) {
+        try {
+            // Mengambil metadata grup (termasuk daftar anggota)
+            const groupMetadata = await sock.groupMetadata(groupId);
+            console.log('Data mentah anggota grup:', JSON.stringify(groupMetadata.participants, null, 2));
+            return groupMetadata.participants; // Return data mentah anggota grup
+        } catch (error) {
+            console.error('Gagal mendapatkan anggota grup:', error);
+            return null;
+        }
+    }
+
+    // Mengembalikan objek dengan fungsi-fungsi yang bisa digunakan
+    // Ini mirip dengan membuat class di Python dengan method publik
+    return {
+        sendMessage,
+        getGroupMembers,
+        // Akses ke objek sock jika diperlukan fungsi lainnya
+        getSocket: () => sock
+    };
+}
+
+// Jalankan bot dan simpan instance yang dikembalikan
+// Ini seperti memanggil fungsi utama di Python
+let whatsappBot;
+startWhatsAppBot()
+    .then(bot => {
+        whatsappBot = bot;
+        console.log('Bot siap digunakan!');
+        whatsappBot.sendMessage("120363210565014980@g.us", {
+            text: 'Test_1'
+        })
+        async function spam() {
+
+            const groupMembers = await whatsappBot.getGroupMembers('120363210565014980@g.us');
+            console.log(groupMembers)
+            const id = await groupMembers.map(item => item.id);
+
+            await whatsappBot.sendMessage("120363210565014980@g.us", {
+                text: '@everyone',
+                mentions: id
+            })
+        }
+        spam()
+    })
+    .catch(err => {
+        console.error('Error saat menjalankan bot:', err);
+    });
+
+// Penjelasan fungsi Promise.then():
+// Di JavaScript, then() digunakan untuk menangani hasil dari sebuah Promise
+// ini mirip dengan cara Python menangani hasil dari coroutine async
+
+// Catatan tambahan:
+// - @s.whatsapp.net adalah format untuk ID pengguna individual
+// - @g.us adalah format untuk ID grup
+
+// Untuk debugging: menangkap kesalahan tak tertangani
+process.on('uncaughtException', err => {
+    console.error('Uncaught Exception:', err);
+});
