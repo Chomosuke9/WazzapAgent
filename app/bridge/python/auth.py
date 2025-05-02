@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 import os
 
 load_dotenv()
+
 def get_key():
   return os.getenv("KEY")
 
