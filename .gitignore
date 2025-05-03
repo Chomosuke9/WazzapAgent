@@ -163,3 +163,8 @@ cython_debug/
 .idea/modules.xml
 .idea/vcs.xml
 .idea/WazzapAgent.iml
+/node_modules
+/.idea
+*.js~
+*.js~
+*.js~
