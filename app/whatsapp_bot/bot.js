@@ -1,52 +1,36 @@
-const { makeWASocket, makeCacheableSignalKeyStore, fetchLatestBaileysVersion } = require('baileys')
-const { useMySQLAuthState } = require('mysql-baileys')
-require('dotenv').config({
-  path: require('path').resolve(__dirname, '../../.env')
-});
+import makeWASocket from 'baileys'
+import NodeCache from 'node-cache'
 
-const host = process.env.HOST;
-const port = process.env.SQL_PORT;
-const user = process.env.SQL_USER;
-const password = process.env.SQL_PASSWORD;
-const database = process.env.SQL_DATABASE;
-
-async function startSock(sessionName){
-	const { error, version } = await fetchLatestBaileysVersion()
-
-	if (error){
-		console.log(`Session: ${sessionName} | No connection, check your internet.`)
-		return startSock(sessionName)
-	}
-
-	const { state, saveCreds, removeCreds } = await useMySQLAuthState({
-		session: sessionName,
-		host: host,
-		port: port,
-		user: user,
-		password: password,
-		database: database,
-		tableName: 'auth',
-		isServer: true
-	})
-
-	const sock = makeWASocket({
-		auth: {
-			creds: state.creds,
-			keys: makeCacheableSignalKeyStore(state.keys, logger),
-		},
-		version: version,
-		defaultQueryTimeoutMs: undefined
-	})
-
-	sock.ev.on('creds.update', saveCreds)
-
-	sock.ev.on('connection.update', async({ connection, lastDisconnect }) => {
-		// your code here
-	})
-
-	sock.ev.on('messages.upsert', async({ messages, type }) => {
-		// your code here
-	})
+// Cache group metadata
+const groupCache = new NodeCache({})
+async function getGroupCache(jid) {
+  let cache = groupCache.get(jid)
+  if (cache) return cache
+  else{
+    cache = await sock.groupMetadata(jid)
+    groupCache.set(jid, cache)
+    return cache
+  }
 }
 
-startSock('session1')
+
+
+const sock = makeWASocket({
+  auth: {}, // auth state of your choosing,
+  printQRInTerminal: true,
+  syncFullHistory: false,
+  shouldSyncHistoryMessages: false,
+  cachedGroupMetadata: async (jid) => getGroupCache(jid)
+  })
+
+sock.ev.on("messages.upsert", async (msg) => {
+
+});
+
+
+// this code will update group metadata
+sock.ev.on("group-participants.update", async (msg) => {
+  let metadata = await sock.groupMetadata(msg.id)
+  groupCache.set(msg.id, metadata)
+})
+
