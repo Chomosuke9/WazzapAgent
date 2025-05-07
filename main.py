@@ -11,7 +11,7 @@ port = os.getenv("PORT")
 async def main():
     await serve(handle_client, "localhost", port)
     print("Server berjalan di ws://localhost:" + port)
-    #subprocess.Popen(["node", "app/bridge/javascript/client.js"]) # Automatically run client
+    subprocess.Popen(["node", "app/bridge/javascript/handle_msg/bridge.js"]) # Automatically run client
     await asyncio.Future()  #Keep the server running
 
 

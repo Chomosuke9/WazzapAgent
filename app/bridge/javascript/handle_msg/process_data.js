@@ -32,4 +32,6 @@ function data({token=null, type=null, key = null, content = null, message = null
   }
 }
 
-module .exports = {data}
+
+
+export {data};

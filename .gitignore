@@ -168,3 +168,4 @@ cython_debug/
 *.js~
 *.js~
 *.js~
+test.js
