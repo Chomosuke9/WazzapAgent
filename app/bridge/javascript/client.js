@@ -1,56 +1,46 @@
 import dotenv from 'dotenv';
-import { dirname } from 'path';
-import { fileURLToPath } from 'url';
-import path from 'path';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import { resolve } from 'path';
+import {data} from './handle_msg/process_data.js';
 
 dotenv.config({
-  path: path.resolve(__dirname, '../../../.env')
+  path: resolve('../..//.env')
 });
-
-const data = import("./handle_msg/process_data.js");
 
 const key = process.env.KEY;
 const port = process.env.PORT;
+
 let token;
 
-class WebSocketClient {
-    constructor(msgFromServer) {
-        this.socket = new WebSocket('ws://localhost:' + port);
+function createWebSocket(onMessageCallback) {
+  const socket = new WebSocket('ws://localhost:' + port);
 
-        // Executes when the connection is successfully established.
-        this.socket.addEventListener('open', () => {
-            console.log('WebSocket connection established!');
-            // Send an auth request to the WebSocket server.
-            this.sendToServer({type: "auth", key: key});
-        });
+  socket.addEventListener('open', () => {
+    console.log('WebSocket connection established!');
+    // Send an auth request to the WebSocket server.
+    socket.send(data({ type: "auth", key: key }));
+  });
 
-        // Listen for messages and send to handler when a message is received from the server.
-        this.socket.addEventListener('message', event => {
-                  const msg = JSON.parse(event.data);
-                  if (msg?.type === "auth") {
-                      if (msg?.status === "success") {
-                          console.log("Auth success")
-                          token = msg.token
-                      } else {
-                          console.log("Auth failed... Key : " + key)
-                      }
-                  } else if (msg?.type === "chat" || msg?.type === "notify") {
-                      return msgFromServer(msg);
-                  }
-
-              }
-        );
+  socket.addEventListener('message', event => {
+    const msg = JSON.parse(event.data);
+    console.log('Message from server: ', msg);
+    if (!token) {
+      token = msg.token;
+    } else if (msg.type === "notify") {
+      onMessageCallback(msg.content); // Call the callback with the message content
     }
+  });
 
-    async sendToServer(content) {
-        content.token = token
-        const contentJSON = JSON.stringify(content);
-        this.socket.send(contentJSON);
+  return {
+    socket, // Return the socket for later use
+    sendMessage: (message) => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(message);
+      } else {
+        console.error('WebSocket is not open. Unable to send message.');
+      }
     }
+  };
 }
 
-export {WebSocketClient};
-
+// Export the function
+export { createWebSocket };

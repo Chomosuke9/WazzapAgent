@@ -169,3 +169,5 @@ cython_debug/
 *.js~
 *.js~
 test.js
+*.json
+auth_info_baileys

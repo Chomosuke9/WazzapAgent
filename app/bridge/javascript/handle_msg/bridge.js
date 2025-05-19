@@ -1,14 +1,15 @@
-import {startWABot} from "../../../whatsapp_bot/bot/bot.js"
-import {WebSocketClient} from "../client.js"
+import {startWASocket} from "../../../whatsapp_bot/bot/bot.js"
+import {createWebSocket} from "../client.js"
+import {data} from "./process_data.js";
 
 
-const sock = new WebSocketClient(handleServerMessage())
-
-async function handleServerMessage(messageFromServer) {
-    console.log(messageFromServer)
-}
+const { socket, sendMessage } = createWebSocket((messageContent) => {
+  console.log('Received notification: ', messageContent);
+});
 
 
-startWABot(async (messageFromWA) => {
-    console.log(messageFromWA)
+const WASocket = startWASocket()
+
+WASocket.getSocket().ev.on("messages.upsert", async (msg) => {
+    socket.send(data({type : "chat", content : msg}))
 })

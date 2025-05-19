@@ -19,11 +19,7 @@ function data({token=null, type=null, key = null, content = null, message = null
     data = {
       token,
       type : "chat",
-      message : message,
-      id : id,
-      name : name,
-      messageType : messageType,
-      mention: mention,
+      content : content
     }
     return data
   }
