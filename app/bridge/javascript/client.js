@@ -9,7 +9,7 @@ dotenv.config({
 const key = process.env.KEY;
 const port = process.env.PORT;
 
-let token;
+export let token;
 
 function createWebSocket(onMessageCallback) {
   const socket = new WebSocket('ws://localhost:' + port);

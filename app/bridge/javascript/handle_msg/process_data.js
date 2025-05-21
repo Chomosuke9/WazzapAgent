@@ -6,7 +6,7 @@ function data({token=null, type=null, key = null, content = null, message = null
       type : "notify",
       content : content
     }
-    return (JSON.stringify(data));
+    return (JSON.stringify(data ));
   }
   if (type === "auth") {
     data = {
@@ -21,7 +21,7 @@ function data({token=null, type=null, key = null, content = null, message = null
       type : "chat",
       content : content
     }
-    return data
+    return (JSON.stringify(data));
   }
   else {
     throw new Error("Invalid data type");

@@ -1,6 +1,6 @@
 import asyncio
 from websockets.asyncio.server import serve
-from app.bridge.python.handle_connection import handle_client
+from app.bridge.python.server import handle_client
 import subprocess
 import dotenv
 import os
