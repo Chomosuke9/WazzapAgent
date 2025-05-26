@@ -6,7 +6,7 @@ const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
 
     function startWASocket() {
         const sock = makeWASocket({
-            auth: state, // auth state of your choosing,
+            auth: state, // auth state of your choosing
             printQRInTerminal: true,
             syncFullHistory: false,
             shouldSyncHistoryMessages: false,
@@ -20,7 +20,6 @@ const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
             })
 
             sock.ev.on("creds.update", saveCreds);
-
         return {getSocket: () => sock}
     }
 

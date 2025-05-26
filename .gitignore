@@ -166,8 +166,7 @@ cython_debug/
 /node_modules
 /.idea
 *.js~
-*.js~
-*.js~
 test.js
 *.json
 auth_info_baileys
+test.py

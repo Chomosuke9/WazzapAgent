@@ -23,22 +23,13 @@ function createWebSocket(onMessageCallback) {
   socket.addEventListener('message', event => {
     const msg = JSON.parse(event.data);
     console.log('Message from server: ', msg);
-    if (!token) {
-      token = msg.token;
-    } else if (msg.type === "notify") {
-      onMessageCallback(msg.content); // Call the callback with the message content
-    }
+    if (token) {onMessageCallback(msg)}
+    else if (!token || msg.type === "auth") {token = msg.token}
+    console.log(token)
   });
 
   return {
     socket, // Return the socket for later use
-    sendMessage: (message) => {
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.send(message);
-      } else {
-        console.error('WebSocket is not open. Unable to send message.');
-      }
-    }
   };
 }
 
