@@ -1,16 +1,17 @@
-import json
 import app.bridge.python.auth as auth
-from app.bridge.python.process_data import *
+from app.bridge.python.data import *
 from app.proccess_message.handlers import handle_message
 
 clients = {}
 secret_key = auth.get_key()
+
 
 async def handle_new_valid_client(websocket):
   token = auth.generate_token()
   clients[websocket] = token
   await websocket.send(auth_data(status="success", token=token))
   print(clients)
+
 
 async def handle_client(websocket):
   try:

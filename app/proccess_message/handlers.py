@@ -1,3 +1,4 @@
 
 def handle_message(message):
-    print(message)
+    if message.get("type") == "chat":
+        print(message.get("content"))
