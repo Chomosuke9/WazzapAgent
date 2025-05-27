@@ -25,7 +25,6 @@ function createWebSocket(onMessageCallback) {
     console.log('Message from server: ', msg);
     if (token) {onMessageCallback(msg)}
     else if (!token || msg.type === "auth") {token = msg.token}
-    console.log(token)
   });
 
   return {

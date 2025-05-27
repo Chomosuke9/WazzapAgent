@@ -170,3 +170,4 @@ test.js
 *.json
 auth_info_baileys
 test.py
+*.py~

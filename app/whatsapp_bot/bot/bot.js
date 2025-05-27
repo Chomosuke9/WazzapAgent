@@ -1,13 +1,18 @@
 import {makeWASocket, useMultiFileAuthState, initAuthCreds} from 'baileys'
 import {getGroupCache, setGroupCache} from '../utils/caching.js'
 import pino from "pino";
-const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
+import QRCode from 'qrcode';
+import dotenv from 'dotenv';
+import { resolve } from 'path';
+dotenv.config({
+  path: resolve('../..//.env')
+});
 
+const { state, saveCreds } = await useMultiFileAuthState(process.env.AUTH_STATE_FILE);
 
-    function startWASocket() {
+    function startWASocket(printQRinTerminal = true) {
         const sock = makeWASocket({
             auth: state, // auth state of your choosing
-            printQRInTerminal: true,
             syncFullHistory: false,
             shouldSyncHistoryMessages: false,
             cachedGroupMetadata: async (jid) => getGroupCache(jid, sock),
@@ -20,6 +25,12 @@ const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
             })
 
             sock.ev.on("creds.update", saveCreds);
+            sock.ev.on("connection.update", (update) => {
+                const { connection, lastDisconnect } = update;
+                if (update.qr && printQRinTerminal){QRCode.toString(update.qr, { type: 'terminal', small: true}).then(console.log)}
+            // TODO : add login with pairing code
+            })
+
         return {getSocket: () => sock}
     }
 
