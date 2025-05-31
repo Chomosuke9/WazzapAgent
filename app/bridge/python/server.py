@@ -1,10 +1,11 @@
+from asyncio import create_task, to_thread, Semaphore, iscoroutinefunction
 import app.bridge.python.auth as auth
 from app.bridge.python.data import *
 from app.proccess_message.handlers import handle_message
 
 clients = {}
 secret_key = auth.get_key()
-
+sem = Semaphore(10)
 
 async def handle_new_valid_client(websocket):
   token = auth.generate_token()
@@ -20,7 +21,8 @@ async def handle_websocket_message(message, websocket):
         return
 
       if websocket in clients and msg.get("token") == clients[websocket]:
-        create_task(handle_message(msg))
+        async with sem:
+          create_task(handle_message(msg))
 
       elif websocket not in clients:
         if msg.get("type") == "auth" and msg.get("key") == secret_key:
@@ -40,28 +42,7 @@ async def handle_client(websocket):
   try:
     async for message in websocket:
       # print("Received message:", message)
-      try:
-        msg = json.loads(message)
-      except json.JSONDecodeError:
-        await websocket.send(notify_data(content="Invalid JSON"))
-        continue
-
-      if websocket in clients and msg.get("token") == clients[websocket]:
-        handle_message(msg)
-
-      elif websocket not in clients:
-        if msg.get("type") == "auth" and msg.get("key") == secret_key:
-          await websocket.send(notify_data(content="Authenticated Successfully, adding to verified clients..."))
-          await handle_new_valid_client(websocket)
-
-        else:
-          await websocket.send(notify_data(content="Unauthorized. Please authenticate."))
-
-      elif websocket in clients and msg.get("token") != clients[websocket]:
-        await websocket.send(notify_data(content="Unauthorized. Please authenticate."))
-      else:
-        await websocket.send(notify_data(content=f"Something wrong... {msg}"))
-
+      create_task(handle_websocket_message(message, websocket))
 
   except Exception as e:
     print("Error:", e)
