@@ -1,0 +1,528 @@
+Test from normal account in group
+{
+    "token": "Kb3FzaVEP9tDndW5ndz7",
+    "type": "chat",
+    "content": {
+        "messages": [
+            {
+                "key": {
+                    "remoteJid": "120363210565014980@g.us",
+                    "fromMe": False,
+                    "id": "3FD83E3009137DA6574A",
+                    "participant": "1234567890000@s.whatsapp.net",
+                },
+                "messageTimestamp": 1748574494,
+                "pushName": "Normal_WhatsApp_Test",
+                "broadcast": False,
+                "message": {
+                    "extendedTextMessage": {
+                        "text": "test1_Normal_Group",
+                        "contextInfo": {"expiration": 0},
+                    }
+                },
+            }
+        ],
+        "type": "notify",
+    },
+}
+
+
+
+Test from business account in group
+{
+    "token": "Kb3FzaVEP9tDndW5ndz7",
+    "type": "chat",
+    "content": {
+        "messages": [
+            {
+                "key": {
+                    "remoteJid": "120363210565014980@g.us",
+                    "fromMe": False,
+                    "id": "9EACD594CF44436A2790F52BA526706D",
+                    "participant": "1234567890000@s.whatsapp.net",
+                },
+                "messageTimestamp": 1748574494,
+                "pushName": "Business_WhatsApp_Test",
+                "broadcast": False,
+                "message": {
+                    "conversation": "Test2_Business_Group",
+                    "messageContextInfo": {
+                        "messageSecret": "55tl9tt27BZbRcDWRueerByNK3MOxJkJAHt8RTTsppE="
+                    },
+                },
+            }
+        ],
+        "type": "notify",
+    },
+}
+
+
+
+Test from business account in private
+{
+    "token": "Kb3FzaVEP9tDndW5ndz7",
+    "type": "chat",
+    "content": {
+        "messages": [
+            {
+                "key": {
+                    "remoteJid": "1234567890000@s.whatsapp.net",
+                    "fromMe": False,
+                    "id": "B4E91B976C77639F5F0D43DD24192D3C",
+                },
+                "messageTimestamp": 1748574685,
+                "pushName": "Business_WhatsApp_Test",
+                "broadcast": False,
+                "message": {
+                    "extendedTextMessage": {
+                        "text": "Test3_business_private",
+                        "previewType": "NONE",
+                        "contextInfo": {
+                            "entryPointConversionSource": "group_participant_list",
+                            "entryPointConversionApp": "whatsapp",
+                            "entryPointConversionDelaySeconds": 55,
+                        },
+                        "inviteLinkGroupTypeV2": "DEFAULT",
+                    },
+                    "messageContextInfo": {
+                        "deviceListMetadata": {
+                            "senderTimestamp": "1746460570",
+                            "recipientKeyHash": "ShoWBPcWfm8HBA==",
+                            "recipientTimestamp": "1748344640",
+                        },
+                        "deviceListMetadataVersion": 2,
+                        "messageSecret": "nXXH2IM55l7tsnChrIokgE2hoVbqgO84utRXVXSS1Pw=",
+                    },
+                },
+                "verifiedBizName": "Business_WhatsApp_Test",
+            }
+        ],
+        "type": "notify",
+    },
+}
+
+
+
+Test from normal account in private
+{
+    "token": "Kb3FzaVEP9tDndW5ndz7",
+    "type": "chat",
+    "content": {
+        "messages": [
+            {
+                "key": {
+                    "remoteJid": "1234567890000@s.whatsapp.net",
+                    "fromMe": False,
+                    "id": "3FDF124479AE04DAF7AB",
+                },
+                "messageTimestamp": 1748574685,
+                "pushName": "Normal_WhatsApp_Test",
+                "broadcast": False,
+                "message": {
+                    "extendedTextMessage": {
+                        "text": "test4_normal_private",
+                        "contextInfo": {
+                            "expiration": 0,
+                            "ephemeralSettingTimestamp": "0",
+                            "disappearingMode": {"initiator": "CHANGED_IN_CHAT"},
+                        },
+                    },
+                    "messageContextInfo": {
+                        "deviceListMetadata": {
+                            "senderKeyHash": "41sgAkWfZDObhA==",
+                            "senderTimestamp": "1748473928",
+                            "recipientKeyHash": "ShoWBPcWfm8HBA==",
+                            "recipientTimestamp": "1748344640",
+                        },
+                        "deviceListMetadataVersion": 2,
+                    },
+                },
+            }
+        ],
+        "type": "notify",
+    },
+}
+
+
+
+Test image from normal account in group without captions
+{
+    "token": "MMGZqfpTnmeZyVr52ET9",
+    "type": "chat",
+    "content": {
+        "messages": [
+            {
+                "key": {
+                    "remoteJid": "120363210565014980@g.us",
+                    "fromMe": False,
+                    "id": "6E3A72640F0AA66F0F39FFE8B44CA9CB",
+                    "participant": "1234567890000@s.whatsapp.net",
+                },
+                "messageTimestamp": 1748577202,
+                "pushName": "Normal_WhatsApp_Test",
+                "broadcast": False,
+                "message": {
+                    "imageMessage": {
+                        "url": "https://mmg.whatsapp.net/o1/v/t24/f2/m233/AQNgN5tOmOpzk_QQoGAEHZjY5eYT5X-nVd7GBUTNXjCioDA08yOLDBeze7bDKQIAGX405y1oMpFDMKN9uTk4BwpWIOF6bOviQbv48blpBw?ccb=9-4&oh=01_Q5Aa1gH3qZZmHXFVfrKIcJKJmp0gOKOqm5UZ5w8U6JpSF5Bh-A&oe=6860AA0D&_nc_sid=e6ed6c&mms3=true",
+                        "mimetype": "image/jpeg",
+                        "fileSha256": "3kO1+SiuLC0XS5/BmLoYtPx4Ay89ihpO3LGT+5HXLeQ=",
+                        "fileLength": "364806",
+                        "height": 3840,
+                        "width": 2160,
+                        "mediaKey": "f3CuvOCvON9rBFlrrEIlcAkX6zSpdVSW8kH+zv7EG40=",
+                        "fileEncSha256": "HX8O39gt+0HysPv0ee/o3RjPdgY7oLlvSfYLrDmKw7Q=",
+                        "directPath": "/o1/v/t24/f2/m233/AQNgN5tOmOpzk_QQoGAEHZjY5eYT5X-nVd7GBUTNXjCioDA08yOLDBeze7bDKQIAGX405y1oMpFDMKN9uTk4BwpWIOF6bOviQbv48blpBw?ccb=9-4&oh=01_Q5Aa1gH3qZZmHXFVfrKIcJKJmp0gOKOqm5UZ5w8U6JpSF5Bh-A&oe=6860AA0D&_nc_sid=e6ed6c",
+                        "mediaKeyTimestamp": "1748577200",
+                        "jpegThumbnail": "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEABsbGxscGx4hIR4qLSgtKj04MzM4PV1CR0JHQl2NWGdYWGdYjX2Xe3N7l33gsJycsOD/2c7Z//////////////8BGxsbGxwbHiEhHiotKC0qPTgzMzg9XUJHQkdCXY1YZ1hYZ1iNfZd7c3uXfeCwnJyw4P/Zztn////////////////CABEIADwAIQMBIgACEQEDEQH/xAAtAAEBAQEBAQAAAAAAAAAAAAAAAQMCBAYBAQEBAAAAAAAAAAAAAAAAAAABAv/aAAwDAQACEAMQAAAA+cnUIsANJ3rnfmunNmak0785ds4ORcgAAf/EACIQAAICAQMEAwAAAAAAAAAAAAECABEhEiIxMEFRcRMgQv/aAAgBAQABPwDpKrNwIRUqaGq6xKPiBiEImjYtJdjmPagARrCKLwczW3mEj4l9wnam+sROSPzGFeu30s1CxNX26n//xAAYEQACAwAAAAAAAAAAAAAAAAAAERAgIf/aAAgBAgEBPwCWM0Vv/8QAGhEAAgIDAAAAAAAAAAAAAAAAABEBIRASIP/aAAgBAwEBPwDMQxFGw65//9k=",
+                        "contextInfo": {},
+                        "scansSidecar": "Ew6ePZHV4jFgtcKHBSBKBP8PAgs1f+LpZdnlUxXc7/QNDD1bJmTD8A==",
+                        "scanLengths": [43433, 33628, 114508, 173237],
+                        "midQualityFileSha256": "NqIZhNuneVV4dbmXHl7w6MmOYGST7MGiHNcb8Y+jzIU=",
+                    },
+                    "messageContextInfo": {
+                        "messageSecret": "OFmAKBmJrWEyDZvMLs6HGe5ZqYjyiIe5HJZzY1PxhWU="
+                    },
+                },
+            }
+        ],
+        "type": "notify",
+    },
+}
+
+
+
+Test image from normal account in group with captions
+{
+    "token": "MMGZqfpTnmeZyVr52ET9",
+    "type": "chat",
+    "content": {
+        "messages": [
+            {
+                "key": {
+                    "remoteJid": "120363210565014980@g.us",
+                    "fromMe": False,
+                    "id": "75C0DA139B520B22E7A5E033BDBCF2AB",
+                    "participant": "1234567890000@s.whatsapp.net",
+                },
+                "messageTimestamp": 1748577270,
+                "pushName": "Normal_WhatsApp_Test",
+                "broadcast": False,
+                "message": {
+                    "imageMessage": {
+                        "url": "https://mmg.whatsapp.net/o1/v/t24/f2/m233/AQNgN5tOmOpzk_QQoGAEHZjY5eYT5X-nVd7GBUTNXjCioDA08yOLDBeze7bDKQIAGX405y1oMpFDMKN9uTk4BwpWIOF6bOviQbv48blpBw?ccb=9-4&oh=01_Q5Aa1gH3qZZmHXFVfrKIcJKJmp0gOKOqm5UZ5w8U6JpSF5Bh-A&oe=6860AA0D&_nc_sid=e6ed6c&mms3=true",
+                        "mimetype": "image/jpeg",
+                        "caption": "Test5_normal_group_imageWithCaptions",
+                        "fileSha256": "3kO1+SiuLC0XS5/BmLoYtPx4Ay89ihpO3LGT+5HXLeQ=",
+                        "fileLength": "364806",
+                        "height": 3840,
+                        "width": 2160,
+                        "mediaKey": "f3CuvOCvON9rBFlrrEIlcAkX6zSpdVSW8kH+zv7EG40=",
+                        "fileEncSha256": "HX8O39gt+0HysPv0ee/o3RjPdgY7oLlvSfYLrDmKw7Q=",
+                        "directPath": "/o1/v/t24/f2/m233/AQNgN5tOmOpzk_QQoGAEHZjY5eYT5X-nVd7GBUTNXjCioDA08yOLDBeze7bDKQIAGX405y1oMpFDMKN9uTk4BwpWIOF6bOviQbv48blpBw?ccb=9-4&oh=01_Q5Aa1gH3qZZmHXFVfrKIcJKJmp0gOKOqm5UZ5w8U6JpSF5Bh-A&oe=6860AA0D&_nc_sid=e6ed6c",
+                        "mediaKeyTimestamp": "1748577200",
+                        "jpegThumbnail": "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEABsbGxscGx4hIR4qLSgtKj04MzM4PV1CR0JHQl2NWGdYWGdYjX2Xe3N7l33gsJycsOD/2c7Z//////////////8BGxsbGxwbHiEhHiotKC0qPTgzMzg9XUJHQkdCXY1YZ1hYZ1iNfZd7c3uXfeCwnJyw4P/Zztn////////////////CABEIADwAIQMBIgACEQEDEQH/xAAtAAEBAQEBAQAAAAAAAAAAAAAAAQMCBAYBAQEBAAAAAAAAAAAAAAAAAAABAv/aAAwDAQACEAMQAAAA+cnUIsANJ3rnfmunNmak0785ds4ORcgAAf/EACIQAAICAQMEAwAAAAAAAAAAAAECABEhEiIxMEFRcRMgQv/aAAgBAQABPwDpKrNwIRUqaGq6xKPiBiEImjYtJdjmPagARrCKLwczW3mEj4l9wnam+sROSPzGFeu30s1CxNX26n//xAAYEQACAwAAAAAAAAAAAAAAAAAAERAgIf/aAAgBAgEBPwCWM0Vv/8QAGhEAAgIDAAAAAAAAAAAAAAAAABEBIRASIP/aAAgBAwEBPwDMQxFGw65//9k=",
+                        "contextInfo": {},
+                        "scansSidecar": "Ew6ePZHV4jFgtcKHBSBKBP8PAgs1f+LpZdnlUxXc7/QNDD1bJmTD8A==",
+                        "scanLengths": [43433, 33628, 114508, 173237],
+                        "midQualityFileSha256": "NqIZhNuneVV4dbmXHl7w6MmOYGST7MGiHNcb8Y+jzIU=",
+                    },
+                    "messageContextInfo": {
+                        "messageSecret": "6PM4OE8q7dICdmX3TrlRpAsS4sl2jt9OuQJbai2xLCs="
+                    },
+                },
+            }
+        ],
+        "type": "notify",
+    },
+}
+
+
+
+Test image from business account in group without captions
+{
+    "token": "MMGZqfpTnmeZyVr52ET9",
+    "type": "chat",
+    "content": {
+        "messages": [
+            {
+                "key": {
+                    "remoteJid": "120363210565014980@g.us",
+                    "fromMe": False,
+                    "id": "BBB17A9BA7DDA457497E41629306E90E",
+                    "participant": "1234567890000@s.whatsapp.net",
+                },
+                "messageTimestamp": 1748577304,
+                "pushName": "Test_WA_Bussiness",
+                "broadcast": False,
+                "message": {
+                    "imageMessage": {
+                        "url": "https://mmg.whatsapp.net/o1/v/t24/f2/m233/AQNgN5tOmOpzk_QQoGAEHZjY5eYT5X-nVd7GBUTNXjCioDA08yOLDBeze7bDKQIAGX405y1oMpFDMKN9uTk4BwpWIOF6bOviQbv48blpBw?ccb=9-4&oh=01_Q5Aa1gH3qZZmHXFVfrKIcJKJmp0gOKOqm5UZ5w8U6JpSF5Bh-A&oe=6860AA0D&_nc_sid=e6ed6c&mms3=true",
+                        "mimetype": "image/jpeg",
+                        "fileSha256": "3kO1+SiuLC0XS5/BmLoYtPx4Ay89ihpO3LGT+5HXLeQ=",
+                        "fileLength": "364806",
+                        "height": 3840,
+                        "width": 2160,
+                        "mediaKey": "f3CuvOCvON9rBFlrrEIlcAkX6zSpdVSW8kH+zv7EG40=",
+                        "fileEncSha256": "HX8O39gt+0HysPv0ee/o3RjPdgY7oLlvSfYLrDmKw7Q=",
+                        "directPath": "/o1/v/t24/f2/m233/AQNgN5tOmOpzk_QQoGAEHZjY5eYT5X-nVd7GBUTNXjCioDA08yOLDBeze7bDKQIAGX405y1oMpFDMKN9uTk4BwpWIOF6bOviQbv48blpBw?ccb=9-4&oh=01_Q5Aa1gH3qZZmHXFVfrKIcJKJmp0gOKOqm5UZ5w8U6JpSF5Bh-A&oe=6860AA0D&_nc_sid=e6ed6c",
+                        "mediaKeyTimestamp": "1748577200",
+                        "jpegThumbnail": "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEABsbGxscGx4hIR4qLSgtKj04MzM4PV1CR0JHQl2NWGdYWGdYjX2Xe3N7l33gsJycsOD/2c7Z//////////////8BGxsbGxwbHiEhHiotKC0qPTgzMzg9XUJHQkdCXY1YZ1hYZ1iNfZd7c3uXfeCwnJyw4P/Zztn////////////////CABEIADwAIQMBIgACEQEDEQH/xAAtAAEBAQEBAQAAAAAAAAAAAAAAAQMCBAYBAQEBAAAAAAAAAAAAAAAAAAABAv/aAAwDAQACEAMQAAAA+cnUIsANJ3rnfmunNmak0785ds4ORcgAAf/EACIQAAICAQMEAwAAAAAAAAAAAAECABEhEiIxMEFRcRMgQv/aAAgBAQABPwDpKrNwIRUqaGq6xKPiBiEImjYtJdjmPagARrCKLwczW3mEj4l9wnam+sROSPzGFeu30s1CxNX26n//xAAYEQACAwAAAAAAAAAAAAAAAAAAERAgIf/aAAgBAgEBPwCWM0Vv/8QAGhEAAgIDAAAAAAAAAAAAAAAAABEBIRASIP/aAAgBAwEBPwDMQxFGw65//9k=",
+                        "contextInfo": {},
+                    },
+                    "messageContextInfo": {
+                        "messageSecret": "2GmWKNg0+AgHzVHsZSuUMNzTzM33hvhG/9XD1vv9sSA="
+                    },
+                },
+            }
+        ],
+        "type": "notify",
+    },
+}
+
+
+
+Test image from business account in group with captions
+{
+    "token": "MMGZqfpTnmeZyVr52ET9",
+    "type": "chat",
+    "content": {
+        "messages": [
+            {
+                "key": {
+                    "remoteJid": "120363210565014980@g.us",
+                    "fromMe": False,
+                    "id": "AA15F7726FDB031C0406D25474B20A22",
+                    "participant": "1234567890000@s.whatsapp.net",
+                },
+                "messageTimestamp": 1748577362,
+                "pushName": "Business_WhatsApp_Test",
+                "broadcast": False,
+                "message": {
+                    "imageMessage": {
+                        "url": "https://mmg.whatsapp.net/o1/v/t24/f2/m233/AQNgN5tOmOpzk_QQoGAEHZjY5eYT5X-nVd7GBUTNXjCioDA08yOLDBeze7bDKQIAGX405y1oMpFDMKN9uTk4BwpWIOF6bOviQbv48blpBw?ccb=9-4&oh=01_Q5Aa1gH3qZZmHXFVfrKIcJKJmp0gOKOqm5UZ5w8U6JpSF5Bh-A&oe=6860AA0D&_nc_sid=e6ed6c&mms3=true",
+                        "mimetype": "image/jpeg",
+                        "caption": "Test6_business_group_imageWithCaptions",
+                        "fileSha256": "3kO1+SiuLC0XS5/BmLoYtPx4Ay89ihpO3LGT+5HXLeQ=",
+                        "fileLength": "364806",
+                        "height": 3840,
+                        "width": 2160,
+                        "mediaKey": "f3CuvOCvON9rBFlrrEIlcAkX6zSpdVSW8kH+zv7EG40=",
+                        "fileEncSha256": "HX8O39gt+0HysPv0ee/o3RjPdgY7oLlvSfYLrDmKw7Q=",
+                        "directPath": "/o1/v/t24/f2/m233/AQNgN5tOmOpzk_QQoGAEHZjY5eYT5X-nVd7GBUTNXjCioDA08yOLDBeze7bDKQIAGX405y1oMpFDMKN9uTk4BwpWIOF6bOviQbv48blpBw?ccb=9-4&oh=01_Q5Aa1gH3qZZmHXFVfrKIcJKJmp0gOKOqm5UZ5w8U6JpSF5Bh-A&oe=6860AA0D&_nc_sid=e6ed6c",
+                        "mediaKeyTimestamp": "1748577200",
+                        "jpegThumbnail": "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEABsbGxscGx4hIR4qLSgtKj04MzM4PV1CR0JHQl2NWGdYWGdYjX2Xe3N7l33gsJycsOD/2c7Z//////////////8BGxsbGxwbHiEhHiotKC0qPTgzMzg9XUJHQkdCXY1YZ1hYZ1iNfZd7c3uXfeCwnJyw4P/Zztn////////////////CABEIADwAIQMBIgACEQEDEQH/xAAtAAEBAQEBAQAAAAAAAAAAAAAAAQMCBAYBAQEBAAAAAAAAAAAAAAAAAAABAv/aAAwDAQACEAMQAAAA+cnUIsANJ3rnfmunNmak0785ds4ORcgAAf/EACIQAAICAQMEAwAAAAAAAAAAAAECABEhEiIxMEFRcRMgQv/aAAgBAQABPwDpKrNwIRUqaGq6xKPiBiEImjYtJdjmPagARrCKLwczW3mEj4l9wnam+sROSPzGFeu30s1CxNX26n//xAAYEQACAwAAAAAAAAAAAAAAAAAAERAgIf/aAAgBAgEBPwCWM0Vv/8QAGhEAAgIDAAAAAAAAAAAAAAAAABEBIRASIP/aAAgBAwEBPwDMQxFGw65//9k=",
+                        "contextInfo": {},
+                    },
+                    "messageContextInfo": {
+                        "messageSecret": "gxUS4vI7IDuhMek8nGl8vXrw6jZPkC262jVlIavxV20="
+                    },
+                },
+            }
+        ],
+        "type": "notify",
+    },
+}
+
+
+
+Test image normal account in private without captions
+{
+    "token": "MMGZqfpTnmeZyVr52ET9",
+    "type": "chat",
+    "content": {
+        "messages": [
+            {
+                "key": {
+                    "remoteJid": "1234567890000@s.whatsapp.net",
+                    "fromMe": False,
+                    "id": "B5F0F084926B2EA8CAE6548509C9C3D7",
+                },
+                "messageTimestamp": 1748577383,
+                "pushName": "Normal_WhatsApp_Test",
+                "broadcast": False,
+                "message": {
+                    "imageMessage": {
+                        "url": "https://mmg.whatsapp.net/o1/v/t24/f2/m233/AQNgN5tOmOpzk_QQoGAEHZjY5eYT5X-nVd7GBUTNXjCioDA08yOLDBeze7bDKQIAGX405y1oMpFDMKN9uTk4BwpWIOF6bOviQbv48blpBw?ccb=9-4&oh=01_Q5Aa1gH3qZZmHXFVfrKIcJKJmp0gOKOqm5UZ5w8U6JpSF5Bh-A&oe=6860AA0D&_nc_sid=e6ed6c&mms3=true",
+                        "mimetype": "image/jpeg",
+                        "fileSha256": "3kO1+SiuLC0XS5/BmLoYtPx4Ay89ihpO3LGT+5HXLeQ=",
+                        "fileLength": "364806",
+                        "height": 3840,
+                        "width": 2160,
+                        "mediaKey": "f3CuvOCvON9rBFlrrEIlcAkX6zSpdVSW8kH+zv7EG40=",
+                        "fileEncSha256": "HX8O39gt+0HysPv0ee/o3RjPdgY7oLlvSfYLrDmKw7Q=",
+                        "directPath": "/o1/v/t24/f2/m233/AQNgN5tOmOpzk_QQoGAEHZjY5eYT5X-nVd7GBUTNXjCioDA08yOLDBeze7bDKQIAGX405y1oMpFDMKN9uTk4BwpWIOF6bOviQbv48blpBw?ccb=9-4&oh=01_Q5Aa1gH3qZZmHXFVfrKIcJKJmp0gOKOqm5UZ5w8U6JpSF5Bh-A&oe=6860AA0D&_nc_sid=e6ed6c",
+                        "mediaKeyTimestamp": "1748577200",
+                        "jpegThumbnail": "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEABsbGxscGx4hIR4qLSgtKj04MzM4PV1CR0JHQl2NWGdYWGdYjX2Xe3N7l33gsJycsOD/2c7Z//////////////8BGxsbGxwbHiEhHiotKC0qPTgzMzg9XUJHQkdCXY1YZ1hYZ1iNfZd7c3uXfeCwnJyw4P/Zztn////////////////CABEIADwAIQMBIgACEQEDEQH/xAAtAAEBAQEBAQAAAAAAAAAAAAAAAQMCBAYBAQEBAAAAAAAAAAAAAAAAAAABAv/aAAwDAQACEAMQAAAA+cnUIsANJ3rnfmunNmak0785ds4ORcgAAf/EACIQAAICAQMEAwAAAAAAAAAAAAECABEhEiIxMEFRcRMgQv/aAAgBAQABPwDpKrNwIRUqaGq6xKPiBiEImjYtJdjmPagARrCKLwczW3mEj4l9wnam+sROSPzGFeu30s1CxNX26n//xAAYEQACAwAAAAAAAAAAAAAAAAAAERAgIf/aAAgBAgEBPwCWM0Vv/8QAGhEAAgIDAAAAAAAAAAAAAAAAABEBIRASIP/aAAgBAwEBPwDMQxFGw65//9k=",
+                        "contextInfo": {},
+                        "scansSidecar": "Ew6ePZHV4jFgtcKHBSBKBP8PAgs1f+LpZdnlUxXc7/QNDD1bJmTD8A==",
+                        "scanLengths": [43433, 33628, 114508, 173237],
+                        "midQualityFileSha256": "NqIZhNuneVV4dbmXHl7w6MmOYGST7MGiHNcb8Y+jzIU=",
+                    },
+                    "messageContextInfo": {
+                        "deviceListMetadata": {
+                            "senderKeyHash": "41sgAkWfZDObhA==",
+                            "senderTimestamp": "1748473928",
+                            "recipientKeyHash": "ShoWBPcWfm8HBA==",
+                            "recipientTimestamp": "1748344640",
+                        },
+                        "deviceListMetadataVersion": 2,
+                        "messageSecret": "FL1EKHqtXVkCmwgOUOIiQj0ZjYh8jUDPIiYzQpGvnRU=",
+                    },
+                },
+            }
+        ],
+        "type": "notify",
+    },
+}
+
+
+
+Test image normal account in private with captions
+{
+    "token": "MMGZqfpTnmeZyVr52ET9",
+    "type": "chat",
+    "content": {
+        "messages": [
+            {
+                "key": {
+                    "remoteJid": "1234567890000@s.whatsapp.net",
+                    "fromMe": False,
+                    "id": "0238C227155540060F9F3C3067D5233D",
+                },
+                "messageTimestamp": 1748577413,
+                "pushName": "Normal_WhatsApp_Test",
+                "broadcast": False,
+                "message": {
+                    "imageMessage": {
+                        "url": "https://mmg.whatsapp.net/o1/v/t24/f2/m233/AQNgN5tOmOpzk_QQoGAEHZjY5eYT5X-nVd7GBUTNXjCioDA08yOLDBeze7bDKQIAGX405y1oMpFDMKN9uTk4BwpWIOF6bOviQbv48blpBw?ccb=9-4&oh=01_Q5Aa1gH3qZZmHXFVfrKIcJKJmp0gOKOqm5UZ5w8U6JpSF5Bh-A&oe=6860AA0D&_nc_sid=e6ed6c&mms3=true",
+                        "mimetype": "image/jpeg",
+                        "caption": "Test7_normal_private_imageWithCaptions",
+                        "fileSha256": "3kO1+SiuLC0XS5/BmLoYtPx4Ay89ihpO3LGT+5HXLeQ=",
+                        "fileLength": "364806",
+                        "height": 3840,
+                        "width": 2160,
+                        "mediaKey": "f3CuvOCvON9rBFlrrEIlcAkX6zSpdVSW8kH+zv7EG40=",
+                        "fileEncSha256": "HX8O39gt+0HysPv0ee/o3RjPdgY7oLlvSfYLrDmKw7Q=",
+                        "directPath": "/o1/v/t24/f2/m233/AQNgN5tOmOpzk_QQoGAEHZjY5eYT5X-nVd7GBUTNXjCioDA08yOLDBeze7bDKQIAGX405y1oMpFDMKN9uTk4BwpWIOF6bOviQbv48blpBw?ccb=9-4&oh=01_Q5Aa1gH3qZZmHXFVfrKIcJKJmp0gOKOqm5UZ5w8U6JpSF5Bh-A&oe=6860AA0D&_nc_sid=e6ed6c",
+                        "mediaKeyTimestamp": "1748577200",
+                        "jpegThumbnail": "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEABsbGxscGx4hIR4qLSgtKj04MzM4PV1CR0JHQl2NWGdYWGdYjX2Xe3N7l33gsJycsOD/2c7Z//////////////8BGxsbGxwbHiEhHiotKC0qPTgzMzg9XUJHQkdCXY1YZ1hYZ1iNfZd7c3uXfeCwnJyw4P/Zztn////////////////CABEIADwAIQMBIgACEQEDEQH/xAAtAAEBAQEBAQAAAAAAAAAAAAAAAQMCBAYBAQEBAAAAAAAAAAAAAAAAAAABAv/aAAwDAQACEAMQAAAA+cnUIsANJ3rnfmunNmak0785ds4ORcgAAf/EACIQAAICAQMEAwAAAAAAAAAAAAECABEhEiIxMEFRcRMgQv/aAAgBAQABPwDpKrNwIRUqaGq6xKPiBiEImjYtJdjmPagARrCKLwczW3mEj4l9wnam+sROSPzGFeu30s1CxNX26n//xAAYEQACAwAAAAAAAAAAAAAAAAAAERAgIf/aAAgBAgEBPwCWM0Vv/8QAGhEAAgIDAAAAAAAAAAAAAAAAABEBIRASIP/aAAgBAwEBPwDMQxFGw65//9k=",
+                        "contextInfo": {},
+                        "scansSidecar": "Ew6ePZHV4jFgtcKHBSBKBP8PAgs1f+LpZdnlUxXc7/QNDD1bJmTD8A==",
+                        "scanLengths": [43433, 33628, 114508, 173237],
+                        "midQualityFileSha256": "NqIZhNuneVV4dbmXHl7w6MmOYGST7MGiHNcb8Y+jzIU=",
+                    },
+                    "messageContextInfo": {
+                        "deviceListMetadata": {
+                            "senderKeyHash": "41sgAkWfZDObhA==",
+                            "senderTimestamp": "1748473928",
+                            "recipientKeyHash": "ShoWBPcWfm8HBA==",
+                            "recipientTimestamp": "1748344640",
+                        },
+                        "deviceListMetadataVersion": 2,
+                        "messageSecret": "nd7eZywVTk0UaqdwsUe+Jy2MW71UUA8755SCM1InwnM=",
+                    },
+                },
+            }
+        ],
+        "type": "notify",
+    },
+}
+
+
+
+Test image from business account in private without captions
+{
+    "token": "MMGZqfpTnmeZyVr52ET9",
+    "type": "chat",
+    "content": {
+        "messages": [
+            {
+                "key": {
+                    "remoteJid": "1234567890000@s.whatsapp.net",
+                    "fromMe": False,
+                    "id": "5AAAADAD793041AD9541F7288C1A411E",
+                },
+                "messageTimestamp": 1748577423,
+                "pushName": "Business_WhatsApp_Test",
+                "broadcast": False,
+                "message": {
+                    "imageMessage": {
+                        "url": "https://mmg.whatsapp.net/o1/v/t24/f2/m233/AQNgN5tOmOpzk_QQoGAEHZjY5eYT5X-nVd7GBUTNXjCioDA08yOLDBeze7bDKQIAGX405y1oMpFDMKN9uTk4BwpWIOF6bOviQbv48blpBw?ccb=9-4&oh=01_Q5Aa1gH3qZZmHXFVfrKIcJKJmp0gOKOqm5UZ5w8U6JpSF5Bh-A&oe=6860AA0D&_nc_sid=e6ed6c&mms3=true",
+                        "mimetype": "image/jpeg",
+                        "fileSha256": "3kO1+SiuLC0XS5/BmLoYtPx4Ay89ihpO3LGT+5HXLeQ=",
+                        "fileLength": "364806",
+                        "height": 3840,
+                        "width": 2160,
+                        "mediaKey": "f3CuvOCvON9rBFlrrEIlcAkX6zSpdVSW8kH+zv7EG40=",
+                        "fileEncSha256": "HX8O39gt+0HysPv0ee/o3RjPdgY7oLlvSfYLrDmKw7Q=",
+                        "directPath": "/o1/v/t24/f2/m233/AQNgN5tOmOpzk_QQoGAEHZjY5eYT5X-nVd7GBUTNXjCioDA08yOLDBeze7bDKQIAGX405y1oMpFDMKN9uTk4BwpWIOF6bOviQbv48blpBw?ccb=9-4&oh=01_Q5Aa1gH3qZZmHXFVfrKIcJKJmp0gOKOqm5UZ5w8U6JpSF5Bh-A&oe=6860AA0D&_nc_sid=e6ed6c",
+                        "mediaKeyTimestamp": "1748577200",
+                        "jpegThumbnail": "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEABsbGxscGx4hIR4qLSgtKj04MzM4PV1CR0JHQl2NWGdYWGdYjX2Xe3N7l33gsJycsOD/2c7Z//////////////8BGxsbGxwbHiEhHiotKC0qPTgzMzg9XUJHQkdCXY1YZ1hYZ1iNfZd7c3uXfeCwnJyw4P/Zztn////////////////CABEIADwAIQMBIgACEQEDEQH/xAAtAAEBAQEBAQAAAAAAAAAAAAAAAQMCBAYBAQEBAAAAAAAAAAAAAAAAAAABAv/aAAwDAQACEAMQAAAA+cnUIsANJ3rnfmunNmak0785ds4ORcgAAf/EACIQAAICAQMEAwAAAAAAAAAAAAECABEhEiIxMEFRcRMgQv/aAAgBAQABPwDpKrNwIRUqaGq6xKPiBiEImjYtJdjmPagARrCKLwczW3mEj4l9wnam+sROSPzGFeu30s1CxNX26n//xAAYEQACAwAAAAAAAAAAAAAAAAAAERAgIf/aAAgBAgEBPwCWM0Vv/8QAGhEAAgIDAAAAAAAAAAAAAAAAABEBIRASIP/aAAgBAwEBPwDMQxFGw65//9k=",
+                        "contextInfo": {},
+                    },
+                    "messageContextInfo": {
+                        "deviceListMetadata": {
+                            "senderTimestamp": "1746460570",
+                            "recipientKeyHash": "ShoWBPcWfm8HBA==",
+                            "recipientTimestamp": "1748344640",
+                        },
+                        "deviceListMetadataVersion": 2,
+                        "messageSecret": "mn8wafCFdSrHa98HyViVlokqcBkAC7bPaH+w+GKC5gw=",
+                    },
+                },
+                "verifiedBizName": "Test_WA_Bussiness",
+            }
+        ],
+        "type": "notify",
+    },
+}
+
+
+
+Test image from business account in private without captions
+{
+    "token": "MMGZqfpTnmeZyVr52ET9",
+    "type": "chat",
+    "content": {
+        "messages": [
+            {
+                "key": {
+                    "remoteJid": "1234567890000@s.whatsapp.net",
+                    "fromMe": False,
+                    "id": "A9B2E68667A0709084858F1229F35C5A",
+                },
+                "messageTimestamp": 1748577448,
+                "pushName": "Business_WhatsApp_Test",
+                "broadcast": False,
+                "message": {
+                    "imageMessage": {
+                        "url": "https://mmg.whatsapp.net/o1/v/t24/f2/m233/AQNgN5tOmOpzk_QQoGAEHZjY5eYT5X-nVd7GBUTNXjCioDA08yOLDBeze7bDKQIAGX405y1oMpFDMKN9uTk4BwpWIOF6bOviQbv48blpBw?ccb=9-4&oh=01_Q5Aa1gH3qZZmHXFVfrKIcJKJmp0gOKOqm5UZ5w8U6JpSF5Bh-A&oe=6860AA0D&_nc_sid=e6ed6c&mms3=true",
+                        "mimetype": "image/jpeg",
+                        "caption": "Test8_business_private_imageWiithCaptions",
+                        "fileSha256": "3kO1+SiuLC0XS5/BmLoYtPx4Ay89ihpO3LGT+5HXLeQ=",
+                        "fileLength": "364806",
+                        "height": 3840,
+                        "width": 2160,
+                        "mediaKey": "f3CuvOCvON9rBFlrrEIlcAkX6zSpdVSW8kH+zv7EG40=",
+                        "fileEncSha256": "HX8O39gt+0HysPv0ee/o3RjPdgY7oLlvSfYLrDmKw7Q=",
+                        "directPath": "/o1/v/t24/f2/m233/AQNgN5tOmOpzk_QQoGAEHZjY5eYT5X-nVd7GBUTNXjCioDA08yOLDBeze7bDKQIAGX405y1oMpFDMKN9uTk4BwpWIOF6bOviQbv48blpBw?ccb=9-4&oh=01_Q5Aa1gH3qZZmHXFVfrKIcJKJmp0gOKOqm5UZ5w8U6JpSF5Bh-A&oe=6860AA0D&_nc_sid=e6ed6c",
+                        "mediaKeyTimestamp": "1748577200",
+                        "jpegThumbnail": "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEABsbGxscGx4hIR4qLSgtKj04MzM4PV1CR0JHQl2NWGdYWGdYjX2Xe3N7l33gsJycsOD/2c7Z//////////////8BGxsbGxwbHiEhHiotKC0qPTgzMzg9XUJHQkdCXY1YZ1hYZ1iNfZd7c3uXfeCwnJyw4P/Zztn////////////////CABEIADwAIQMBIgACEQEDEQH/xAAtAAEBAQEBAQAAAAAAAAAAAAAAAQMCBAYBAQEBAAAAAAAAAAAAAAAAAAABAv/aAAwDAQACEAMQAAAA+cnUIsANJ3rnfmunNmak0785ds4ORcgAAf/EACIQAAICAQMEAwAAAAAAAAAAAAECABEhEiIxMEFRcRMgQv/aAAgBAQABPwDpKrNwIRUqaGq6xKPiBiEImjYtJdjmPagARrCKLwczW3mEj4l9wnam+sROSPzGFeu30s1CxNX26n//xAAYEQACAwAAAAAAAAAAAAAAAAAAERAgIf/aAAgBAgEBPwCWM0Vv/8QAGhEAAgIDAAAAAAAAAAAAAAAAABEBIRASIP/aAAgBAwEBPwDMQxFGw65//9k=",
+                        "contextInfo": {},
+                    },
+                    "messageContextInfo": {
+                        "deviceListMetadata": {
+                            "senderTimestamp": "1746460570",
+                            "recipientKeyHash": "ShoWBPcWfm8HBA==",
+                            "recipientTimestamp": "1748344640",
+                        },
+                        "deviceListMetadataVersion": 2,
+                        "messageSecret": "jLL1Nv+lHVqk5O2zaawNglisRE+8JGC8WeNA0qvs6sc=",
+                    },
+                },
+                "verifiedBizName": "Business_WhatsApp_Test",
+            }
+        ],
+        "type": "notify",
+    },
+}
