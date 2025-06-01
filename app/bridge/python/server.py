@@ -1,4 +1,4 @@
-from asyncio import create_task, to_thread, Semaphore, iscoroutinefunction
+from asyncio import create_task, Semaphore
 import app.bridge.python.auth as auth
 from app.bridge.python.data import *
 from app.proccess_message.handlers import handle_message
@@ -22,7 +22,7 @@ async def handle_websocket_message(message, websocket):
 
       if websocket in clients and msg.get("token") == clients[websocket]:
         async with sem:
-          create_task(handle_message(msg))
+          create_task(handle_message(websocket, msg))
 
       elif websocket not in clients:
         if msg.get("type") == "auth" and msg.get("key") == secret_key:

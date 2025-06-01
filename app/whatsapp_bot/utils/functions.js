@@ -1,9 +1,14 @@
-/**
- * @param  {SendMessageOptions} options
- */
-async function sendMessage(options) {
-  const { sock, target, message, image,video, mentions, sendAsReply} = options;
-  await sock.sendMessage(target, { text: message, mentions : mentions, quotedMsg: sendAsReply, image : image, video : video});
+async function sendMessage(sock, target, message, mentions) {
+  sock.sendMessage(target, { text : message, mentions : mentions });
+}
+
+async function sendMessageAndGetInfo(sock, target, message, mentions) {
+  return await sock.sendMessage(target, { text : message, mentions : mentions });
+}
+
+async function tagAllMembers(sock, target) {
+  const participants = getGroupMembers(sock, target)
+  await sendMessage(target, { text : "@everyone", mentions : participants });
 }
 
 
