@@ -78,3 +78,4 @@ def parse_whatsapp_message(message_data: dict) -> dict | None:
     except Exception as e:
         print(f"Error parsing message: {e}")
         return None
+

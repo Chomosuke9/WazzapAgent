@@ -1,12 +1,13 @@
 import json
-from .parse_message import parse_whatsapp_message
-from dotenv import load_dotenv
-import os
+from .parseMessage import parse_whatsapp_message
+from websockets.legacy.server import WebSocketServerProtocol
+from ..state.state import bot_number, clients
 
-load_dotenv()
-bot_number = os.getenv("BOT_NUMBER") + "@s.whatsapp.net"
 
-async def handle_message(socket, message):
+
+
+
+async def handle_message(socket : WebSocketServerProtocol, message : dict) -> None:
     print(message)
     if message.get("type") == "chat":
         data = parse_whatsapp_message(message)
@@ -15,3 +16,18 @@ async def handle_message(socket, message):
             found = any(bot_number in mention for mention in (data.get("mentions") or []) + (data.get("quotedParticipants") or []))
             if found:
                 print("Bot found in message")
+
+
+async def wait_for_response(socket : WebSocketServerProtocol, uid : str) -> list | None:
+    while True:
+        data = await socket.recv()
+        try :
+            data = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+        msg_uid, token, msg_type, content = data.get("uid"), data.get("token"), data.get("type"), data.get("content")
+        if msg_uid and token:
+            if msg_type == "response" and token == clients[socket]:
+                if msg_uid == uid:
+                    return content
+

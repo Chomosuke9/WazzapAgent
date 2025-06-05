@@ -78,7 +78,7 @@ npm install
 
 Run the project with:
 
-**Using [python](https://pypi.org/project/pip/):**
+**Using [python](https://www.python.org/):**
 ```sh
 python main.py
 ```
