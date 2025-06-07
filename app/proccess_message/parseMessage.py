@@ -1,3 +1,5 @@
+from ..state.state import logger
+
 def parse_whatsapp_message(message_data: dict) -> dict | None:
     """
     Parse WhatsApp message data and extract key information
@@ -10,12 +12,12 @@ def parse_whatsapp_message(message_data: dict) -> dict | None:
     """
     try:
         if not isinstance(message_data, dict):
-            print("Unrecognized message format")
+            logger.critical("Unrecognized message format")
             return None
 
         messages = message_data.get('content', {}).get('messages', [])
         if not messages:
-            print("Unrecognized message format")
+            logger.critical("Unrecognized message format")
             return None
 
         # Take the first message only
@@ -76,6 +78,6 @@ def parse_whatsapp_message(message_data: dict) -> dict | None:
         return parsed_msg
 
     except Exception as e:
-        print(f"Error parsing message: {e}")
+        logger.critical(f"Error parsing message: {e}")
         return None
 

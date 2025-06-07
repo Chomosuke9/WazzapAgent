@@ -6,9 +6,7 @@ import crypto from 'crypto';
 // sometimes you will get crypto error, to prevent this error simply add this to make it work
 try {
     global.crypto = crypto;
-} catch (e) {
-    console.error(e)
-}
+} catch (e) {}
 
 
 

@@ -1,21 +1,21 @@
 import json
 from .parseMessage import parse_whatsapp_message
 from websockets.legacy.server import WebSocketServerProtocol
-from ..state.state import bot_number, clients
+from ..state.state import bot_number, clients, logger
 
 
 
 
 
 async def handle_message(socket : WebSocketServerProtocol, message : dict) -> None:
-    print(message)
+    logger.debug(f"Received message: {message}")
     if message.get("type") == "chat":
         data = parse_whatsapp_message(message)
-        print(json.dumps(data, indent=2, ensure_ascii=False))
+        logger.debug("Parsed message:\n" + json.dumps(data, indent=2, ensure_ascii=False))
         if data.get("mentions"):
             found = any(bot_number in mention for mention in (data.get("mentions") or []) + (data.get("quotedParticipants") or []))
             if found:
-                print("Bot found in message")
+                logger.debug("Message contains bot number, sending response...")
 
 
 async def wait_for_response(socket : WebSocketServerProtocol, uid : str) -> list | None:
