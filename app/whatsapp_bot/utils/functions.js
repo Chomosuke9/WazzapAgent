@@ -1,5 +1,6 @@
-async function sendMessage(sock, target, message, mentions) {
+async function sendMessageToTarget(sock, target, message, mentions) {
   sock.sendMessage(target, { text : message, mentions : mentions });
+
 }
 
 async function sendMessageAndGetInfo(sock, target, message, mentions) {
@@ -7,19 +8,19 @@ async function sendMessageAndGetInfo(sock, target, message, mentions) {
 }
 
 async function tagAllMembers(sock, target) {
-  const participants = getGroupMembers(sock, target)
-  await sendMessage(target, { text : "@everyone", mentions : participants });
+  const participants = await getGroupMembers(sock, target)
+  await sendMessageToTarget(sock, target, "@everyone", participants );
 }
 
 
-function getGroupMembers(sock, jid) {
-  const metadata = sock.groupMetadata(jid);
-  return metadata.participants;
-
+async function getGroupMembers(sock, jid) {
+  const metadata = await sock.groupMetadata(jid).then((result) => result);
+  const participants = metadata.participants
+  return participants.map(item => item.id)
 }
 
-function getGroupAdmins(sock : Object, jid : string) : string[] {
-  const metadata = sock.groupMetadata(jid);
+async function getGroupAdmins(sock, jid) {
+  const metadata = await sock.groupMetadata(jid);
   const admins = [];
   for (const participant of metadata.participants) {
     if (participant.isAdmin) {
@@ -29,4 +30,4 @@ function getGroupAdmins(sock : Object, jid : string) : string[] {
   return admins;
 }
 
-module.exports = { getGroupMembers, getGroupAdmins, sendMessage};
+export { sendMessageToTarget, sendMessageAndGetInfo, tagAllMembers, getGroupMembers, getGroupAdmins };

@@ -30,7 +30,7 @@ const { state, saveCreds } = await useMultiFileAuthState(process.env.AUTH_STATE_
             // TODO : add login with pairing code
             })
 
-        return {getSocket: () => sock}
+        return sock
     }
 
     export {startWASocket}
