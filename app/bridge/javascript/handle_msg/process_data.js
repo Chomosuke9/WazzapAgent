@@ -1,33 +1,33 @@
-function data({token=null, type=null, key = null, content = null, message = null, id = null, name = null, messageType = null, mention = null}) {
-  let data = null;
-  if (type === "notify") {
-    data = {
-      token,
-      type : "notify",
-      content : content
-    }
-    return (JSON.stringify(data ));
-  }
-  if (type === "auth") {
-    data = {
-      type : "auth",
-      key : key,
-  }
-  return (JSON.stringify(data));
-  }
-  if (type === "chat") {
-    data = {
-      token,
-      type : "chat",
-      content : content
-    }
-    return (JSON.stringify(data));
-  }
-  else {
-    throw new Error("Invalid data type");
-  }
+function notify(token, content) {
+  return JSON.stringify({
+    token,
+    type: "notify",
+    content
+  });
 }
 
+function auth(key) {
+  return JSON.stringify({
+    type: "auth",
+    key
+  });
+}
 
+function chat(token, content) {
+  return JSON.stringify({
+    token,
+    type: "chat",
+    content
+  });
+}
 
-export {data};
+function feedback(token, content, id) {
+  return JSON.stringify({
+    token,
+    type: "feedback",
+    id,
+    content
+  });
+}
+
+export { notify, auth, chat, feedback };

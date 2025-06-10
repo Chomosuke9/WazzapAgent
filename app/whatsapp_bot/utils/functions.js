@@ -30,4 +30,8 @@ async function getGroupAdmins(sock, jid) {
   return admins;
 }
 
-export { sendMessageToTarget, sendMessageAndGetInfo, tagAllMembers, getGroupMembers, getGroupAdmins };
+async function editMessage(sock, message, key) {
+  sock.sendMessage(key.remoteJid, { text: message, edit: key });
+}
+
+export { sendMessageToTarget, sendMessageAndGetInfo, tagAllMembers, getGroupMembers, getGroupAdmins, editMessage };

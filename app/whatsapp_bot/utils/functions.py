@@ -1,9 +1,8 @@
 import json
 from websockets.legacy.server import WebSocketServerProtocol
 from random import randbytes
-from asyncio import wait_for
-from ...state.state import logger
-from ...state.state import clients
+from asyncio import wait_for, Queue, TimeoutError
+from ...state.state import logger, clients, pending_feedback
 
 async def wait_for_response(socket : WebSocketServerProtocol, uid : str) -> list[str|int]:
     """
@@ -40,28 +39,38 @@ async def send_message(sock: WebSocketServerProtocol, target: str, message: str,
     await sock.send(json.dumps({"type": "simpleChat", "target": target, "message": message, "mentions": mentions}))
 
 
-async def send_message_and_get_info(sock: WebSocketServerProtocol, target: str, message: str, mentions: list[str] | str = None) -> dict:
+async def send_message_and_get_key(sock: WebSocketServerProtocol, target: str, message: str, mentions: list[str] | str = None, timeout: int = 10) -> str:
     """
       Send a message and get info of the message
       :param sock: WebSocket
       :param target: JID of target (Group or User)
       :param message: Message
       :param mentions: (Optional) JID of Participants to mention (Only works for groups)
-      :return: List of message info
+      :return: id of the message
       """
-    logger.debug(f"Waiting for response from client. Function: send_message_and_get_info")
-    logger.info(f"Sending message and getting info about message")
+    logger.debug(f"Waiting for response from client. Function: send_message_and_get_key")
+    logger.info(f"Sending message and getting key message")
     uid = randbytes(5).hex()
     logger.debug(f"Generating uid: {uid}")
+    queue = Queue()
+    pending_feedback[uid] = queue
     await sock.send(
         json.dumps({"type": "chatAndGetInfo", "uid": uid, "target": target, "message": message, "mentions": mentions}))
     try:
-        message_info = await wait_for(wait_for_response(sock, uid), 4)
-        logger.debug(f"Received response from client. Function: send_message_and_get_info. content: {message_info}")
-        return message_info
+        message_info = await wait_for(queue.get(), timeout=timeout)
+        logger.debug(f"Received message key for uid: {uid}")
+        key = message_info.get('content', {}).get('key', {})
+        if key:
+            logger.debug(f"Message key: {json.dumps(key, indent=2, ensure_ascii=False)}")
+            return key
+        else:
+            logger.warning(f"Message id not found for uid: {uid}")
     except TimeoutError:
-        logger.info("Timeout when waiting for response. Function: send_message_and_get_info")
+        logger.warning(f"Timeout waiting for feedback for uid: {uid}")
         return None
+    finally:
+        pending_feedback.pop(uid, None)
+        logger.debug(f"Removed pending feedback for uid: {uid}")
 
 
 async def tag_everyone(sock: WebSocketServerProtocol, target: str) -> None:
@@ -76,3 +85,6 @@ async def tag_everyone(sock: WebSocketServerProtocol, target: str) -> None:
         logger.info(f"Tagging everyone in group: {target}")
     elif target[-3:] == "net":
         logger.error("Tagging everyone is not supported for private chats")
+
+async def edit_message(sock: WebSocketServerProtocol, message: str, key: dict) -> None:
+    await sock.send(json.dumps({"type": "editMessage", "message": message, "key": key}))

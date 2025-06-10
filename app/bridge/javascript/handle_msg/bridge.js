@@ -1,6 +1,6 @@
 import {startWASocket} from "../../../whatsapp_bot/bot/bot.js"
 import {token, createWebSocket} from "../client.js"
-import {data} from "./process_data.js";
+import {chat} from "./process_data.js";
 import crypto from 'crypto';
 import {handle_message} from "../../../proccess_message/handlers.js"
 
@@ -21,7 +21,7 @@ const WASocket = startWASocket()
 WASocket.ev.on("messages.upsert", async (msg) => {
     // check if the message is not from you and make sure the message is not error
     if (msg.messages[0].message && !msg.messages[0].key.fromMe) {
-        socket.send(data({token: token, type: "chat", content: msg}))
+        socket.send(chat(token,msg))
     }
     })
 //WASocket.groupMetadata("120363210565014980@g.us").then((result) => console.log(result.participants))

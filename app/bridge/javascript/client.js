@@ -1,7 +1,6 @@
 import dotenv from 'dotenv';
 import { resolve } from 'path';
-import {data} from './handle_msg/process_data.js';
-
+import {auth} from './handle_msg/process_data.js';
 dotenv.config({
   path: resolve('../..//.env')
 });
@@ -17,7 +16,7 @@ function createWebSocket(onMessageCallback) {
   socket.addEventListener('open', () => {
     console.log('WebSocket connection established!');
     // Send an auth request to the WebSocket server.
-    socket.send(data({ type: "auth", key: key }));
+    socket.send(auth(key))
   });
 
   socket.addEventListener('message', event => {
