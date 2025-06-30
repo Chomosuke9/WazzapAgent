@@ -16,7 +16,7 @@ const { state, saveCreds } = await useMultiFileAuthState(process.env.AUTH_STATE_
             syncFullHistory: false,
             shouldSyncHistoryMessages: false,
             cachedGroupMetadata: async (jid) => getGroupCache(jid, sock),
-            logger: pino({ level: 'error' })
+            logger: pino({ level: 'debug' })
         })
             // this code will update group metadata
             sock.ev.on("group-participants.update", async (msg) => {

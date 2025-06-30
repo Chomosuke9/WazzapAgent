@@ -14,8 +14,15 @@ async def process_message(socket : WebSocketServerProtocol, message_data: dict) 
 
         elif message_data.get("message") == "test2":
             key = await send_message_and_get_key(sock=socket, target=message_data.get("remoteJid"), message="sending message and getting info")
-            await sleep(3)
+            for i in range(50):
+                print(i)
+                await edit_message(sock=socket, message=editmsg[i%4], key=key)
+                await sleep(0.2)
+
+
+        elif message_data.get("message") == "test3":
+            key = await send_message_and_get_key(sock=socket, target=message_data.get("remoteJid"), message="sending message and getting info")
             for i in range(420):
                 print(i)
                 await edit_message(sock=socket, message=frames[i%42], key=key)
-                await sleep(0.05)
+                await sleep(0.04)
