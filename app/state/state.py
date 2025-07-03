@@ -10,5 +10,5 @@ port = os.getenv("PORT")
 key = os.getenv("KEY")
 clients = {}
 logger = create_logger("test", 10)
-# Bisa di module-level
 pending_feedback: dict[str, Queue] = {}
+node_path = os.getenv("NODE_PATH")

@@ -48,6 +48,7 @@ This project requires the following dependencies:
 - **Programming Language:** JavaScript, Python
 - **Package Manager:** Pip, Npm
 
+Note: For some reason, you will get cryptographic error when using old Node.js. version , to fix it you need to update it to newest version 
 ### Installation
 
 Build WazzapAgent from the source and install dependencies:
