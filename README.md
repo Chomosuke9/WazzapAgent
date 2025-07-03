@@ -26,16 +26,10 @@
 
 ## Overview
 
-WazzapAgent is an innovative AI-driven interface designed to enhance your WhatsApp experience by automating interactions and streamlining communication.
 
-**Why WazzapAgent?**
 
-This project serves as a versatile solution for users seeking automated assistance within the messaging platform. The core features include:
+## Feature
 
-- 🤖 **Intelligent AI Interface:** Automates interactions, enhancing communication efficiency.
-- ⚡ **Real-time Communication:** Utilizes WebSocket connections for seamless message handling.
-- 🔒 **Robust Security:** Implements secure authentication and token management for user safety.
-- ⚙️ **Easy Installation:** Simplifies setup with clear configuration guidelines for developers.
 
 ---
 
