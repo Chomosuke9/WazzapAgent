@@ -3,6 +3,7 @@ import app.bridge.python.auth as auth
 from app.bridge.python.data import *
 from app.proccess_message.handlers import handle_message
 from websockets.legacy.server import WebSocketServerProtocol
+from websockets import exceptions
 from ...state.state import clients, key, logger
 
 sem = Semaphore(10)
@@ -19,7 +20,7 @@ async def handle_websocket_message( websocket: WebSocketServerProtocol, message)
     except json.JSONDecodeError:
         logger.error("Invalid message format")
         return
-
+    print("message received : ", msg)
     if websocket in clients and msg.get("token") == clients[websocket]:
         async with sem:
             create_task(handle_message(socket=websocket, message=msg))
@@ -34,7 +35,8 @@ async def handle_websocket_message( websocket: WebSocketServerProtocol, message)
             logger.debug("Unauthorized")
 
     elif websocket in clients and msg.get("token") != clients[websocket]:
-        logger.debug("Invalid token")
+        logger.error("Invalid token")
+        logger.error("Message : ", msg)
     else:
         logger.critical(f"Unknown error: {msg}")
 
@@ -44,8 +46,8 @@ async def handle_client(websocket: WebSocketServerProtocol) -> None:
         async for message in websocket:
             create_task(handle_websocket_message(message=message, websocket=websocket))
 
-    except Exception as e:
-        logger.critical("Error:", e)
+    except exceptions.ConnectionClosed as e:
+        logger.info(f"Client disconnected : {e}")
     finally:
         if websocket in clients:
             del clients[websocket]

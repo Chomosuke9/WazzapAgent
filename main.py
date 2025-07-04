@@ -8,7 +8,7 @@ from app.state.state import port, node_path
 async def main():
     await serve(handle_client, "localhost", port)
     print("Server started on ws://localhost:" + port)
-    Popen([node_path, "main.js"]) # Automatically run client
+    #Popen([node_path, "main.js"], ) # Automatically run client
     await Future()  #Keep the server running
 
 

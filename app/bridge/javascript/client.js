@@ -21,14 +21,12 @@ function createWebSocket(onMessageCallback) {
 
   socket.addEventListener('message', event => {
     const msg = JSON.parse(event.data);
-    //console.log('Message from server: ', msg);
+    //console.log('Message from server: ' , msg);
     if (token) {onMessageCallback(msg)}
     else if (!token || msg.type === "auth") {token = msg.token}
   });
 
-  return {
-    socket, // Return the socket for later use
-  };
+  return  socket  // Return the socket for later use;
 }
 
 // Export the function
