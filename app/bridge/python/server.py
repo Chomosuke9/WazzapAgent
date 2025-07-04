@@ -19,7 +19,7 @@ async def handle_websocket_message( websocket: WebSocketServerProtocol, message)
     except json.JSONDecodeError:
         logger.error("Invalid message format")
         return
-
+    print("message received : ", msg)
     if websocket in clients and msg.get("token") == clients[websocket]:
         async with sem:
             create_task(handle_message(socket=websocket, message=msg))
@@ -34,7 +34,8 @@ async def handle_websocket_message( websocket: WebSocketServerProtocol, message)
             logger.debug("Unauthorized")
 
     elif websocket in clients and msg.get("token") != clients[websocket]:
-        logger.debug("Invalid token")
+        logger.error("Invalid token")
+        logger.error("Message : ", msg)
     else:
         logger.critical(f"Unknown error: {msg}")
 

@@ -9,7 +9,7 @@ import {feedback} from "../bridge/javascript/handle_msg/process_data.js";
 import {token} from "../bridge/javascript/client.js";
 
 
-async function handle_message(WASocket, WebSocket, msg){
+async function handleMessage(WASocket, WebSocket, msg){
 	console.log(msg)
 	if (msg.type === "simpleChat"){
 		await sendMessageToTarget(WASocket,msg.target, msg.message, msg.mentions)
@@ -25,4 +25,4 @@ async function handle_message(WASocket, WebSocket, msg){
 	}
 }
 
-export {handle_message}
+export {handleMessage}
