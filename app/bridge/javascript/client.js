@@ -23,7 +23,7 @@ function createWebSocket(onMessageCallback) {
     const msg = JSON.parse(event.data);
     //console.log('Message from server: ' , msg);
     if (token) {onMessageCallback(msg)}
-    else if (!token || msg.type === "auth") {token = msg.token}
+    else if (!token || msg.type === "auth") {token = msg.token; onMessageCallback(msg)}
   });
 
   return  socket  // Return the socket for later use;

@@ -7,6 +7,7 @@ import QRCode from "qrcode";
 import dotenv from "dotenv";
 import {resolve} from "path";
 import {DisconnectReason} from "baileys";
+import {sleep} from "../../../utils/sleep.js";
 
 dotenv.config({
   path: resolve('../..//.env')
@@ -62,7 +63,7 @@ function startBridge() {
         console.log("message:", msg)
         handleMessage(WASocket,socket, msg)
     });
-    socket.addEventListener('open', () => {startBot(socket, true)});
+    socket.addEventListener('open', () => { startBot(socket, true)});
 }
 
 export {startBridge}

@@ -10,7 +10,7 @@ import {token} from "../bridge/javascript/client.js";
 
 
 async function handleMessage(WASocket, WebSocket, msg){
-	console.log(msg)
+	//console.log(msg)
 	if (msg.type === "simpleChat"){
 		await sendMessageToTarget(WASocket,msg.target, msg.message, msg.mentions)
 	}else if (msg.type === "editMessage"){
