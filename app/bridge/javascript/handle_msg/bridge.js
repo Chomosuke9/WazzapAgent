@@ -33,11 +33,10 @@ function startBot(socket, printQRinTerminal = true){
         else if (update.connection === "open"){
             socket.send(notify(token, "Successfully connected to WhatsApp server."));
         } else if (update.connection === "connecting"){
-            console.log(token)
             socket.send(notify(token, "Connecting to WhatsApp server."));
-            setTimeout(() => {console.log(token)}, 3000)
         } else if (update.connection === "close"){
-            const lastDisconnectReason = update?.lastDisconnect?.error?.cause
+            const lastDisconnectReason = update?.lastDisconnect?.error
+            socket.send(notify(token, "Disconnected from WhatsApp server, reason: " + lastDisconnectReason));
             if (lastDisconnectReason === DisconnectReason.connectionClosed ||
                 lastDisconnectReason === DisconnectReason.connectionLost ||
                 lastDisconnectReason === DisconnectReason.restartRequired ||
@@ -66,7 +65,7 @@ function startBridge() {
     socket.addEventListener('open', () => {
         setTimeout(() => {
             startBot(socket, true)
-        }, 500);
+        }, 50);
     });
 }
 
