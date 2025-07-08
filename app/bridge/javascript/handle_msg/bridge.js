@@ -63,7 +63,11 @@ function startBridge() {
         console.log("message:", msg)
         handleMessage(WASocket,socket, msg)
     });
-    socket.addEventListener('open', () => { startBot(socket, true)});
+    socket.addEventListener('open', () => {
+        setTimeout(() => {
+            startBot(socket, true)
+        }, 500);
+    });
 }
 
 export {startBridge}
