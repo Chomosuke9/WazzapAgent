@@ -24,8 +24,6 @@ const { state, saveCreds } = await useMultiFileAuthState(process.env.AUTH_STATE_
             })
 
             sock.ev.on("creds.update", saveCreds);
-
         return sock
     }
-
     export {startWASocket}

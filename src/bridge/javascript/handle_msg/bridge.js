@@ -52,6 +52,7 @@ function startBot(socket, printQRinTerminal = true){
         // check if the message is not from you and make sure the message is not error
         if (msg.messages[0].message && !msg.messages[0].key.fromMe) {
             socket.send(chat(token, msg))
+            //console.log(msg)
         }
     })
 }

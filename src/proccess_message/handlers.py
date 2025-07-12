@@ -1,5 +1,4 @@
 import json
-from .parseMessage import parse_whatsapp_message
 from websockets.legacy.server import WebSocketServerProtocol
 from ..state.state import logger, pending_feedback
 from .chatLogic import process_message
@@ -9,11 +8,8 @@ from .chatLogic import process_message
 async def handle_message(socket : WebSocketServerProtocol, message : dict) -> None:
     logger.debug(f"Received message: {message}")
     type : str | None = message.get("type")
-
     if type == "chat":
-        data = parse_whatsapp_message(message)
-        logger.debug("Parsed message:\n" + json.dumps(data, indent=2, ensure_ascii=False))
-        await process_message(socket=socket, message_data=data)
+        await process_message(socket=socket, message_data=message)
         #if data.get("mentions"):
         #    found = any(bot_number in mention for mention in (data.get("mentions") or []) + (data.get("quotedParticipants") or []))
         #    if found:
