@@ -1,8 +1,8 @@
 from asyncio import Future, run
 from websockets.asyncio.server import serve
-from app.bridge.python.server import handle_client
+from src.bridge.python.server import handle_client
 from subprocess import Popen
-from app.state.state import port, node_path
+from src.state.state import port, node_path
 
 
 async def main():
@@ -14,5 +14,3 @@ async def main():
 
 if __name__ == "__main__":
     run(main())
-
-#apa kau bisa melihat perubahan ini?

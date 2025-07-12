@@ -1,11 +1,12 @@
 from asyncio import create_task, Semaphore
-import app.bridge.python.auth as auth
-from app.bridge.python.data import *
-from app.proccess_message.handlers import handle_message
+import src.bridge.python.auth as auth
+from src.bridge.python.data import *
+from src.proccess_message.handlers import handle_message
 from websockets.legacy.server import WebSocketServerProtocol
 from websockets import exceptions
 from ...state.state import clients, key, logger
 
+file_name = "log.txt"
 sem = Semaphore(10)
 
 async def handle_new_valid_client(websocket: WebSocketServerProtocol) -> None:
@@ -24,6 +25,7 @@ async def handle_websocket_message( websocket: WebSocketServerProtocol, message)
     if websocket in clients and msg.get("token") == clients[websocket]:
         async with sem:
             create_task(handle_message(socket=websocket, message=msg))
+        #print(json.dumps(msg.get("content"), indent=2))
 
     elif websocket not in clients:
         logger.debug("New client trying to connect, checking if key are valid.")

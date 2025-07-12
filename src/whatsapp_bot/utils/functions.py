@@ -88,3 +88,7 @@ async def tag_everyone(sock: WebSocketServerProtocol, target: str) -> None:
 
 async def edit_message(sock: WebSocketServerProtocol, message: str, key: dict) -> None:
     await sock.send(json.dumps({"type": "editMessage", "message": message, "key": key}))
+
+
+async def send_button_message(sock: WebSocketServerProtocol, target: str, quoted_message : json) -> None:
+    await sock.send(json.dumps({"type": "sendButton", "target": target, "quoted": quoted_message}))

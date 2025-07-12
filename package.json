@@ -1,7 +1,9 @@
 {
   "dependencies": {
-    "baileys": "^6.7.17",
+    "baileys": "github:nstar-y/bail",
     "dotenv": "^16.5.0",
+    "eslint": "^9.30.1",
+    "jimp": "^0.16.13",
     "node-cache": "^5.1.2",
     "pino": "^9.6.0",
     "qrcode": "^1.5.4"
