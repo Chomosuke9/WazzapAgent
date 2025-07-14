@@ -9,13 +9,15 @@ from ...state.state import clients, key, logger
 file_name = "log.txt"
 sem = Semaphore(10)
 
+
 async def handle_new_valid_client(websocket: WebSocketServerProtocol) -> None:
     token = auth.generate_token()
     clients[websocket] = token
     await websocket.send(auth_data(status="success", token=token))
     logger.debug("Client successfully connected and authenticated.")
 
-async def handle_websocket_message( websocket: WebSocketServerProtocol, message) -> None:
+
+async def handle_websocket_message(websocket: WebSocketServerProtocol, message) -> None:
     try:
         msg = json.loads(message)
     except json.JSONDecodeError:
