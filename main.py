@@ -1,7 +1,8 @@
 from asyncio import Future, run
 from websockets.asyncio.server import serve
 from src.bridge.python.server import handle_client
-from src.state.state import port, node_path
+from os import popen # type: ignore
+from src.state.state import port, node_path # type: ignore
 
 
 async def main() -> None:

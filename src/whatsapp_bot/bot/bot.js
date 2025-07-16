@@ -1,13 +1,9 @@
 import {makeWASocket, useMultiFileAuthState} from 'baileys'
 import {getGroupCache, setGroupCache} from '../utils/caching.js'
 import pino from "pino";
-import dotenv from 'dotenv';
-import { resolve } from 'path';
-dotenv.config({
-  path: resolve('.env')
-});
+import { authStateFile } from '../../state/state.js';
 
-const { state, saveCreds } = await useMultiFileAuthState(process.env.AUTH_STATE_FILE);
+const { state, saveCreds } = await useMultiFileAuthState(authStateFile);
 
     function startWASocket() {
         const sock = makeWASocket({

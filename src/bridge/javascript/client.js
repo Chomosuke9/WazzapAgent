@@ -1,12 +1,5 @@
-import dotenv from 'dotenv';
-import { resolve } from 'path';
+import { port, key } from '../../state/state.js';
 import {auth} from './handle_msg/process_data.js';
-dotenv.config({
-  path: resolve('../..//.env')
-});
-
-const key = process.env.KEY;
-const port = process.env.PORT;
 
 export let token;
 

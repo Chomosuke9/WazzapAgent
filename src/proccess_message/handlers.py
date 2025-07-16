@@ -1,4 +1,3 @@
-import json
 from typing import Any, Dict
 from websockets.legacy.server import WebSocketServerProtocol
 from ..state.state import logger, pending_feedback
@@ -14,7 +13,7 @@ async def handle_message(socket : WebSocketServerProtocol, message : Dict[str, A
     message_type: str | None = message.get("type")
 
     if message_type == "chat":
-        await process_message(socket=socket, message_data=message)
+        await process_message(socket=socket, data=message)
         #if data.get("mentions"):
         #    found = any(bot_number in mention for mention in (data.get("mentions") or []) + (data.get("quotedParticipants") or []))
         #    if found:

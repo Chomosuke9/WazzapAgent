@@ -8,7 +8,8 @@ import dotenv from "dotenv";
 import {resolve} from "path";
 import {DisconnectReason} from "baileys";
 import {sleep} from "../../../utils/sleep.js";
-
+import { cache } from "../../../state/state.js";
+import { parseMessage } from "../../../proccess_message/messageParser.js";
 dotenv.config({
   path: resolve('../..//.env')
 });
@@ -51,8 +52,14 @@ function startBot(socket, printQRinTerminal = true){
     WASocket.ev.on("messages.upsert", async (msg) => {
         // check if the message is not from you and make sure the message is not error
         if (msg.messages[0].message && !msg.messages[0].key.fromMe) {
-            socket.send(chat(token, msg))
+            console.log("message received:", JSON.stringify(msg.messages[0], null, 2));
+            const parsedMessage = await parseMessage(msg.messages[0]);
+            socket.send(chat(token, parsedMessage))
+            cache.set(msg.messages[0].key.id, msg.messages[0]);
+            
             //console.log(msg)
+        } else if (msg.messages[0].message && msg.messages[0].key.fromMe){
+            cache.set(msg.messages[0].key.id, msg.messages[0]);
         }
     })
 }
