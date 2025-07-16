@@ -1,16 +1,31 @@
 import logging
+import sys
 
+# Define a type hint for logger levels for clarity
+LoggerLevel = int
 
-def create_logger(name, level : 10|20|30|40|50 = 10) -> logging.Logger:
+def create_logger(name: str, level: LoggerLevel = logging.DEBUG) -> logging.Logger:
     """
-    Create logger with name and level.
-    :param name: Name of the logger
-    :param level: Level of the logger [10, 20, 30, 40, 50]
-    :return: logger
+    Creates, configures, and returns a logger instance.
+
+    Args:
+        name: The name of the logger, typically __name__.
+        level: The logging level, e.g., logging.DEBUG, logging.INFO.
+               Defaults to logging.DEBUG.
+
+    Returns:
+        A configured logging.Logger instance.
     """
-    logger = logging.getLogger(name=name)
+    logger = logging.getLogger(name)
     logger.setLevel(level)
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-    logger.addHandler(console_handler)
+
+    # Prevent adding duplicate handlers if logger is already configured
+    if not logger.handlers:
+        console_handler = logging.StreamHandler(sys.stdout)
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+
     return logger
