@@ -11,13 +11,13 @@ agent and is **not** the agent's internal `bridge.history.WhatsAppMessage`.
 - **CONTRACT.md §1.4/§1.5** — the Node→Python events these constants name.
 
 ## Files to read before starting
-- CONTRACT.md §4, §7, §1.4, §1.5
-- `src/wa/inbound.ts` (the `incoming_message` payload literal — the source of §7)
-- `python/bridge/history.py` (`WhatsAppMessage`) — to confirm this is a
+- Original - CONTRACT.md §4, §7, §1.4, §1.5
+- `migration/node/wa/inbound.ts` (the `incoming_message` payload literal — the source of §7)
+- `migration/python/bridge/history.py` (`WhatsAppMessage`) — to confirm this is a
   **different** type and avoid confusion
 
 ## Files to create
-### `python/wasocket/events.py`
+### `migration/python/wasocket/events.py`
 **Purpose:** Event-name constants + `WhatsAppMessage` inbound model.
 **Exports:**
 - Constants: `MESSAGE="message"`, `STATUS="status"`, `READY="ready"`,
@@ -46,7 +46,7 @@ None.
 None.
 
 ## Acceptance criteria
-- `pytest python/tests/test_events.py`:
+- `pytest migration/python/tests/test_events.py`:
   - a full `incoming_message` payload (from README/CONTRACT §7) parses into a
     `WhatsAppMessage` with every field populated and `folder_path` set.
   - a minimal payload (only the "Always" fields) parses without error and

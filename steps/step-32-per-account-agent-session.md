@@ -13,12 +13,12 @@ signatures, idle counters, pending-ack maps) is currently created once inside
 - **CONTRACT.md §7** — handlers consume `WhatsAppMessage`.
 
 ## Files to read before starting
-- `python/bridge/main.py` — the `handle_socket` local-state block and the
+- Original - `migration/python/bridge/main.py` — the `handle_socket` local-state block and the
   `process_message_batch` / `flush_pending` closures + the Step 28/29 handlers
-- `python/wasocket/socket.py` (Step 27)
+- `migration/python/wasocket/socket.py` (Step 27)
 
 ## Files to create
-### `python/bridge/session.py` (or an `AgentSession` class inside `main.py`)
+### `migration/python/bridge/session.py` (or an `AgentSession` class inside `main.py`)
 **Purpose:** Encapsulate all per-account agent state and handler registration.
 **Exports:** `class AgentSession` with `__init__(self, sock: WaSocket)` and a
 `register(self) -> None` that wires `@sock.on("message")`, `"status"`,
@@ -34,7 +34,7 @@ either keep one webhook server shared across sessions keyed by `chat_id`
 tracker per session — choose per-session trackers to preserve isolation.
 
 ## Files to modify
-### `python/bridge/main.py`
+### `migration/python/bridge/main.py`
 **Change:** Replace the single inline `handle_socket` state with
 `AgentSession(sock).register()`. `main()` still constructs one socket here
 (N-socket boot is Step 33).
@@ -44,7 +44,7 @@ tracker per session — choose per-session trackers to preserve isolation.
 None.
 
 ## Acceptance criteria
-- `pytest python/tests/test_agent_session.py`:
+- `pytest migration/python/tests/test_agent_session.py`:
   - constructing two `AgentSession`s (over two stub `WaSocket`s) yields
     independent `per_chat` history — a `WhatsAppMessage` delivered to session A's
     `"message"` handler never appears in session B's history.

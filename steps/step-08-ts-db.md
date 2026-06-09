@@ -11,14 +11,14 @@ per-tenant `db/` path resolution (CONTRACT.md §8) is wired later (Step 17 / 33)
   current global path behavior and does **not** move DBs under `<folderPath>/db/`.
 
 ## Files to read before starting
-- `src/db.js`
+- Original - `migration/node/db.js`
 - `docs/llm-architecture/05-state-data-and-db.md` (table/column shapes)
 
 ## Files to create
 None beyond the rename.
 
 ## Files to modify
-### `src/db.js` → `src/db.ts`
+### `migration/node/db.js` → `migration/node/db.ts`
 **Change:** Rename; declare interfaces for row shapes (`ChatSettingsRow`,
 `LlmModelRow`, `ChatActivationRow`, `ActivationCodeRow`, `OwnerContactRow`,
 `StickerRow`) per doc 05; type every exported CRUD function and `init`/
@@ -27,7 +27,7 @@ exactly as today.
 **Location:** whole file.
 
 ## Files to delete
-- `src/db.js`.
+- `migration/node/db.js`.
 
 ## Acceptance criteria
 - `pnpm typecheck` passes with zero errors.

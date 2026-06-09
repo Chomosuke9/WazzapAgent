@@ -14,14 +14,14 @@ singletons. **Largest refactor; must merge as one PR.**
   (intentionally not on the wire), but the exported type name must match §5.
 
 ## Files to read before starting
-- `src/caches.ts`, `src/identifiers.ts` (Step 06)
-- `src/wa/sendQueue.ts` (Step 10)
-- `src/wa/outbound.ts`, `src/wa/inbound.ts`, `src/wa/events.ts` (Step 12)
-- `src/wa/interactive/*.ts` (Step 10)
-- `src/protocol/types.ts` (the `AccountContext` placeholder)
+- Original - `migration/node/caches.ts`, `migration/node/identifiers.ts` (Step 06)
+- `migration/node/wa/sendQueue.ts` (Step 10)
+- `migration/node/wa/outbound.ts`, `migration/node/wa/inbound.ts`, `migration/node/wa/events.ts` (Step 12)
+- `migration/node/wa/interactive/*.ts` (Step 10)
+- `migration/node/protocol/types.ts` (the `AccountContext` placeholder)
 
 ## Files to create
-### `src/account/accountContext.ts`
+### `migration/node/account/accountContext.ts`
 **Purpose:** Per-account state holder + factory.
 **Exports:**
 - `interface AccountContext` (the concrete fields: the former `caches.ts`
@@ -33,22 +33,22 @@ singletons. **Largest refactor; must merge as one PR.**
 Replaces the module-global singletons that lived in `caches.ts`.
 
 ## Files to modify
-### `src/caches.ts`
+### `migration/node/caches.ts`
 **Change:** Move the singleton `Map`/`Set`s into `AccountContext`; `caches.ts`
 keeps only `cacheSetBounded`, `GROUP_JOIN_STUB_TYPES`, and bound constants.
 
-### `src/identifiers.ts`
+### `migration/node/identifiers.ts`
 **Change:** Each function (`nextContextMsgId`, `rememberSenderRef`,
 `rememberMessage`, `resolveQuotedMessage`, `rememberMessageKeyIndex`, …) takes an
 `AccountContext` (first param or via a bound factory) instead of reading globals.
 Pure helpers (`normalizeJid`, `normalizeContextMsgId`, `makeSenderRef`) stay
 static.
 
-### `src/wa/sendQueue.ts`
+### `migration/node/wa/sendQueue.ts`
 **Change:** `withJidQueue` operates on the context's queue map (so two accounts
 serialize the same `chatId` independently).
 
-### `src/wa/{outbound,inbound,events}.ts`, `src/wa/interactive/*.ts`
+### `migration/node/wa/{outbound,inbound,events}.ts`, `migration/node/wa/interactive/*.ts`
 **Change:** Thread the `AccountContext` through every identifier/cache/queue call
 site. No behavioral change beyond per-account isolation.
 

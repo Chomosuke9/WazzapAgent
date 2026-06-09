@@ -18,19 +18,19 @@ are preserved; only the transport seam moves.
 - **CONTRACT.md §8** — accounts created on connect ensure the tenant folder.
 
 ## Files to read before starting
-- `src/index.ts` (`bootstrap`, the `dispatchCommand` copy)
-- `src/server/wsServer.ts` (Step 20), `src/account/actionDispatcher.ts` (Step 19)
-- `python/bridge/main.py` (`handle_socket`, `main`, the `async for raw in ws`
+- Original - `migration/node/index.ts` (`bootstrap`, the `dispatchCommand` copy)
+- `migration/node/server/wsServer.ts` (Step 20), `migration/node/account/actionDispatcher.ts` (Step 19)
+- `migration/python/bridge/main.py` (`handle_socket`, `main`, the `async for raw in ws`
   loop and its control-event branches, `_parse_endpoint`)
-- `python/bridge/messaging/gateway.py` (the `ws`-first-arg send_* helpers)
-- `python/wasocket/socket.py` (Step 27)
+- `migration/python/bridge/messaging/gateway.py` (the `ws`-first-arg send_* helpers)
+- `migration/python/wasocket/socket.py` (Step 27)
 - CONTRACT.md §1, §4
 
 ## Files to create
 None (all modules already exist from Phases 3–4).
 
 ## Files to modify
-### `src/index.ts`
+### `migration/node/index.ts`
 **Change:** Replace `await startWhatsApp()` + `wsClient.connect()` with
 `startWsServer(config.wsListenPort)`. Remove the in-file `dispatchCommand`
 body and `wsClient.on('message', …)` (routing now lives in `actionDispatcher`
@@ -38,7 +38,7 @@ via `wsServer`). `index.ts` becomes the thin entry: `dbInit` (global, until
 Step 33 per-tenant), start server, signal handling.
 **Location:** `bootstrap()` and the `dispatchCommand`/`emitAction*` block.
 
-### `python/bridge/main.py`
+### `migration/python/bridge/main.py`
 **Change:** Replace `websockets.serve(handle_socket, …)` + the `async for raw in
 ws` loop with: construct a `WaSocket` via `make_wa_socket(folder_path)`,
 `await sock.connect(node_url)`, register `@sock.on("message")` → the existing
@@ -51,7 +51,7 @@ Keep `handle_socket`'s per-chat state/closures intact (just hosted under the
 WaSocket handlers).
 **Location:** `handle_socket` body + `main()`.
 
-### `python/bridge/messaging/gateway.py`
+### `migration/python/bridge/messaging/gateway.py`
 **Change:** Re-point each `send_*` helper from `await ws.send(json.dumps({...}))`
 to the corresponding `WaSocket` action method (the first arg `ws` becomes the
 `WaSocket`). Signatures otherwise unchanged so call sites in `main.py` are stable.
@@ -84,8 +84,8 @@ to the corresponding `WaSocket` action method (the first arg `ws` becomes the
 
 ## Rollback procedure
 1. Revert this commit (and Step 29 if squashed in): `git revert <sha>` restores
-   `src/index.ts` (back to `startWhatsApp()` + `wsClient.connect()`) and
-   `python/bridge/main.py` (back to `websockets.serve(handle_socket)`).
+   `migration/node/index.ts` (back to `startWhatsApp()` + `wsClient.connect()`) and
+   `migration/python/bridge/main.py` (back to `websockets.serve(handle_socket)`).
 2. No data migration is needed — DB schema and `wa/`/`bridge/` logic are
    unchanged by the flip; only the transport seam moved.
 3. Restart both processes; the old topology (Node client → Python server on
@@ -120,7 +120,7 @@ the old Python bridge, in staging:
 - End-to-end on staging (single account): inbound message → LLM1/LLM2 →
   `send_message` → WhatsApp; `/reset`, `/model`, mute enforcement, a quiz
   round-trip, and a sub-agent task all behave as before.
-- `node --test 'tests/node/**/*.test.mjs'` and `pytest python/tests/` green.
+- `node --test 'tests/node/**/*.test.mjs'` and `pytest migration/python/tests/` green.
 
 ## Must NOT do
 - Do not land this without Step 29 in the same PR (hydration would break).

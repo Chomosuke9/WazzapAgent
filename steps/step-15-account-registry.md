@@ -12,11 +12,11 @@ queue. This leaf module is built first; nothing wires into the live boot yet.
   reliable Node→Python frames: `whatsapp_status`, control events, `hello_ack`).
 
 ## Files to read before starting
-- `src/protocol/types.ts` (Step 09 — `AccountEntry`, `OutboundFrame`)
-- `src/wsClient.ts` (the `reliableQueue`/`MAX_RELIABLE_QUEUE` pattern to mirror)
+- Original - `migration/node/protocol/types.ts` (Step 09 — `AccountEntry`, `OutboundFrame`)
+- `migration/node/wsClient.ts` (the `reliableQueue`/`MAX_RELIABLE_QUEUE` pattern to mirror)
 
 ## Files to create
-### `src/server/accountRegistry.ts`
+### `migration/node/server/accountRegistry.ts`
 **Purpose:** In-memory `Map<folderPath, AccountEntry>` + per-account send helpers.
 **Exports:**
 - `getOrCreate(folderPath: string): AccountEntry`

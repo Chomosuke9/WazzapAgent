@@ -11,28 +11,28 @@ Handlers depend on `db`/`config`/identifiers (already typed). Logic unchanged.
 - `slashCommand` field (CONTRACT.md §7) is produced by `parseSlashCommand`.
 
 ## Files to read before starting
-- `src/wa/command/parseCommand.js`
-- `src/wa/command/index.js`
+- Original - `migration/node/wa/command/parseCommand.js`
+- `migration/node/wa/command/index.js`
 - 3–4 representative handlers: `prompt.js`, `mode.js`, `model.js`, `setting.js`
 
 ## Files to create
 None beyond renames.
 
 ## Files to modify
-### `src/wa/command/parseCommand.js` → `parseCommand.ts`
+### `migration/node/wa/command/parseCommand.js` → `parseCommand.ts`
 **Change:** Type `parseSlashCommand(text: string | null): { command: string; args: string } | null`
 and the `COMMAND_ALIASES` map. Keep alias table verbatim.
 
-### `src/wa/command/*.js` → `*.ts` (all ~28 handlers)
+### `migration/node/wa/command/*.js` → `*.ts` (all ~28 handlers)
 **Change:** Rename and type each `handle*` export's params object and return.
 May be done in sub-batches across commits but lands as one logical step. Logic
 unchanged; these stay in Node.
 
-### `src/wa/command/index.js` → `index.ts`
+### `migration/node/wa/command/index.js` → `index.ts`
 **Change:** Convert the barrel re-exports.
 
 ## Files to delete
-- The `.js` originals under `src/wa/command/`.
+- The `.js` originals under `migration/node/wa/command/`.
 
 ## Acceptance criteria
 - `pnpm typecheck` passes with zero errors.

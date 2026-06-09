@@ -11,9 +11,9 @@ two-account end-to-end smoke test so a fresh clone can boot both stacks.
   not contradict CONTRACT.md.
 
 ## Files to read before starting
-- `AGENTS.md`, `README.md`, `.env.example`
+- Original - `AGENTS.md`, `README.md`, `.env.example`
 - `MIGRATION_PLAN.md` (topology diagrams), `CONTRACT.md`
-- `src/config.ts` (final config keys), `python/bridge/accounts.py` (Step 33)
+- `migration/node/config.ts` (final config keys), `migration/python/bridge/accounts.py` (Step 33)
 
 ## Files to create
 ### `tests/e2e/two-account.md` (or a scripted test under `tests/`)
@@ -32,8 +32,8 @@ clients connect via `node_url`; per-tenant folder layout (CONTRACT.md §8);
 
 ### `AGENTS.md`
 **Change:** Update the architecture-at-a-glance, the WebSocket protocol section,
-directory structure (add `src/server/`, `src/account/`, `src/protocol/`,
-`python/wasocket/`), and the env-var table.
+directory structure (add `migration/node/server/`, `migration/node/account/`, `migration/node/protocol/`,
+`migration/python/wasocket/`), and the env-var table.
 **Location:** the relevant sections.
 
 ### `.env.example`

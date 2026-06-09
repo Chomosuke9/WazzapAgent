@@ -11,20 +11,20 @@ intact here; the per-account refactor is Step 16.
   (`contextMsgId`) but no shape changes here.
 
 ## Files to read before starting
-- `src/caches.js`
-- `src/identifiers.js`
+- Original - `migration/node/caches.js`
+- `migration/node/identifiers.js`
 
 ## Files to create
 None beyond renames.
 
 ## Files to modify
-### `src/caches.js` → `src/caches.ts`
+### `migration/node/caches.js` → `migration/node/caches.ts`
 **Change:** Rename; type each `Map`/`Set` (key/value generics) and
 `cacheSetBounded<K,V>`. Keep the exported singletons and `GROUP_JOIN_STUB_TYPES`
 filter exactly as-is.
 **Location:** whole file.
 
-### `src/identifiers.js` → `src/identifiers.ts`
+### `migration/node/identifiers.js` → `migration/node/identifiers.ts`
 **Change:** Rename; type `normalizeJid`, `normalizeContextMsgId`,
 `nextContextMsgId`, `rememberSenderRef`, `rememberMessage`,
 `resolveQuotedMessage`, `rememberMessageKeyIndex`, and the registry entry
@@ -32,7 +32,7 @@ shapes. Behavior unchanged.
 **Location:** whole file.
 
 ## Files to delete
-- `src/caches.js`, `src/identifiers.js`.
+- `migration/node/caches.js`, `migration/node/identifiers.js`.
 
 ## Acceptance criteria
 - `pnpm typecheck` passes with zero errors.

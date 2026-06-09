@@ -13,13 +13,13 @@ contract's `WaStatus`.
 - **CONTRACT.md §1.1** — `WaStatus` normalization (`closed→close`).
 
 ## Files to read before starting
-- `src/wa/inbound.ts` (the `wsClient.send({ type:'incoming_message', payload })`)
-- `src/wa/events.ts` (the three `wsClient.send` emitters)
-- `src/wa/connection.ts` Listener 2 + `connection.update`
-- `src/account/accountContext.ts`, `src/server/accountRegistry.ts`
+- Original - `migration/node/wa/inbound.ts` (the `wsClient.send({ type:'incoming_message', payload })`)
+- `migration/node/wa/events.ts` (the three `wsClient.send` emitters)
+- `migration/node/wa/connection.ts` Listener 2 + `connection.update`
+- `migration/node/account/accountContext.ts`, `migration/node/server/accountRegistry.ts`
 
 ## Files to create
-### `src/account/eventForwarder.ts`
+### `migration/node/account/eventForwarder.ts`
 **Purpose:** Turn Baileys events for one account into `OutboundFrame`s and send
 them to that account's client via the registry.
 **Exports:**
@@ -34,12 +34,12 @@ via `registry.sendToClient` (best-effort); `whatsapp_status` via
 `registry.sendReliableToClient` (reliable) using the normalized `WaStatus`.
 
 ## Files to modify
-### `src/wa/inbound.ts`
+### `migration/node/wa/inbound.ts`
 **Change:** Replace the direct `wsClient.send(...)` with a call through the
 injected forwarder/`AccountEntry`; add `folderPath` to the built payload.
 **Location:** `handleIncomingMessage` near the `wsClient.send` call.
 
-### `src/wa/events.ts`
+### `migration/node/wa/events.ts`
 **Change:** Route the three synthetic emitters
 (`emitGroupJoinContextEvent`/`emitBotActionContextEvent`/`emitBotRoleChangeEvent`)
 through the forwarder with `folderPath` stamped.

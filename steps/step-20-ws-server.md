@@ -14,15 +14,15 @@ the forwarder. Built and tested behind a secondary entry; the live boot
   the folder layout).
 
 ## Files to read before starting
-- `src/server/accountRegistry.ts` (Step 15)
-- `src/account/baileysFactory.ts` (Step 17)
-- `src/account/eventForwarder.ts` (Step 18)
-- `src/account/actionDispatcher.ts` (Step 19)
-- `src/wsClient.ts` (`_startHeartbeat`/`_clearHeartbeat` to mirror server-side)
-- `src/config.ts` (token; add `wsListenPort`)
+- Original - `migration/node/server/accountRegistry.ts` (Step 15)
+- `migration/node/account/baileysFactory.ts` (Step 17)
+- `migration/node/account/eventForwarder.ts` (Step 18)
+- `migration/node/account/actionDispatcher.ts` (Step 19)
+- `migration/node/wsClient.ts` (`_startHeartbeat`/`_clearHeartbeat` to mirror server-side)
+- `migration/node/config.ts` (token; add `wsListenPort`)
 
 ## Files to create
-### `src/server/wsServer.ts`
+### `migration/node/server/wsServer.ts`
 **Purpose:** `startWsServer(port?: number): WebSocketServer` + per-connection
 lifecycle.
 **Exports:** `startWsServer`.
@@ -42,7 +42,7 @@ normalization (delegate to `eventForwarder`).
   (mirror `wsClient` `_startHeartbeat`, interval `WS_HEARTBEAT_INTERVAL_MS`).
 
 ## Files to modify
-### `src/config.ts`
+### `migration/node/config.ts`
 **Change:** Add `wsListenPort` (env `WS_LISTEN_PORT`, default `3000`). Do not
 remove `wsEndpoint` yet (old client path still uses it).
 

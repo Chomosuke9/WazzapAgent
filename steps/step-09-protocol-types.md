@@ -1,4 +1,4 @@
-# Step 09 — `src/protocol/types.ts` (TypeScript wire types)
+# Step 09 — `migration/node/protocol/types.ts` (TypeScript wire types)
 
 ## Context
 Create the single TypeScript module that exports every WS frame type plus
@@ -13,7 +13,7 @@ CONTRACT.md §5 and becomes the type source consumed by `wa/*`, `eventForwarder`
 - **CONTRACT.md §7** (`WhatsAppMessagePayload`).
 
 ## Files to create
-### `src/protocol/types.ts`
+### `migration/node/protocol/types.ts`
 **Purpose:** Exported TypeScript types for all WS frames + registry/factory types.
 **Exports:** exactly the names listed in CONTRACT.md §5 — `WaStatus`,
 `ErrorCode`, `Attachment`, `HelloPayload`, every `*Payload` action type,

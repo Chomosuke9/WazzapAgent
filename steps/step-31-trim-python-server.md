@@ -10,16 +10,16 @@ for the client.
 - None changed.
 
 ## Files to read before starting
-- `python/bridge/main.py` (`_parse_endpoint`, legacy `_shutdown_signal_handler`,
+- Original - `migration/python/bridge/main.py` (`_parse_endpoint`, legacy `_shutdown_signal_handler`,
   any `websockets.serve` import path)
-- `python/wasocket/transport.py` (confirms the client still imports `websockets`)
+- `migration/python/wasocket/transport.py` (confirms the client still imports `websockets`)
 - `requirements.txt`
 
 ## Files to create
 None.
 
 ## Files to modify
-### `python/bridge/main.py`
+### `migration/python/bridge/main.py`
 **Change:** Delete `_parse_endpoint`, the legacy `_shutdown_signal_handler` (if
 unused), and any remaining `websockets.serve`/server-only import left after
 Step 28. Keep the signal handling that the WaSocket boot uses.
@@ -34,12 +34,12 @@ none).
 None (only dead functions inside `main.py`).
 
 ## Acceptance criteria
-- `grep -n "websockets.serve\|_parse_endpoint" python/bridge/main.py` returns
+- `grep -n "websockets.serve\|_parse_endpoint" migration/python/bridge/main.py` returns
   **zero** matches.
-- `python -m pyflakes python/bridge/main.py` (if available) reports no unused
-  imports; otherwise `python -c "import ast,sys; ast.parse(open('python/bridge/main.py').read())"`
+- `python -m pyflakes migration/python/bridge/main.py` (if available) reports no unused
+  imports; otherwise `python -c "import ast,sys; ast.parse(open('migration/python/bridge/main.py').read())"`
   succeeds and `python -m python.bridge.main` boots and connects as a client.
-- `pytest python/tests/` green.
+- `pytest migration/python/tests/` green.
 
 ## Must NOT do
 - Do not remove `websockets` from `requirements.txt` (the SDK client needs it).

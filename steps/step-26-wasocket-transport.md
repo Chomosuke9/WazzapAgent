@@ -4,7 +4,7 @@
 The transport is the WS **client** layer: connect, exponential backoff with
 symmetric jitter, the canonical `isAlive` heartbeat, the accept-then-kick grace
 timer, a bounded reliable queue, the `hello`/`hello_ack` handshake, and graceful
-close. **This is the step that ports `src/wsClient.js`'s reconnect/backoff logic
+close. **This is the step that ports `migration/node/wsClient.js`'s reconnect/backoff logic
 into Python.** It emits raw decoded frames to a callback; it does not interpret
 them.
 
@@ -16,15 +16,15 @@ them.
   ships frames.
 
 ## Files to read before starting
-- `src/wsClient.js` (entire file: `computeReconnectDelay`,
+- Original - `migration/node/wsClient.js` (entire file: `computeReconnectDelay`,
   `connect`/`scheduleReconnect`/`_startHeartbeat`/`_clearHeartbeat`/`close`/
   `send`/`sendReliable`/`flushReliableQueue`, the `stableResetTimer` grace logic)
-- `python/wasocket/protocol.py` (Step 23), `python/wasocket/errors.py` (Step 22)
-- `python/bridge/main.py` `main()` (`websockets` server config: `ping_interval=20,
+- `migration/python/wasocket/protocol.py` (Step 23), `migration/python/wasocket/errors.py` (Step 22)
+- `migration/python/bridge/main.py` `main()` (`websockets` server config: `ping_interval=20,
   ping_timeout=20`) — for symmetry
 
 ## Files to create
-### `python/wasocket/transport.py`
+### `migration/python/wasocket/transport.py`
 **Purpose:** `WSClientTransport` — the resilient WS client.
 **Exports:**
 - `compute_reconnect_delay(attempt, base_ms, max_ms, jitter_ratio, rand=random.random) -> int`
@@ -47,7 +47,7 @@ accept-then-kick because `attempt` only resets after the OPEN grace window.
 None (Node `wsClient.ts` is deleted later, Step 30).
 
 ## Acceptance criteria
-- `pytest python/tests/test_transport.py`:
+- `pytest migration/python/tests/test_transport.py`:
   - `compute_reconnect_delay` matches the JS reference for a table of
     `(attempt, base, max, jitter, rand)` inputs (port the existing
     `computeReconnectDelay` test cases; injectable `rand`).

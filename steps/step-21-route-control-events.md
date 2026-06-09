@@ -14,28 +14,28 @@ the registry with `folderPath` attached.
 - **CONTRACT.md §1.6** — these remain **reliable**.
 
 ## Files to read before starting
-- `src/wa/connection.ts` (model select, modelcfg remove, `whatsapp_status`,
+- Original - `migration/node/wa/connection.ts` (model select, modelcfg remove, `whatsapp_status`,
   `invalidate_default_model` emits)
-- `src/wa/command/*.ts` handlers that call `wsClient.sendReliable` (model, mode,
+- `migration/node/wa/command/*.ts` handlers that call `wsClient.sendReliable` (model, mode,
   prompt, permission, trigger, reset, subagent, idle, announcement, modelcfg)
-- `src/wa/commandHandler.ts` (the `context` object threaded to handlers)
-- `src/server/accountRegistry.ts`
+- `migration/node/wa/commandHandler.ts` (the `context` object threaded to handlers)
+- `migration/node/server/accountRegistry.ts`
 
 ## Files to create
 None.
 
 ## Files to modify
-### `src/wa/commandHandler.ts`
+### `migration/node/wa/commandHandler.ts`
 **Change:** Thread the acting account (`folderPath`/`AccountContext`) into the
 `context` passed to each `handle*` and to `handleButtonResponse`.
 **Location:** `handleCommandListener` signature + `context` construction.
 
-### `src/wa/command/*.ts` (control-emitting handlers)
+### `migration/node/wa/command/*.ts` (control-emitting handlers)
 **Change:** Replace `wsClient.sendReliable({ type, … })` with
 `registry.sendReliableToClient(folderPath, { type, folderPath, … })`.
 **Location:** each `wsClient.sendReliable` call.
 
-### `src/wa/connection.ts`
+### `migration/node/wa/connection.ts`
 **Change:** Same replacement for the `set_llm2_model`/`invalidate_*`/
 `whatsapp_status` emits in button handlers and `connection.update`.
 **Location:** `handleButtonResponse`, `setDefaultModel`, `connection.update`.

@@ -13,34 +13,34 @@ Type `sendOutgoing`'s return against the protocol types.
   `folderPath` yet (added in Step 18).
 
 ## Files to read before starting
-- `src/wa/{actions.js,moderation.js,presence.js,runCommand.js,outbound.js,events.js,inbound.js}`
-- `src/protocol/types.ts` (Step 09)
+- Original - `migration/node/wa/{actions.js,moderation.js,presence.js,runCommand.js,outbound.js,events.js,inbound.js}`
+- `migration/node/protocol/types.ts` (Step 09)
 
 ## Files to create
 None beyond renames.
 
 ## Files to modify
-### `src/wa/actions.js` → `actions.ts`
+### `migration/node/wa/actions.js` → `actions.ts`
 **Change:** Type `reactToMessage`, `deleteMessageByContextId`, and the
 `actionError(code, detail)` helper (its `code` is a CONTRACT.md §2 `ErrorCode`).
 
-### `src/wa/moderation.js` → `moderation.ts`
+### `migration/node/wa/moderation.js` → `moderation.ts`
 **Change:** Type `kickMembers` → `ActionResult.kick_member` shape.
 
-### `src/wa/presence.js` → `presence.ts`
+### `migration/node/wa/presence.js` → `presence.ts`
 **Change:** Type `markChatRead`, `sendPresence`.
 
-### `src/wa/runCommand.js` → `runCommand.ts`
+### `migration/node/wa/runCommand.js` → `runCommand.ts`
 **Change:** Type `dispatchRunCommand` → `{ ok, detail, command }`.
 
-### `src/wa/outbound.js` → `outbound.ts`
+### `migration/node/wa/outbound.js` → `outbound.ts`
 **Change:** Type `sendOutgoing` (return `{ sent: SentEntry[]; replyTo: string | null }`),
 `renderOutboundMentions`, `sendLottieSticker`.
 
-### `src/wa/events.js` → `events.ts`
+### `migration/node/wa/events.js` → `events.ts`
 **Change:** Type the three emitters; keep `wsClient.send({ type:'incoming_message', payload })`.
 
-### `src/wa/inbound.js` → `inbound.ts`
+### `migration/node/wa/inbound.js` → `inbound.ts`
 **Change:** Type `handleIncomingMessage`/`handleGroupParticipantsUpdate`; annotate
 the `payload` literal as `WhatsAppMessagePayload` (omitting `folderPath` for now).
 

@@ -11,22 +11,22 @@ is Step 16).
   `send_carousel`, `send_copy_code` (CONTRACT.md §1.2). No wire change.
 
 ## Files to read before starting
-- `src/wa/utils.js`
-- `src/wa/sendQueue.js`
-- `src/wa/interactive/{index.js,sendInteractive.js,sendButtons.js,sendCarousel.js}`
+- Original - `migration/node/wa/utils.js`
+- `migration/node/wa/sendQueue.js`
+- `migration/node/wa/interactive/{index.js,sendInteractive.js,sendButtons.js,sendCarousel.js}`
 
 ## Files to create
 None beyond renames.
 
 ## Files to modify
-### `src/wa/utils.js` → `src/wa/utils.ts`
+### `migration/node/wa/utils.js` → `migration/node/wa/utils.ts`
 **Change:** Type `withTimeout`, `runWithConcurrency`, `escapeRegex`, semaphore.
 
-### `src/wa/sendQueue.js` → `src/wa/sendQueue.ts`
+### `migration/node/wa/sendQueue.js` → `migration/node/wa/sendQueue.ts`
 **Change:** Type `withJidQueue<T>(jid: string, fn: () => Promise<T>): Promise<T>`.
 Keep the module-level `jidQueues` map and behavior unchanged.
 
-### `src/wa/interactive/*.js` → `*.ts`
+### `migration/node/wa/interactive/*.js` → `*.ts`
 **Change:** Type `sendQuickReply`, `sendUrlButtons`, `sendCopyCode`,
 `sendCombinedButtons`, `sendList`, `sendNativeFlow`, `sendRichMessage`,
 `sendLegacyButtons`, `sendTemplate`, `sendCarousel`; convert the barrel

@@ -14,12 +14,12 @@ action methods. This is the surface the agent will use in Phase 5.
 - **CONTRACT.md §7** — `"message"` handler receives a `WhatsAppMessage`.
 
 ## Files to read before starting
-- CONTRACT.md §4 (primary), §1–§3, §7
-- `python/wasocket/{transport,protocol,correlation,events,errors}.py` (Steps 22–26)
-- `python/bridge/messaging/gateway.py` (canonical action frame shapes to mirror)
+- Original - CONTRACT.md §4 (primary), §1–§3, §7
+- `migration/python/wasocket/{transport,protocol,correlation,events,errors}.py` (Steps 22–26)
+- `migration/python/bridge/messaging/gateway.py` (canonical action frame shapes to mirror)
 
 ## Files to create
-### `python/wasocket/socket.py`
+### `migration/python/wasocket/socket.py`
 **Purpose:** `WaSocket` public API + `make_wa_socket` factory.
 **Exports:** `make_wa_socket(folder_path) -> WaSocket`; `class WaSocket`.
 **Must NOT contain:** any agent/LLM/DB logic; any `bridge.*` import.
@@ -37,14 +37,14 @@ action methods. This is the surface the agent will use in Phase 5.
   `action_ack`/`send_ack`→resolve future **and** re-emit as events (D3);
   control events→emit by their type name.
 
-### `python/wasocket/__init__.py`
+### `migration/python/wasocket/__init__.py`
 **Purpose:** Package surface.
 **Exports:** `make_wa_socket`, `WaSocket`, `WhatsAppMessage` (+ the
 `WaSocketError` hierarchy for convenience).
 **Must NOT contain:** logic.
 
 ## Files to create (test support)
-### `python/tests/stub_node_server.py`
+### `migration/python/tests/stub_node_server.py`
 **Purpose:** A minimal asyncio WS server implementing the CONTRACT.md handshake +
 echoing canned acks/events, for SDK integration tests (used when the real
 Step 20 `wsServer` is not run).
@@ -53,7 +53,7 @@ Step 20 `wsServer` is not run).
 `error` `not_found`; can push an `incoming_message` and a `clear_history`.
 
 ## Acceptance criteria
-- `pytest python/tests/test_socket.py` (against `stub_node_server.py`, or the
+- `pytest migration/python/tests/test_socket.py` (against `stub_node_server.py`, or the
   Step 20 `wsServer`):
   - `await sock.connect()` fires the `"ready"` handler after `hello_ack`.
   - `await sock.send_message(chat, "hi")` returns the `result` dict with
@@ -67,7 +67,7 @@ Step 20 `wsServer` is not run).
   succeeds.
 
 ## Must NOT do
-- Do not import anything from `python/bridge/` (SDK is agent-agnostic).
+- Do not import anything from `migration/python/bridge/` (SDK is agent-agnostic).
 - Do not wire the SDK into `main.py` yet (Step 28).
 - Do not add `request_id` formats or error codes not in CONTRACT.md.
 

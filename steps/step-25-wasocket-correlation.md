@@ -12,13 +12,13 @@ that `socket.py` resolves when an `action_ack`/`error` arrives.
   `WaSocketError` on expiry.
 
 ## Files to read before starting
-- CONTRACT.md §2, §3
-- `python/bridge/messaging/processing.py` (`_make_request_id`, `REQUEST_COUNTER`)
+- Original - CONTRACT.md §2, §3
+- `migration/python/bridge/messaging/processing.py` (`_make_request_id`, `REQUEST_COUNTER`)
   — the exact format to port
-- `python/wasocket/errors.py` (Step 22)
+- `migration/python/wasocket/errors.py` (Step 22)
 
 ## Files to create
-### `python/wasocket/correlation.py`
+### `migration/python/wasocket/correlation.py`
 **Purpose:** `request_id` generation + pending-ack futures.
 **Exports:**
 - `make_request_id(tag: str) -> str` — `f"{tag}-{int(time.time()*1000)}-{next(_counter):06d}"`
@@ -42,7 +42,7 @@ None (the bridge keeps its own `_make_request_id` until Step 28).
 None.
 
 ## Acceptance criteria
-- `pytest python/tests/test_correlation.py`:
+- `pytest migration/python/tests/test_correlation.py`:
   - `make_request_id("send")` matches regex `^send-\d{13}-\d{6}$`; two calls give
     strictly increasing `seq6`.
   - `register` then `resolve` resolves the future with the result dict.

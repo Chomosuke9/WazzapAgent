@@ -12,13 +12,13 @@ executed against the correct account's Baileys socket and context, and the
 - **CONTRACT.md §2** — `ErrorCode` mapping (`deriveKickFailure`, `actionErrorCode`).
 
 ## Files to read before starting
-- `src/index.ts` (`dispatchCommand`, `emitActionAck`, `emitActionError`,
+- Original - `migration/node/index.ts` (`dispatchCommand`, `emitActionAck`, `emitActionError`,
   `deriveKickFailure`, `actionErrorCode`, `actionErrorDetail`)
-- `src/server/accountRegistry.ts`, `src/account/accountContext.ts`
-- `src/protocol/types.ts`
+- `migration/node/server/accountRegistry.ts`, `migration/node/account/accountContext.ts`
+- `migration/node/protocol/types.ts`
 
 ## Files to create
-### `src/account/actionDispatcher.ts`
+### `migration/node/account/actionDispatcher.ts`
 **Purpose:** `dispatchAction(entry: AccountEntry, frame: InboundActionFrame): Promise<void>`.
 **Exports:** `dispatchAction`, `emitActionAck`, `emitActionError`.
 **Must NOT contain:** WS server/listener code (Step 20), control-event emission

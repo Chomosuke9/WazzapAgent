@@ -16,19 +16,19 @@ decision D3, option **b**) so behavior is preserved verbatim.
 - **CONTRACT.md §6** — `AckResult` dataclass.
 
 ## Files to read before starting
-- `python/bridge/main.py` — the `event_type in {"send_ack","action_ack"}` block
+- Original - `migration/python/bridge/main.py` — the `event_type in {"send_ack","action_ack"}` block
   (the `send_message` hydration, `pending_send_request_chat`,
   `pending_subagent_attachments`, and `run_command` ack branches)
-- `python/bridge/messaging/processing.py` —
+- `migration/python/bridge/messaging/processing.py` —
   `_hydrate_provisional_context_id_from_ack`, `_extract_send_ack_context_msg_id`,
   `_extract_all_send_ack_entries`
-- `python/wasocket/socket.py` (Step 27 — the `action_ack` event)
+- `migration/python/wasocket/socket.py` (Step 27 — the `action_ack` event)
 
 ## Files to create
 None.
 
 ## Files to modify
-### `python/bridge/main.py`
+### `migration/python/bridge/main.py`
 **Change:** Add `@sock.on("action_ack")` (and `@sock.on("send_ack")` if needed)
 handlers whose bodies are the moved logic from the old loop's ack block:
 `send_message` provisional hydration via
@@ -46,7 +46,7 @@ removed `action_ack`/`send_ack` loop branch).
 None (the old loop block is removed by Step 28).
 
 ## Acceptance criteria
-- `pytest python/tests/test_hydration.py` (driving the agent's ack handler with a
+- `pytest migration/python/tests/test_hydration.py` (driving the agent's ack handler with a
   synthetic `AckResult`):
   - a provisional entry (`context_msg_id="pending"`,
     `message_id="local-send-<rid>"`) becomes the real 6-digit id after an

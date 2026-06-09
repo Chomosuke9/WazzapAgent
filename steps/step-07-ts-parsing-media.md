@@ -10,30 +10,30 @@ that `wa/` consumers can be typed against them later.
   §7 (`Attachment` / `WhatsAppMessage.attachments`). No shape change here.
 
 ## Files to read before starting
-- `src/messageParser.js`
-- `src/participants.js`
-- `src/mediaHandler.js`
-- `src/groupContext.js`
+- Original - `migration/node/messageParser.js`
+- `migration/node/participants.js`
+- `migration/node/mediaHandler.js`
+- `migration/node/groupContext.js`
 
 ## Files to create
 None beyond renames.
 
 ## Files to modify
-### `src/messageParser.js` → `src/messageParser.ts`
+### `migration/node/messageParser.js` → `migration/node/messageParser.ts`
 **Change:** Type `unwrapMessage`, `extractText`, `extractQuoted`,
 `extractMentionedJids`, `extractLocationData`, `formatLocationText`. Logic
 unchanged.
 
-### `src/participants.js` → `src/participants.ts`
+### `migration/node/participants.js` → `migration/node/participants.ts`
 **Change:** Type role flags (`roleFlagsForJid` → `{ isAdmin, isSuperAdmin }`),
 `compactParticipantJids`, name lookups, `isOwnerJid`.
 
-### `src/mediaHandler.js` → `src/mediaHandler.ts`
+### `migration/node/mediaHandler.js` → `migration/node/mediaHandler.ts`
 **Change:** Type `saveMedia` (returns an `Attachment`-shaped object per
 CONTRACT.md §1 `Attachment`), `resolveAllowedAttachmentPath`,
 `detectMimeFromFile`, `normalizeMime`, `inferExtension`.
 
-### `src/groupContext.js` → `src/groupContext.ts`
+### `migration/node/groupContext.js` → `migration/node/groupContext.ts`
 **Change:** Type the group metadata cache shape and `getGroupContext`,
 `getCachedGroupMetadata`, `parseGroupJoinStub`, `setSockAccessor`.
 

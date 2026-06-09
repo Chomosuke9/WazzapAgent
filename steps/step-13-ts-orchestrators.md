@@ -12,24 +12,24 @@ single global `sock` (multi-account is Phase 3).
   Step 18/20).
 
 ## Files to read before starting
-- `src/wa/commandHandler.js`
-- `src/wa/connection.js`
-- `src/wa/index.js`
+- Original - `migration/node/wa/commandHandler.js`
+- `migration/node/wa/connection.js`
+- `migration/node/wa/index.js`
 
 ## Files to create
 None beyond renames.
 
 ## Files to modify
-### `src/wa/commandHandler.js` → `commandHandler.ts`
+### `migration/node/wa/commandHandler.js` → `commandHandler.ts`
 **Change:** Type `handleCommandListener(msg, context)` and the `context` object
 shape and the command `switch`. Behavior unchanged.
 
-### `src/wa/connection.js` → `connection.ts`
+### `migration/node/wa/connection.js` → `connection.ts`
 **Change:** Type `startWhatsApp`, `getSock`, the button/form handlers
 (`handleButtonResponse`, `parseModelReply`, model form helpers). Keep the single
 `let sock` module global for now.
 
-### `src/wa/index.js` → `index.ts`
+### `migration/node/wa/index.js` → `index.ts`
 **Change:** Convert the barrel re-exports.
 
 ## Files to delete

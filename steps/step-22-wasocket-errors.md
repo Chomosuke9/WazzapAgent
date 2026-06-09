@@ -10,12 +10,12 @@ or an ack-wait timeout). Leaf module with no SDK dependencies.
 - **CONTRACT.md §4** — the methods document which subclass each action raises.
 
 ## Files to read before starting
-- CONTRACT.md §2, §4
-- `src/index.ts` `actionErrorCode`/`actionErrorDetail` (Node side that produces
+- Original - CONTRACT.md §2, §4
+- `migration/node/index.ts` `actionErrorCode`/`actionErrorDetail` (Node side that produces
   these codes) — for parity
 
 ## Files to create
-### `python/wasocket/errors.py`
+### `migration/python/wasocket/errors.py`
 **Purpose:** `WaSocketError` hierarchy + code→class mapping.
 **Exports:**
 - `class WaSocketError(Exception)` — base; carries `code`, `detail`, `request_id`,
@@ -40,7 +40,7 @@ None.
 
 ## Acceptance criteria
 - `python -c "import python.wasocket.errors"` imports cleanly.
-- `pytest python/tests/test_errors.py`:
+- `pytest migration/python/tests/test_errors.py`:
   - each of the 6 codes round-trips through `from_error_frame` to the correct
     subclass; `from_error_frame({"code":"weird"})` → base `WaSocketError`.
   - `from_failed_ack({"ok":False,"code":"not_found",...})` → `NotFoundError`.

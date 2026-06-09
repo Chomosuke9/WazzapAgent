@@ -9,17 +9,17 @@ missing types must be declared so `pnpm typecheck` stays clean.
 - None.
 
 ## Files to read before starting
-- `package.json` (`test` script)
+- Original - `package.json` (`test` script)
 - `tests/node/` (existing test layout)
 - `node_modules/.../package.json` `types` fields for `baileys`,
   `better-sqlite3`, `fs-extra`, `pino`, `sharp`, `fluent-ffmpeg` (to find gaps)
 
 ## Files to create
-### `src/types/ambient.d.ts` (only if gaps exist)
+### `migration/node/types/ambient.d.ts` (only if gaps exist)
 **Purpose:** Ambient module declarations for dependencies lacking bundled types.
 **Exports:** `declare module "<dep>"` stubs for the gaps found above only.
 **Must NOT contain:** declarations for deps that already ship types; any
-project type that belongs in `src/protocol/types.ts` (CONTRACT.md §5).
+project type that belongs in `migration/node/protocol/types.ts` (CONTRACT.md §5).
 **Key logic:** Minimal `declare module` shims; prefer installing an `@types/*`
 package where one exists rather than hand-writing a stub.
 

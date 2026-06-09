@@ -3,7 +3,7 @@
 ## Context
 Define the frozen dataclasses for every frame the SDK sends/receives, plus
 encode/decode helpers and the handshake types. These mirror the Node
-`src/protocol/types.ts` field-for-field so the two sides cannot drift.
+`migration/node/protocol/types.ts` field-for-field so the two sides cannot drift.
 
 ## Contract references
 - **CONTRACT.md §6** — implements the dataclasses verbatim (`Hello`, `HelloAck`,
@@ -14,12 +14,12 @@ encode/decode helpers and the handshake types. These mirror the Node
 - **CONTRACT.md §3** — `request_id` is a plain field here (generated in Step 25).
 
 ## Files to read before starting
-- CONTRACT.md §1, §6
-- `src/protocol/types.ts` (Step 09 — the mirror)
-- `python/bridge/messaging/gateway.py` (the current action JSON shapes)
+- Original - CONTRACT.md §1, §6
+- `migration/node/protocol/types.ts` (Step 09 — the mirror)
+- `migration/python/bridge/messaging/gateway.py` (the current action JSON shapes)
 
 ## Files to create
-### `python/wasocket/protocol.py`
+### `migration/python/wasocket/protocol.py`
 **Purpose:** Frozen dataclasses + `encode`/`decode`.
 **Exports:** every dataclass named in CONTRACT.md §6, plus
 - `encode(frame) -> str` — dataclass → JSON string `{type, payload}` (or
@@ -40,7 +40,7 @@ None.
 None.
 
 ## Acceptance criteria
-- `pytest python/tests/test_protocol.py`:
+- `pytest migration/python/tests/test_protocol.py`:
   - round-trip: `decode(encode(x)) == x` for one instance of every action and
     every event dataclass.
   - a golden JSON sample of each action (taken from `gateway.py` / CONTRACT.md
@@ -54,7 +54,7 @@ None.
 ## Must NOT do
 - Do not generate `request_id`s here.
 - Do not open sockets or import `websockets`.
-- Do not diverge field names from `src/protocol/types.ts`.
+- Do not diverge field names from `migration/node/protocol/types.ts`.
 
 ## Depends on
 Step 22.

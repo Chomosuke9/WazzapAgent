@@ -13,15 +13,15 @@ registry. This is what lets one Node process drive N WhatsApp accounts.
   `<folderPath>/db/` (Node is responsible per §8).
 
 ## Files to read before starting
-- `src/wa/connection.ts` (`startWhatsApp`, the global `sock`/`getSock`)
-- `src/account/accountContext.ts` (Step 16)
-- `src/server/accountRegistry.ts` (Step 15)
-- `src/config.ts` (current global `authDir`/db paths)
-- `src/utils/cachedAuthState.js` (auth-state provider)
-- `src/db.ts` (Step 08 — to parameterize DB paths per tenant)
+- Original - `migration/node/wa/connection.ts` (`startWhatsApp`, the global `sock`/`getSock`)
+- `migration/node/account/accountContext.ts` (Step 16)
+- `migration/node/server/accountRegistry.ts` (Step 15)
+- `migration/node/config.ts` (current global `authDir`/db paths)
+- `migration/node/utils/cachedAuthState.js` (auth-state provider)
+- `migration/node/db.ts` (Step 08 — to parameterize DB paths per tenant)
 
 ## Files to create
-### `src/account/baileysFactory.ts`
+### `migration/node/account/baileysFactory.ts`
 **Purpose:** `createOrResumeAccount(opts: BaileysFactoryOptions): Promise<AccountEntry>`.
 **Exports:** `createOrResumeAccount`.
 **Must NOT contain:** the WS server (Step 20), action dispatch (Step 19), event
@@ -39,14 +39,14 @@ forwarding wiring beyond attaching listeners that call into Step 18's forwarder.
 - Idempotent: if `registry.get(folderPath)?.sock` is live, return it.
 
 ## Files to modify
-### `src/wa/connection.ts`
+### `migration/node/wa/connection.ts`
 **Change:** Reduce to shared, account-parameterized helpers (QR print,
 `handleButtonResponse`, `parseModelReply`, model form helpers). Keep a thin
 `getSock()` shim that returns the **first/default** account's sock so the still
 live old boot path (`index.ts`) keeps working until Step 28.
 **Location:** `startWhatsApp` (extracted to the factory), the `let sock` global.
 
-### `src/db.ts`
+### `migration/node/db.ts`
 **Change:** Allow opening DBs under a caller-supplied tenant `db/` directory
 (add a path-injecting init alongside the existing global one). Do **not** remove
 the global path init yet (old boot still uses it).
