@@ -1,0 +1,193 @@
+:root {
+  --ifm-color-primary: #1db954;
+  --ifm-color-primary-dark: #1aa64c;
+  --ifm-color-primary-darker: #189d47;
+  --ifm-color-primary-darkest: #14813b;
+  --ifm-color-primary-light: #21cc5d;
+  --ifm-color-primary-lighter: #27dc67;
+  --ifm-color-primary-lightest: #54e884;
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+  --wazzap-gradient: linear-gradient(135deg, #075E54 0%, #128C7E 45%, #25D366 100%);
+  --wazzap-card-border: rgba(37, 211, 102, 0.18);
+  --wazzap-soft-shadow: 0 16px 45px rgba(7, 94, 84, 0.12);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #25D366;
+  --ifm-color-primary-dark: #20be5b;
+  --ifm-color-primary-darker: #1eb456;
+  --ifm-color-primary-darkest: #189447;
+  --ifm-color-primary-light: #2ae871;
+  --ifm-color-primary-lighter: #3bea7e;
+  --ifm-color-primary-lightest: #5eed96;
+  --ifm-background-color: #0f1419;
+  --ifm-background-surface-color: #151d23;
+  --docusaurus-highlighted-code-line-bg: rgba(37, 211, 102, 0.14);
+  --wazzap-card-border: rgba(37, 211, 102, 0.22);
+  --wazzap-soft-shadow: 0 16px 45px rgba(0, 0, 0, 0.32);
+}
+
+.hero--primary {
+  background: var(--wazzap-gradient);
+  color: #fff;
+}
+
+.hero--primary .hero__title {
+  letter-spacing: -0.04em;
+}
+
+.hero--primary .hero__subtitle {
+  max-width: 760px;
+  margin-inline: auto;
+  opacity: 0.95;
+}
+
+.feature-card {
+  background: var(--ifm-card-background-color, #fff);
+  border: 1px solid var(--wazzap-card-border);
+  border-radius: 18px;
+  padding: 1.75rem;
+  box-shadow: var(--wazzap-soft-shadow);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  height: 100%;
+}
+
+.feature-card:hover {
+  transform: translateY(-5px);
+  border-color: rgba(37, 211, 102, 0.55);
+  box-shadow: 0 20px 50px rgba(7, 94, 84, 0.18);
+}
+
+[data-theme='dark'] .feature-card {
+  background: linear-gradient(180deg, rgba(37, 211, 102, 0.05), rgba(18, 28, 34, 0.9));
+}
+
+[data-theme='dark'] .feature-card:hover {
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+}
+
+.hero .button--secondary {
+  border: 0;
+  color: #075E54;
+  font-weight: 600;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.hero .button:hover {
+  transform: scale(1.05);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+.step-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--wazzap-gradient);
+  color: #fff;
+  font-weight: 700;
+  font-size: 1.1rem;
+  margin-bottom: 0.75rem;
+  flex-shrink: 0;
+}
+
+.how-it-works {
+  background:
+    radial-gradient(circle at top left, rgba(37, 211, 102, 0.16), transparent 30rem),
+    var(--ifm-background-surface-color, #f8f9fa);
+  padding: 3rem 0;
+}
+
+[data-theme='dark'] .how-it-works {
+  background:
+    radial-gradient(circle at top left, rgba(37, 211, 102, 0.12), transparent 30rem),
+    var(--ifm-background-surface-color, #151d23);
+}
+
+.theme-code-block {
+  border: 1px solid rgba(37, 211, 102, 0.18);
+  border-radius: 14px;
+  box-shadow: 0 12px 34px rgba(15, 23, 42, 0.12);
+  overflow: hidden;
+}
+
+[data-theme='dark'] .theme-code-block {
+  border-color: rgba(37, 211, 102, 0.24);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.35);
+}
+
+.theme-code-block pre {
+  padding: 1.25rem !important;
+}
+
+.theme-code-block code {
+  font-size: 0.92rem;
+  line-height: 1.65;
+}
+
+.main-wrapper {
+  animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.alert--warning {
+  border-left-color: #f0ad4e;
+}
+
+.alert--danger {
+  border-left-color: #d9534f;
+}
+
+.navbar {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(12px);
+}
+
+/* Ensure sidebar drawer is usable on mobile */
+@media (max-width: 996px) {
+  .navbar-sidebar {
+    /* Ensure sidebar drawer fully covers viewport */
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  .navbar-sidebar__items {
+    /* Prevent items overflow */
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .navbar-sidebar__back {
+    /* Make back button more tappable */
+    padding: 0.75rem 1rem;
+  }
+
+  /* Ensure sidebar menu items have adequate tap targets */
+  .menu__list-item {
+    padding: 0;
+  }
+
+  .menu__link {
+    padding: 0.5rem 1rem;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+}
+
+.footer__link-item:hover {
+  color: #25D366;
+}

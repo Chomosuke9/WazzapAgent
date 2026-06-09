@@ -1,0 +1,46 @@
+{
+  "link.title.Panduan": {
+    "message": "Guide",
+    "description": "The title of the footer links column with title=Panduan"
+  },
+  "link.title.Lainnya": {
+    "message": "More",
+    "description": "The title of the footer links column with title=Lainnya"
+  },
+  "link.item.label.Mulai di Sini": {
+    "message": "Get Started",
+    "description": "The label of footer link with label=Mulai di Sini"
+  },
+  "link.item.label.Semua Perintah": {
+    "message": "All Commands",
+    "description": "The label of footer link with label=Semua Perintah"
+  },
+  "link.item.label.Contoh Prompt": {
+    "message": "Prompt Examples",
+    "description": "The label of footer link with label=Contoh Prompt"
+  },
+  "link.title.Developer": {
+    "message": "Developer",
+    "description": "The title of the footer links column with title=Developer"
+  },
+  "link.item.label.Arsitektur": {
+    "message": "Architecture",
+    "description": "The label of footer link with label=Arsitektur"
+  },
+  "link.item.label.Instalasi": {
+    "message": "Installation",
+    "description": "The label of footer link with label=Instalasi"
+  },
+  "link.item.label.Protokol WebSocket": {
+    "message": "WebSocket Protocol",
+    "description": "The label of footer link with label=Protokol WebSocket"
+  },
+  "link.item.label.GitHub": {
+    "message": "GitHub",
+    "description": "The label of footer link with label=GitHub"
+  },
+  "copyright": {
+    "message": "Copyright © 2026 WazzapAgents.",
+    "description": "The footer copyright"
+  }
+}

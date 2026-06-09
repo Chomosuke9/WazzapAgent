@@ -1,0 +1,35 @@
+# WazzapAgents
+
+> WhatsApp AI agent system — Baileys v7 gateway + LLM bridge with automated conversation, moderation, and interactive features.
+
+## What this is
+
+WazzapAgents connects a WhatsApp account to LLM services (OpenAI-compatible APIs) via a two-process architecture: a Node.js gateway handles the WhatsApp socket (Baileys v7) and a Python bridge handles LLM routing, response generation, and moderation decisions. Communication between the two processes runs over WebSocket.
+
+## Stack
+
+- **Node.js 18+** (ESM) — WhatsApp gateway via Baileys v7
+- **Python 3.10+** — LLM bridge with LangChain / ChatOpenAI
+- **SQLite** (3 separate DBs) — settings, stats, moderation
+- **WebSocket** — Node ↔ Python JSON protocol
+
+## Architecture
+
+```
+WhatsApp ←→ Node.js Gateway (Baileys v7)
+                  ↕  WebSocket
+            Python Bridge (LLM1 router → LLM2 responder)
+```
+
+- **Node Gateway** (`src/`): WhatsApp socket lifecycle, inbound message normalization, outbound send/react/delete/kick, slash commands, interactive messages
+- **Python Bridge** (`python/bridge/`): Message debounce/batching, LLM1 decision routing, LLM2 response generation, tool call extraction, action dispatch back to Node
+- **LLM1**: Cheap, fast model decides whether to respond (skip/express-only/respond)
+- **LLM2**: Full model generates replies and invokes tools (reply, delete, mute, kick)
+- **Protocol**: Node sends `incoming_message`; Python sends `send_message`, `react_message`, `delete_message`, `kick_member`, etc.; Node returns `action_ack`
+
+## Docs
+
+- `AGENTS.md` — Full developer context for AI coding agents
+- `README.md` — Setup, deployment, and WebSocket protocol reference
+- `docs/llm-architecture/` — Detailed architecture docs (00–05 series)
+- `.env.example` — All environment variables with descriptions

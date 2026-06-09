@@ -1,0 +1,74 @@
+{
+  "homepage.tagline": {
+    "message": "An AI-powered WhatsApp bot that can chat, moderate groups, and be fully customized to your liking.",
+    "description": "The tagline on the homepage"
+  },
+  "homepage.cta.getStarted": {
+    "message": "Get Started",
+    "description": "The get started button on the homepage"
+  },
+  "homepage.cta.viewCommands": {
+    "message": "View Commands",
+    "description": "The view commands button on the homepage"
+  },
+  "homepage.howItWorks.title": {
+    "message": "How It Works",
+    "description": "The how it works section title"
+  },
+  "homepage.howItWorks.step1.title": {
+    "message": "Add the Bot",
+    "description": "Step 1 title"
+  },
+  "homepage.howItWorks.step1.desc": {
+    "message": "Add the bot's number to your WhatsApp group just like adding a regular member.",
+    "description": "Step 1 description"
+  },
+  "homepage.howItWorks.step2.title": {
+    "message": "Set the Prompt",
+    "description": "Step 2 title"
+  },
+  "homepage.howItWorks.step2.desc": {
+    "message": "Define the bot's personality and rules with the /prompt command.",
+    "description": "Step 2 description"
+  },
+  "homepage.howItWorks.step3.title": {
+    "message": "Ready to Go!",
+    "description": "Step 3 title"
+  },
+  "homepage.howItWorks.step3.desc": {
+    "message": "The bot is instantly active and can chat with all group members.",
+    "description": "Step 3 description"
+  },
+  "homepage.feature1.title": {
+    "message": "AI Assistant on WhatsApp",
+    "description": "Feature 1 title"
+  },
+  "homepage.feature1.desc": {
+    "message": "An AI-powered bot that can chat naturally, answer questions, joke around, and help group members.",
+    "description": "Feature 1 description"
+  },
+  "homepage.feature2.title": {
+    "message": "Automatic Moderation",
+    "description": "Feature 2 title"
+  },
+  "homepage.feature2.desc": {
+    "message": "Can automatically delete spam messages or kick troublesome members according to rules you set.",
+    "description": "Feature 2 description"
+  },
+  "homepage.feature3.title": {
+    "message": "Fully Customizable",
+    "description": "Feature 3 title"
+  },
+  "homepage.feature3.desc": {
+    "message": "Set the bot's personality, role, and rules with the /prompt command. Different for each group.",
+    "description": "Feature 3 description"
+  },
+  "homepage.layout.title": {
+    "message": "User Guide",
+    "description": "The homepage layout title"
+  },
+  "homepage.layout.description": {
+    "message": "Complete documentation for using WazzapAgents — an AI-powered WhatsApp bot",
+    "description": "The homepage layout description"
+  }
+}

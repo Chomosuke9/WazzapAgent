@@ -1,0 +1,12 @@
+node_modules
+pnpm-lock.yaml
+data/
+.env
+*.pyc
+.venv/
+__pycache__/
+
+# Docusaurus
+website/.docusaurus
+website/build
+website/node_modules

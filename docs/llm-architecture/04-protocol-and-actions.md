@@ -1,0 +1,143 @@
+# 04 - Protocol and Actions
+
+## Node → Python events
+
+### `incoming_message`
+The primary event containing a normalized chat message payload. Sent for every
+inbound message that passes the activation gate. Bot-originated messages are
+forwarded as `contextOnly: true` for context enrichment without triggering LLM1.
+
+Key fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `instanceId` | `string` | Bot instance identifier (always present) |
+| `chatId` | `string` | Chat JID (`12345@g.us` or `12345@s.whatsapp.net`) |
+| `chatType` | `string` | `"group"` or `"private"` |
+| `chatName` | `string` | Display name of the chat |
+| `senderId` | `string` | Sender JID |
+| `senderRef` | `string` | Short 6-char LLM-friendly reference (e.g. `u8k2d1`) |
+| `senderName` | `string` | Sender display name |
+| `senderIsAdmin` | `boolean` | Sender is a group admin |
+| `senderIsSuperAdmin` | `boolean` | Sender is a WhatsApp community super-admin |
+| `senderIsOwner` | `boolean` | Sender is a bot owner (from `BOT_OWNER_JIDS`) |
+| `isGroup` | `boolean` | Whether the chat is a group |
+| `botIsAdmin` | `boolean` | Bot has admin role in the group |
+| `botIsSuperAdmin` | `boolean` | Bot is a WhatsApp community super-admin |
+| `fromMe` | `boolean` | Message was sent by the bot itself |
+| `contextOnly` | `boolean` | `true` for bot's own echoed messages (enrich context only, do not trigger LLM1) |
+| `triggerLlm1` | `boolean` | Whether LLM1 should process this message. `false` for bot's own messages and context-only entries. |
+| `contextMsgId` | `string` | 6-digit per-chat sequence number (`000000`–`999999`, wraps) |
+| `messageId` | `string` | WhatsApp native message ID (`wamid-...`) |
+| `timestampMs` | `number` | Unix timestamp in milliseconds |
+| `messageType` | `string` | WhatsApp message type. Synthetic types not from WhatsApp: `"actionLog"` (bot action context events), `"groupParticipantsUpdate"` (join/leave events), `"botRoleChange"` (bot promoted/demoted). |
+| `text` | `string\|null` | Message text content |
+| `quoted` | `object\|null` | Quoted/replied-to message: `{ messageId, contextMsgId, senderId, text, type }` |
+| `attachments` | `array` | Media attachments: `[{ kind, mime, fileName, size, path, isAnimated }]` |
+| `mentionedJids` | `string[]` | Raw JIDs of mentioned participants |
+| `mentionedParticipants` | `array` | Resolved mentions as `[{ jid, senderRef, name }]` — prefer over `mentionedJids` |
+| `botMentioned` | `boolean` | Bot was `@`-mentioned |
+| `repliedToBot` | `boolean` | Message is a direct reply to a bot message |
+| `location` | `object\|null` | Location data `{ degreesLatitude, degreesLongitude }` or `null` |
+| `groupDescription` | `string\|null` | Group description text for LLM context |
+| `slashCommand` | `object\|null` | Parsed slash command: `{ command, args }` or `null` |
+| `commandHandled` | `boolean` | Whether this slash command was already processed by Node (Python should not re-process) |
+| `actionLog` | `object\|null` | Present when `messageType === "actionLog"`: `{ action, result }` details |
+
+### Control events
+
+`hello` is sent once via `send()` (best-effort handshake). All other control events use `sendReliable()`.
+
+| Event | Payload | Trigger |
+|-------|---------|---------|
+| `hello` | `{ instanceId, role }` | Sent once when WS opens (handshake); uses `send()` |
+| `whatsapp_status` | `{ status, reason?, instanceId }` | WhatsApp connection state changes |
+| `clear_history` | `{ chatId }` or `{ chatId: "global" }` | After `/reset` |
+| `set_llm2_model` | `{ chatId, modelId }` or `{ chatId: "global", modelId }` or `{ chatId, modelId: null }` (when model is deleted) | After `/model` |
+| `invalidate_llm2_model` | `{ chatId }` or `{ chatId: "global" }` | After model config change |
+| `invalidate_default_model` | `{}` | After `/modelcfg` |
+| `invalidate_chat_settings` | `{ chatId }` or `{ chatId: "global" }` | After `/mode`, `/prompt`, `/permission`, `/trigger`, `/idle`, or `/announcement` changes |
+| `set_subagent_enabled` | `{ chatId, enabled }` | After `/subagent on\|off` |
+
+See `README.md` for full payload shape examples for each control event.
+
+## Python → Node actions
+
+| Action | Required fields | Description |
+|--------|----------------|-------------|
+| `send_message` | `chatId`, `text` | Send text/media reply (see README for attachment, sticker, and mention formats) |
+| `react_message` | `chatId`, `contextMsgId`, `emoji` | React with a single emoji |
+| `delete_message` | `chatId`, `contextMsgId` | Delete a message by its contextMsgId |
+| `kick_member` | `chatId`, `targets[]` | Remove members from group (validates senderRef + anchorContextMsgId) |
+| `mark_read` | `chatId`, `messageId` | Mark messages as read |
+| `send_presence` | `chatId`, `type` | Send typing (`"composing"`) or paused indicator |
+| `send_quiz` | `chatId`, `question`, `choices[]` | Send multiple-choice quiz with quick-reply buttons (2–5 choices, mobile only) |
+| `send_copy_code` | `chatId`, `code` | Send CTA copy-code interactive message (mobile only) |
+| `relay_lottie_sticker` | `chatId`, `lottiePayload` | Relay stored Lottie sticker JSON preserving full animation |
+| `send_buttons` | `chatId`, `text`, `buttons` | NativeFlow button message (legacy) |
+| `send_carousel` | `chatId`, `cards[]` | Swipeable carousel cards |
+| `run_command` | `chatId`, `command` | Execute a slash command silently (not posted to WhatsApp). Optional `contextMsgId` for anchor. |
+
+## Ack/Error responses (Node → Python)
+
+| Type | Fields | Description |
+|------|--------|-------------|
+| `action_ack` | `requestId`, `action`, `ok`, `detail`, `result?`, `code?` | Action result confirmation — emitted for most actions (not for `mark_read` or `send_presence` on success) |
+| `send_ack` | `requestId` | Legacy compat — emitted alongside `action_ack` for successful `send_message` |
+| `error` | `message`, `detail`, `code`, `requestId?`, `action?` | Action failure with stable error code |
+
+### Stable error codes
+
+| Code | Meaning |
+|------|---------|
+| `not_found` | The target message or resource was not found (e.g. invalid `contextMsgId`) |
+| `not_group` | The action requires a group chat but was sent to a private chat (e.g. `kick_member`) |
+| `permission_denied` | The bot lacks the required role (admin/superadmin) for this action |
+| `invalid_target` | The target `senderRef` or `contextMsgId` is malformed or unresolvable |
+| `send_failed` | The underlying WhatsApp send operation failed (network, media, rate-limit) |
+
+### action_ack result formats
+
+The `result` field is action-specific:
+
+| Action | result shape |
+|--------|-------------|
+| `send_message` | `{ sent: Array<{kind, contextMsgId, messageId}>, replyTo: string\|null }` |
+| `react_message` | `{ contextMsgId }` |
+| `delete_message` | `{ contextMsgId }` |
+| `kick_member` | `{ succeeded: int, failed: int, results: [{ target, ok, detail? }] }` |
+| `run_command` | `{ command: string\|null }` on success, `{ command: null, error: string }` on error |
+| `send_quiz` | `{ contextMsgId, messageId }` |
+| `send_copy_code` | Raw Baileys message object from `generateWAMessageFromContent` (the full `msg` with `key`, `message`, etc.) |
+| `relay_lottie_sticker` | `{ contextMsgId, messageId }` |
+| `send_buttons` | Raw Baileys message object from `generateWAMessageFromContent` (the full `msg` with `key`, `message`, etc.) |
+| `send_carousel` | Raw Baileys message object from `generateWAMessageFromContent` (the full `msg` with `key`, `message`, etc.) |
+
+See `README.md` § *Acknowledgements and errors* for full JSON examples.
+
+## Quiz message tracking
+
+When the LLM sends a `send_quiz` action, the Node gateway tracks the WhatsApp
+message ID of the sent quiz in an in-memory `quizMessageIds` Set (bounded to
+2000 entries via FIFO eviction). When the user taps a quiz button, WhatsApp
+sends a `templateButtonReplyMessage` that arrives as a normal
+`incoming_message`. The Python bridge does not need to distinguish quiz
+replies from other messages — it simply processes all incoming messages.
+
+The `quizMessageIds` set exists on the Node side to distinguish quiz button
+replies from settings menu replies (both use the same button interaction
+path). Quiz button replies are forwarded to the LLM; settings menu replies
+are handled locally and suppressed.
+
+Bots send a synthetic `[QUESTION SENT]` history entry so LLM2 sees its own
+quiz on the next turn.
+
+## Reliability contract
+- Critical control events from Node to Python **must** use `sendReliable()` to survive WS reconnects.
+- If WS is not open, reliable events are stored in an in-memory queue (max 1000 entries, oldest dropped on overflow).
+- The queue is flushed when the connection reopens.
+- Regular `incoming_message` events use `send()` (best-effort) because they're transient.
+
+## Full payload reference
+See `README.md` for the complete `incoming_message`, `send_message`, and all
+other action payload contracts with full JSON examples.
