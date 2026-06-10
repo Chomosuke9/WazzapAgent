@@ -1,0 +1,69 @@
+/**
+ * index.ts — live boot entry (Step 28: WS topology flip).
+ *
+ * Before this step Node dialled OUT to the Python WS server
+ * (`startWhatsApp()` + a single outbound WS client) and routed inbound action
+ * frames through an in-file `dispatchCommand` copy. After the flip Node is the WS
+ * SERVER: each Python `WaSocket` client dials in, announces its tenant via the
+ * `hello` handshake, and the per-account `actionDispatcher` (wired through
+ * `wsServer`/`accountRegistry`) owns ALL action routing + ack/error emission.
+ *
+ * `index.ts` is now the thin entry: initialise the DBs, start the WS server on
+ * `WS_LISTEN_PORT`, and handle shutdown signals. Node no longer dials out — the
+ * canonical action dispatcher lives in `account/actionDispatcher.ts` and Baileys
+ * sockets are created on `hello` by `account/baileysFactory.ts`.
+ */
+import logger from './logger.js';
+import config from './config.js';
+import { init as dbInit, closeAllDbs } from './db.js';
+import { startWsServer } from './server/wsServer.js';
+import type { WebSocketServer } from 'ws';
+
+let wss: WebSocketServer | undefined;
+
+async function bootstrap(): Promise<void> {
+  await dbInit();
+  // Start the inbound WS server. Each Python WaSocket client connects here and
+  // is bound to its tenant account by the server's `hello` handshake; action
+  // routing is delegated to `account/actionDispatcher.ts`.
+  wss = startWsServer(config.wsListenPort);
+}
+
+let shuttingDown = false;
+
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info({ signal }, 'shutting down');
+  try {
+    if (wss) {
+      await new Promise<void>((resolve) => {
+        wss!.close(() => resolve());
+      });
+    }
+  } catch (err) {
+    logger.error({ err }, 'ws server close failed during shutdown');
+  }
+  closeAllDbs();
+  process.exit(0);
+}
+
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => {
+    shutdown(signal).catch((err) => logger.error({ err }, 'shutdown error'));
+  });
+}
+
+bootstrap().catch((err) => {
+  logger.error({ err }, 'bootstrap failed');
+  closeAllDbs();
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  logger.error({ reason }, 'unhandledRejection');
+});
+
+process.on('uncaughtException', (err) => {
+  logger.error({ err }, 'uncaughtException');
+});

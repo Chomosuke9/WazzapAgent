@@ -7,61 +7,104 @@
 
 ## Project Overview
 
-**WazzapAgents** is a WhatsApp AI agent system that connects a WhatsApp account to
+**WazzapAgents** is a WhatsApp AI agent system that connects WhatsApp accounts to
 an LLM service, enabling automated conversation, moderation, and interactive
-features in group and private chats.
+features in group and private chats. Post-migration it supports **multiple
+accounts** (tenants), one per `folder_path`, each fully isolated (CONTRACT.md §8).
 
 **Tech stack:**
-- **Node.js 18+** (ESM) — WhatsApp gateway via Baileys v7
-- **Python 3.10+** — LLM bridge with LangChain / ChatOpenAI
-- **SQLite** — per-chat settings, model configs, moderation state, dashboard stats
-- **WebSocket** — Node ↔ Python protocol (JSON over WS)
+- **Node.js 18+** (ESM/TS) — WhatsApp gateway via Baileys v7; **WebSocket server**
+- **Python 3.10+** — LLM bridge with LangChain / ChatOpenAI; **WaSocket client(s)**
+- **SQLite** — per-tenant settings, model configs, moderation state, dashboard stats
+- **WebSocket** — Node ↔ Python protocol (JSON over WS, CONTRACT.md §1)
+
+> **Reversed topology (post-migration):** the Node gateway is now the WS
+> **server** (binds `WS_LISTEN_PORT`, default `3000`); each Python `WaSocket`
+> **client** dials it at `NODE_URL` and announces its tenant `folder_path` in a
+> `hello`/`hello_ack` handshake. `CONTRACT.md` is the single source of truth for
+> the wire protocol (§1), the `make_wa_socket` SDK (§4), and the per-tenant
+> folder layout (§8).
 
 **Architecture at a glance:**
 
 ```
-WhatsApp (phone)
-      ↕  (Baileys v7 socket, multi-file auth)
-┌─────────────────────────────────────────┐
-│  Node.js Gateway  (src/)                │
-│  ├─ WhatsApp socket lifecycle            │
-│  ├─ Inbound: message parser → WS send   │
-│  ├─ Outbound: WS recv → WA send         │
-│  ├─ Slash commands & interactive msgs    │
-│  ├─ Action dispatcher (react/delete/kick)│
-│  └─ Mute enforcement (delete before      │
-│       forwarding to Python)              │
-└──────────┬────────────────────────────────┘
-           │ WebSocket (LLM_WS_ENDPOINT)
-           │   ↕ incoming_message (best-effort)
-           │   ↕ state-sync events (sendReliable)
-           │   ↕ actions (Python→Node)
-           │   ↕ action_ack (Node→Python)
-┌──────────▼────────────────────────────────┐
-│  Python Bridge  (python/bridge/)          │
-│  ├─ Mute enforcement (delete before       │
-│  │   debounce, for muted members)         │
-│  ├─ Activation gate (REQUIRE_ACTIVATION)  │
-│  ├─ Bot role change auto-response         │
-│  ├─ Message debounce/batch                │
-│  │   (skipped for private/prefix/hybrid)   │
-│  ├─ LLM1: should-respond gating router    │
-│  ├─ LLM2: response generation + tools     │
-│  ├─ Tool extraction → action commands     │
-│  ├─ Sub-agent integration (webhook        │
-│  │   server, subtask tracker, correction  │
-│  │   re-dispatch)                         │
-│  ├─ Reply dedup, echo merge               │
-│  ├─ Idle trigger (probabilistic ping)     │
-│  └─ Action dispatch back to Node          │
-└───────────────────────────────────────────┘
+  phone A        phone B          ← one WhatsApp account per tenant (per-tenant auth)
+     ↕              ↕
+┌──────────────────────────────────────────────────────────┐
+│  Node.js Gateway — WS SERVER, listens on WS_LISTEN_PORT    │
+│  migration/node/                                           │
+│  ├─ server/   wsServer (accept), accountRegistry (bind)    │
+│  ├─ account/  baileysFactory, accountContext,              │
+│  │            actionDispatcher, eventForwarder             │
+│  │            (one AccountEntry per folder_path)           │
+│  ├─ wa/       inbound / outbound / actions / moderation    │
+│  └─ protocol/ types.ts (wire types, CONTRACT §5)           │
+└──────────────────────────────────────────────────────────┘
+        ▲  hello / hello_ack (§1.1)        ▲
+        │  incoming_message, whatsapp_status, control        │  actions (Py→Node):
+        │  events, acks  (Node→Python)                       │  send_message, react,
+   dial │ NODE_URL                                      dial │  delete, kick, …
+┌───────┴────────────────┐                  ┌────────────────┴───────┐
+│ Python WaSocket A       │                  │ Python WaSocket B       │
+│ folder_path=tenants/a   │                  │ folder_path=tenants/b   │
+│  wasocket/ (SDK §4)     │                  │  wasocket/ (SDK §4)     │
+│  bridge/session.py:     │                  │  bridge/session.py:     │
+│  ├─ Mute enforcement    │                  │  ├─ Mute enforcement    │
+│  ├─ Activation gate     │                  │  ├─ Activation gate     │
+│  ├─ debounce/batch      │                  │  ├─ debounce/batch      │
+│  ├─ LLM1 router         │                  │  ├─ LLM1 router         │
+│  ├─ LLM2 + tools        │                  │  ├─ LLM2 + tools        │
+│  ├─ Sub-agent integ.    │                  │  ├─ Sub-agent integ.    │
+│  ├─ Reply dedup/echo    │                  │  ├─ Reply dedup/echo    │
+│  ├─ Idle trigger        │                  │  ├─ Idle trigger        │
+│  └─ Action dispatch     │                  │  └─ Action dispatch     │
+└─────────────────────────┘                  └─────────────────────────┘
+ <tenants/a>/{auth,db,media,stickers}   <tenants/b>/{auth,db,media,stickers}
+            (CONTRACT §8 — fully isolated per tenant)
 ```
+
+The bridge loads an accounts list (`bridge/accounts.py`) and runs one
+`WaSocket`/`AgentSession` per `folder_path`; a single account is the degenerate
+case.
 
 ---
 
 ## Directory Structure
 
+> **Post-migration layout (`migration/`)** — the live, multi-account runtime.
+> The original `src/` (Node) and `python/` (Python) trees below are the
+> pre-migration source and are kept **read-only** for reference; the modules
+> they describe map onto the `migration/` tree.
+
 ```
+migration/node/               Node.js gateway runtime (WS SERVER, TS)
+  index.ts                    Bootstrap: config, ws server, per-tenant accounts
+  config.ts                   Env parsing (WS_LISTEN_PORT, data dirs, DB paths)
+  server/
+    wsServer.ts               WS server: accept clients on WS_LISTEN_PORT, heartbeat
+    accountRegistry.ts        Bind each client to its folder_path AccountEntry
+  account/
+    baileysFactory.ts         Create/resume the per-tenant Baileys socket + dirs
+    accountContext.ts         Per-account caches / identifiers / sendQueue
+    actionDispatcher.ts       Dispatch Python→Node actions for one account
+    eventForwarder.ts         Forward Node→Python events (per-account reliableQueue)
+  protocol/
+    types.ts                  Wire types (CONTRACT §5): frames, WaStatus, AccountEntry
+  wa/                         WhatsApp modules (inbound/outbound/actions/moderation/cmds)
+migration/python/             Python bridge + WaSocket SDK (WS CLIENTS)
+  wasocket/                   make_wa_socket SDK (CONTRACT §4)
+    __init__.py               Re-exports make_wa_socket, WaSocket, WhatsAppMessage
+    socket.py                 WaSocket class + make_wa_socket factory
+    transport.py              WSClientTransport: dial NODE_URL, reconnect, heartbeat
+    protocol.py / events.py   Frame dataclasses (§6) + WhatsAppMessage model (§7)
+    correlation.py / errors.py requestId correlation + WaSocketError hierarchy (§2/§3)
+  bridge/
+    main.py                   Boot: load accounts, build one AgentSession per account
+    accounts.py               Multi-account config loader (ACCOUNTS_JSON/FOLDER_PATHS)
+    session.py                AgentSession: per-account state, handlers, run lifecycle
+    db.py                     Per-tenant SQLite CRUD (resolves under <folder_path>/db)
+    (llm/ messaging/ subagent/ tools/ — same modules as the python/bridge tree)
+
 src/                          Node.js gateway runtime
   index.js                    Bootstrap: DB init, WA socket, WS client, action dispatcher
   wsClient.js                 WS client: send() (best-effort) / sendReliable() (queued)
@@ -282,21 +325,32 @@ Each uses `WAL` mode for concurrent reads.
 
 ## WebSocket Protocol
 
-### Node → Python (inbound events)
+Reversed topology (CONTRACT.md §1): **Node is the WS server**, each **Python
+`WaSocket` is the client**. After the `hello`/`hello_ack` handshake, **actions**
+flow Python→Node and **events, control events and acks** flow Node→Python. Every
+Node→Python frame carries `folderPath` for tenant routing.
+`WaStatus = "open" | "connecting" | "close"`. Guarantees follow CONTRACT.md §1.6
+("reliable" = queued + flushed on reconnect; "best-effort" = dropped if not OPEN).
 
-| Type | Send Mode | Description |
+### Handshake (CONTRACT §1.1)
+
+| Type | Direction | Guarantee | Payload |
+|------|-----------|-----------|---------|
+| `hello` | Python → Node | reliable | `{folderPath, protocolVersion: "2.0"}` |
+| `hello_ack` | Node → Python | reliable | `{folderPath, waStatus}` (sent once the account's Baileys socket is created/resumed + client bound) |
+
+### Node → Python (events & control events)
+
+| Type | Guarantee | Description |
 |------|-----------|-------------|
-| `hello` | `send()` | Handshake on connect: `{instanceId, role: "whatsapp-gateway"}` |
-| `incoming_message` | `send()` | Normalized WhatsApp message payload (best-effort, drops if disconnected) |
-| `whatsapp_status` | `sendReliable()` | Connection state changes (connected/disconnected) |
-| `clear_history` | `sendReliable()` | After `/reset` — clears history for `chatId` or `"global"` |
-| `set_llm2_model` | `sendReliable()` | Authoritative model change sync: `{chatId, modelId}` |
-| `invalidate_llm2_model` | `sendReliable()` | Invalidate cached model for `chatId` or `"global"` |
-| `invalidate_default_model` | `sendReliable()` | After `/modelcfg` changes |
-| `invalidate_chat_settings` | `sendReliable()` | After `/mode`, `/prompt`, `/permission`, `/trigger` changes |
-| `set_subagent_enabled` | `sendReliable()` | After `/subagent` toggle: `{chatId, enabled}` |
-
-### Python → Node (actions)
+| `incoming_message` | best-effort | Normalized WhatsApp message payload (drops if disconnected) |
+| `whatsapp_status` | reliable | Connection state changes: `{folderPath, status, reason?, instanceId}` |
+| `clear_history` | reliable | After `/reset` — clears history for `chatId` or `"global"` (top-level + `folderPath`) |
+| `set_llm2_model` | reliable | Authoritative model change sync: `{folderPath, chatId, modelId}` (top-level) |
+| `invalidate_llm2_model` | reliable | Invalidate cached model for `chatId` or `"global"` (top-level) |
+| `invalidate_default_model` | reliable | After `/modelcfg` changes: `{folderPath}` (top-level) |
+| `invalidate_chat_settings` | reliable | After `/mode`, `/prompt`, `/permission`, `/trigger`, `/idle`, `/announcement` (top-level) |
+| `set_subagent_enabled` | reliable | After `/subagent` toggle: `{folderPath, chatId, enabled}` (top-level) |
 
 | Type | Description |
 |------|-------------|
@@ -382,11 +436,22 @@ Each uses `WAL` mode for concurrent reads.
 
 ### Environment variables
 
-See `.env.example` for the complete reference. Required:
+See `.env.example` for the complete reference.
+
+**Transport (reversed topology) — required:**
 
 | Variable | Description |
 |----------|-------------|
-| `LLM_WS_ENDPOINT` | WebSocket URL to Python bridge (e.g., `ws://localhost:8080/ws`) |
+| `WS_LISTEN_PORT` | Node server listen port (the gateway binds a ws server here). Default `3000`. |
+| `NODE_URL` | URL each Python `WaSocket` client dials. Default `ws://localhost:3000`. |
+
+**Accounts / multi-tenant (Python side):**
+`ACCOUNTS_JSON` (path to a JSON accounts file; per-account `node_url` overrides
+`NODE_URL`), `FOLDER_PATHS` (comma-separated tenant folders sharing `NODE_URL`),
+`FOLDER_PATH` (single-account fallback; or `DATA_DIR`, or repo default
+`migration/data`). Each tenant folder is `<folder_path>/{auth,db,media,stickers}`
+(CONTRACT.md §8). Resolution order: `ACCOUNTS_JSON` → `FOLDER_PATHS` →
+single-account fallback.
 
 **Node Gateway:**
 `INSTANCE_ID`, `BOT_OWNER_JIDS`, `ASSISTANT_NAME`, `REQUIRE_ACTIVATION`,
@@ -395,7 +460,6 @@ See `.env.example` for the complete reference. Required:
 `WS_RECONNECT_MAX_MS` (cap for exponential backoff, default 60000),
 `WS_RECONNECT_JITTER_RATIO` (+/- jitter fraction 0..1, default 0.2),
 `WS_HEARTBEAT_INTERVAL_MS` (ping cadence and detection granularity when connected, default 20000),
-`WS_HEARTBEAT_TIMEOUT_MS` (completely ignored — kept only for `.env` backwards compatibility; parsed but no longer used, default 20000),
 `GROUP_METADATA_TIMEOUT_MS`, `DOWNLOAD_TIMEOUT_MS`, `SEND_TIMEOUT_MS`,
 `UPSERT_CONCURRENCY`, `PERF_LOG_ENABLED`, `PERF_LOG_THRESHOLD_MS`
 
@@ -436,7 +500,9 @@ true = interactive card via sendRichMessage, mobile only),
 `BOT_SETTINGS_DB_PATH`, `BOT_STATS_DB_PATH`, `BOT_MODERATION_DB_PATH`
 
 **SubAgent:**
-`SUBAGENT_URL`, `SUBAGENT_WEBHOOK_PORT` (default 8081),
+`SUBAGENT_URL`, `SUBAGENT_WEBHOOK_PORT` (BASE port, default 8081; multi-account:
+account N binds `SUBAGENT_WEBHOOK_PORT + N`, index 0 keeps the base so
+single-account is unchanged),
 `SUBAGENT_WEBHOOK_URL`, `SUBAGENT_WAIT_TIMEOUT_S` (default 300),
 `SUBAGENT_MAX_WAIT_S` (default 1800), `SUBAGENT_ENABLED_DEFAULT` (default false),
 `SUBAGENT_INPUT_STAGING_DIR`, `SUBAGENT_MAX_INLINE_FILE_BYTES`, `SUBAGENT_WEBHOOK_MAX_BODY_BYTES`
@@ -498,9 +564,7 @@ these for exact cost calculation.
   still sees exponential backoff. A per-connection heartbeat uses the canonical
   `ws`-docs `isAlive` pattern: the interval at `WS_HEARTBEAT_INTERVAL_MS` is
   both pinger and reaper, so the interval itself is the detection granularity
-  and there is no second timer to race. `WS_HEARTBEAT_TIMEOUT_MS` is kept for
-  backwards compatibility with existing `.env` files but is effectively a
-  no-op under the new scheme. This mirrors the Python server's symmetrical
+  and there is no second timer to race. This mirrors the Python server's symmetrical
   `ping_interval=20, ping_timeout=20` in `python/bridge/main.py`.
 - If Node restarts, Python must reconnect. There's no persistent queue on the
   Python side — in-flight batches are lost.

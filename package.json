@@ -6,10 +6,11 @@
   "type": "module",
   "scripts": {
     "postinstall": "node scripts/patch-baileys.js",
-    "dev": "node src/index.js",
-    "start": "node src/index.js",
+    "dev": "tsx migration/node/index.js",
+    "start": "tsx migration/node/index.js",
+    "typecheck": "tsc --noEmit",
     "lint": "echo \"lint not configured\"",
-    "test": "node --test 'tests/node/**/*.test.mjs'",
+    "test": "node --test --import tsx 'tests/**/*.test.mjs' 'tests/**/*.test.ts'",
     "stress:db": "node tests/db-stress/stress.mjs"
   },
   "keywords": [
@@ -31,6 +32,15 @@
     "pino": "^8.21.0",
     "sharp": "^0.33.5",
     "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "7.6.13",
+    "@types/fluent-ffmpeg": "2.1.28",
+    "@types/fs-extra": "11.0.4",
+    "@types/node": "25.9.2",
+    "@types/ws": "8.18.1",
+    "tsx": "4.22.4",
+    "typescript": "6.0.3"
   },
   "packageManager": "pnpm@10.30.3"
 }
