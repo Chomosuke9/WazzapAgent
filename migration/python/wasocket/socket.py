@@ -156,6 +156,9 @@ class WaSocket:
             logger.warning("disconnect: transport close failed: %r", err)
         finally:
             self._handshake_done = False
+            # Fail fast: reject any in-flight awaited actions so callers don't
+            # hang for the full ack timeout after the socket is torn down.
+            self._pending.reject_all(WaSocketError("WaSocket disconnected"))
 
     # ------------------------------------------------------------------ #
     # Event registration (CONTRACT §4)

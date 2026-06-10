@@ -354,7 +354,11 @@ class WSClientTransport:
 
             # --- handshake: send hello, await hello_ack (CONTRACT.md §1.1) ---
             await conn.send(self._encode(self._hello_frame))
-            raw = await conn.recv()
+            try:
+                raw = await asyncio.wait_for(conn.recv(), timeout=self._open_timeout)
+            except asyncio.TimeoutError:
+                logger.warning("hello_ack not received within %ss; closing", self._open_timeout)
+                return
             type_str, _parsed = protocol.decode(raw if isinstance(raw, str) else raw.decode())
             if type_str != "hello_ack":
                 logger.warning("expected hello_ack, got %r; closing", type_str)

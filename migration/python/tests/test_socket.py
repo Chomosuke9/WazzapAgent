@@ -295,3 +295,40 @@ def test_mark_read_fire_and_forget():
             await server.stop()
 
     assert _run(scenario) is True
+
+
+# ===========================================================================
+# (regression) disconnect() must fail-fast in-flight awaited actions.
+#     WaSocket.disconnect() calls self._pending.reject_all(...), so a caller
+#     awaiting an action's ack at disconnect time is rejected immediately
+#     instead of hanging for the full ack timeout. Before the fix reject_all
+#     was never called and the future waited out its (e.g. 30s) expiry.
+# ===========================================================================
+
+
+def test_disconnect_rejects_in_flight_pending_acks():
+    import asyncio
+    import tempfile
+    from wasocket import make_wa_socket
+    from wasocket.errors import WaSocketError
+
+    async def scenario():
+        with tempfile.TemporaryDirectory(prefix="sock_reject_") as tmp:
+            sock = make_wa_socket(tmp, ack_timeout=30.0)
+            # Register a pending-ack future exactly as an in-flight action would.
+            fut = sock._pending.register("req-test-1", timeout=30.0)
+            assert not fut.done()
+
+            # Graceful disconnect must reject the outstanding future fast.
+            await asyncio.wait_for(sock.disconnect(), timeout=5.0)
+
+            # The future must already be rejected with a WaSocketError; a fast
+            # bounded await proves it did NOT wait out the 30s ack timeout.
+            try:
+                await asyncio.wait_for(fut, timeout=1.0)
+                raise AssertionError("pending ack should have been rejected on disconnect")
+            except WaSocketError:
+                pass  # expected: rejected fast on disconnect
+        return True
+
+    assert asyncio.run(asyncio.wait_for(scenario(), timeout=30)) is True

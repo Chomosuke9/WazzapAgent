@@ -399,6 +399,7 @@ async function handleButtonResponse(
           group,
           msg: fakeMsg,
           account,
+          sock,
         };
         await handleCommandListener(fakeMsg, context);
       }

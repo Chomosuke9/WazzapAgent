@@ -335,11 +335,12 @@ class TestMuteDB:
     assert is_muted("chat1", "u2xyz") is False
 
   def test_mute_expiry(self):
-    from bridge.db import add_mute, is_muted, _mute_cache, _cache_lock
+    from bridge.db import add_mute, is_muted, _mute_cache, _cache_lock, _tenant_cache_key
     add_mute("chat1", "u1abc", 1)
-    # Manually set muted_at to a time far in the past so it's expired
+    # Manually set muted_at to a time far in the past so it's expired.
+    # The mute cache is tenant-scoped: outer key is (tenant, chat_id).
     with _cache_lock:
-      _mute_cache["chat1"]["u1abc"]["muted_at"] = "2020-01-01 00:00:00"
+      _mute_cache[_tenant_cache_key("chat1")]["u1abc"]["muted_at"] = "2020-01-01 00:00:00"
     assert is_muted("chat1", "u1abc") is False
 
   def test_clear_mutes(self):

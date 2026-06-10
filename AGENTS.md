@@ -512,7 +512,7 @@ single-account is unchanged),
 The project doesn't currently include a Dockerfile. To containerize:
 
 - **Node gateway**: `docker build` with Node 18+, copy source, run `pnpm install && pnpm dev`
-- **Python bridge**: `docker build` with Python 3.10+, install requirements, run `python -m python.bridge.main`
+- **Python bridge**: `docker build` with Python 3.10+, install requirements, run `python -m bridge.main`
 - Mount `data/` as a volume for auth state persistence across restarts.
 
 ---
@@ -733,7 +733,7 @@ The sub-agent system delegates complex tasks to an external service (WazzapSubAg
 - **Install Node deps**: `pnpm install` (Node 18+; project is ESM)
 - **Install Python deps**: `pip install -r requirements.txt` (Python 3.10+)
 - **Run gateway**: `pnpm dev` (same as `pnpm start`) — starts WA socket + WS client
-- **Run Python bridge**: `python -m python.bridge.main`
+- **Run Python bridge**: `python -m bridge.main`
 - **Run echo server** (for testing): `pip install websockets==12.* pydantic && python examples/llm_ws_echo.py`
 - **Lint**: `pnpm lint` (currently placeholder)
 - **Tests**: No test framework wired yet. If adding: `vitest` as dev dependency,

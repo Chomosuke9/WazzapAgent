@@ -99,6 +99,15 @@ _subagent_enabled_cache: dict[str, bool] = {}
 _mute_cache: dict[str, dict[str, dict]] = {}
 _cache_lock = threading.Lock()
 
+
+def _tenant_cache_key(chat_id: str) -> tuple[str, str]:
+  """Compose the active tenant (the ``_tenant_db_dir`` ContextVar) with
+  *chat_id* so the module-global in-memory caches above are isolated per
+  tenant. Two tenants that share the same WhatsApp group (same ``chat_id``
+  JID) must not read each other's cached settings. Falls back to ``''`` when
+  no tenant is bound (legacy single-account / global mode)."""
+  return (_tenant_db_dir.get() or '', chat_id)
+
 VALID_MODES = {'auto', 'prefix', 'hybrid'}
 DEFAULT_MODE = 'prefix'
 VALID_TRIGGERS = {'tag', 'reply', 'join', 'name'}
@@ -734,12 +743,12 @@ def _pop_all_chat_caches(chat_id: str) -> None:
   hold values from the __global__ fallback) are invalidated.
   """
   with _cache_lock:
-    _prompt_cache.pop(chat_id, None)
-    _permission_cache.pop(chat_id, None)
-    _mode_cache.pop(chat_id, None)
-    _triggers_cache.pop(chat_id, None)
+    _prompt_cache.pop(_tenant_cache_key(chat_id), None)
+    _permission_cache.pop(_tenant_cache_key(chat_id), None)
+    _mode_cache.pop(_tenant_cache_key(chat_id), None)
+    _triggers_cache.pop(_tenant_cache_key(chat_id), None)
     _llm2_model_cache.pop(chat_id, None)
-    _subagent_enabled_cache.pop(chat_id, None)
+    _subagent_enabled_cache.pop(_tenant_cache_key(chat_id), None)
 
 
 def _ensure_chat_row(chat_id: str) -> None:
@@ -804,7 +813,7 @@ def get_prompt(chat_id: str, *, fallback_to_global: bool = True) -> Optional[str
   so that a global-prompt update immediately propagates to non-explicit chats.
   """
   with _cache_lock:
-    cached = _prompt_cache.get(chat_id, _MISSING)
+    cached = _prompt_cache.get(_tenant_cache_key(chat_id), _MISSING)
   if cached is not _MISSING:
     raw = cached  # type: ignore[assignment]
   else:
@@ -819,7 +828,7 @@ def get_prompt(chat_id: str, *, fallback_to_global: bool = True) -> Optional[str
     ).fetchone()
     raw = row['prompt'] if row is not None else None
     with _cache_lock:
-      _prompt_cache[chat_id] = raw
+      _prompt_cache[_tenant_cache_key(chat_id)] = raw
 
   # Apply fallback on top of the cached raw value
   if raw is None and fallback_to_global:
@@ -839,7 +848,7 @@ def _get_global_prompt_cached() -> Optional[str]:
   the database value is NULL, ensuring the file-based default is always live.
   """
   with _cache_lock:
-    global_cached = _prompt_cache.get(GLOBAL_CHAT_ID, _MISSING)
+    global_cached = _prompt_cache.get(_tenant_cache_key(GLOBAL_CHAT_ID), _MISSING)
   if global_cached is not _MISSING:
     return global_cached  # type: ignore[return-value]
   # Not in cache — read from DB and cache it.
@@ -849,7 +858,7 @@ def _get_global_prompt_cached() -> Optional[str]:
   if value is None:
     value = _DEFAULT_PROMPT_OVERRIDE
   with _cache_lock:
-    _prompt_cache[GLOBAL_CHAT_ID] = value
+    _prompt_cache[_tenant_cache_key(GLOBAL_CHAT_ID)] = value
   return value
 
 
@@ -873,7 +882,7 @@ def set_prompt(chat_id: str, prompt: Optional[str]) -> None:
       _prompt_cache.clear()
   # Re-cache the new value so the next get_prompt() hits the cache.
   with _cache_lock:
-    _prompt_cache[chat_id] = prompt
+    _prompt_cache[_tenant_cache_key(chat_id)] = prompt
   logger.info('DB set_prompt chat_id=%s len=%s', chat_id, len(prompt) if prompt else 0)
 
 
@@ -881,14 +890,14 @@ def set_prompt(chat_id: str, prompt: Optional[str]) -> None:
 def get_permission(chat_id: str) -> int:
   """Return the permission level (0-3) for *chat_id*. Default ``0``."""
   with _cache_lock:
-    cached = _permission_cache.get(chat_id, _MISSING)
+    cached = _permission_cache.get(_tenant_cache_key(chat_id), _MISSING)
   if cached is not _MISSING:
     return cached  # type: ignore[return-value]
 
   row = _get_setting_row(chat_id)
   value = int(row['permission']) if row is not None else 0
   with _cache_lock:
-    _permission_cache[chat_id] = value
+    _permission_cache[_tenant_cache_key(chat_id)] = value
   return value
 
 
@@ -905,7 +914,7 @@ def set_permission(chat_id: str, level: int) -> None:
   conn.commit()
   _pop_all_chat_caches(chat_id)
   with _cache_lock:
-    _permission_cache[chat_id] = clamped
+    _permission_cache[_tenant_cache_key(chat_id)] = clamped
   logger.info('DB set_permission chat_id=%s level=%s', chat_id, clamped)
 
 
@@ -922,7 +931,7 @@ def clear_settings(chat_id: str) -> None:
       _prompt_cache.clear()
   else:
     with _cache_lock:
-      _prompt_cache.pop(chat_id, None)
+      _prompt_cache.pop(_tenant_cache_key(chat_id), None)
   _pop_all_chat_caches(chat_id)
 
 
@@ -1113,8 +1122,9 @@ def clear_subagent_enabled_cache(chat_id: Optional[str] = None) -> None:
   """
   with _cache_lock:
     if chat_id is not None:
-      if chat_id in _subagent_enabled_cache:
-        del _subagent_enabled_cache[chat_id]
+      key = _tenant_cache_key(chat_id)
+      if key in _subagent_enabled_cache:
+        del _subagent_enabled_cache[key]
         logger.debug('Cleared subagent_enabled cache for chat_id=%s', chat_id)
     else:
       _subagent_enabled_cache.clear()
@@ -1170,12 +1180,12 @@ def invalidate_chat_caches(chat_id: str) -> None:
   if not chat_id:
     return
   with _cache_lock:
-    _prompt_cache.pop(chat_id, None)
-    _permission_cache.pop(chat_id, None)
-    _mode_cache.pop(chat_id, None)
-    _triggers_cache.pop(chat_id, None)
+    _prompt_cache.pop(_tenant_cache_key(chat_id), None)
+    _permission_cache.pop(_tenant_cache_key(chat_id), None)
+    _mode_cache.pop(_tenant_cache_key(chat_id), None)
+    _triggers_cache.pop(_tenant_cache_key(chat_id), None)
     _llm2_model_cache.pop(chat_id, None)
-    _subagent_enabled_cache.pop(chat_id, None)
+    _subagent_enabled_cache.pop(_tenant_cache_key(chat_id), None)
   reset_settings_connection()
   logger.debug('Per-chat settings caches invalidated chat_id=%s', chat_id)
 
@@ -1313,7 +1323,7 @@ def delete_model(model_id: str) -> bool:
 def get_mode(chat_id: str) -> str:
   """Return the chat mode ('auto', 'prefix', or 'hybrid'). Default 'prefix'."""
   with _cache_lock:
-    cached = _mode_cache.get(chat_id, _MISSING)
+    cached = _mode_cache.get(_tenant_cache_key(chat_id), _MISSING)
   if cached is not _MISSING:
     return cached  # type: ignore[return-value]
 
@@ -1322,7 +1332,7 @@ def get_mode(chat_id: str) -> str:
   if value not in VALID_MODES:
     value = DEFAULT_MODE
   with _cache_lock:
-    _mode_cache[chat_id] = value
+    _mode_cache[_tenant_cache_key(chat_id)] = value
   return value
 
 
@@ -1340,7 +1350,7 @@ def set_mode(chat_id: str, mode: str) -> None:
   conn.commit()
   _pop_all_chat_caches(chat_id)
   with _cache_lock:
-    _mode_cache[chat_id] = mode
+    _mode_cache[_tenant_cache_key(chat_id)] = mode
   logger.info('DB set_mode chat_id=%s mode=%s', chat_id, mode)
 
 
@@ -1348,14 +1358,14 @@ def set_mode(chat_id: str, mode: str) -> None:
 def get_triggers(chat_id: str) -> set[str]:
   """Return the set of enabled trigger types for *chat_id*."""
   with _cache_lock:
-    cached = _triggers_cache.get(chat_id, _MISSING)
+    cached = _triggers_cache.get(_tenant_cache_key(chat_id), _MISSING)
   if cached is not _MISSING:
     raw = cached  # type: ignore[assignment]
   else:
     row = _get_setting_row(chat_id)
     raw = row['triggers'] if row is not None else DEFAULT_TRIGGERS
     with _cache_lock:
-      _triggers_cache[chat_id] = raw
+      _triggers_cache[_tenant_cache_key(chat_id)] = raw
   return {t.strip().lower() for t in raw.split(',') if t.strip().lower() in VALID_TRIGGERS}
 
 
@@ -1373,7 +1383,7 @@ def set_triggers(chat_id: str, triggers: set[str]) -> None:
   conn.commit()
   _pop_all_chat_caches(chat_id)
   with _cache_lock:
-    _triggers_cache[chat_id] = raw
+    _triggers_cache[_tenant_cache_key(chat_id)] = raw
   logger.info('DB set_triggers chat_id=%s triggers=%s', chat_id, raw)
 
 
@@ -1385,14 +1395,14 @@ def set_triggers(chat_id: str, triggers: set[str]) -> None:
 def get_subagent_enabled(chat_id: str) -> bool:
   """Return whether subagent is enabled for *chat_id*. Default False."""
   with _cache_lock:
-    cached = _subagent_enabled_cache.get(chat_id, _MISSING)
+    cached = _subagent_enabled_cache.get(_tenant_cache_key(chat_id), _MISSING)
   if cached is not _MISSING:
     return cached  # type: ignore[return-value]
 
   row = _get_setting_row(chat_id)
   value = bool(row['subagent_enabled']) if row is not None else DEFAULT_SUBAGENT_ENABLED
   with _cache_lock:
-    _subagent_enabled_cache[chat_id] = value
+    _subagent_enabled_cache[_tenant_cache_key(chat_id)] = value
   return value
 
 
@@ -1409,7 +1419,7 @@ def set_subagent_enabled(chat_id: str, enabled: bool) -> None:
   conn.commit()
   _pop_all_chat_caches(chat_id)
   with _cache_lock:
-    _subagent_enabled_cache[chat_id] = enabled
+    _subagent_enabled_cache[_tenant_cache_key(chat_id)] = enabled
   logger.info('DB set_subagent_enabled chat_id=%s enabled=%s', chat_id, enabled)
 
 
@@ -1568,9 +1578,10 @@ def add_mute(chat_id: str, sender_ref: str, duration_minutes: int) -> None:
   from datetime import datetime, timezone
   now_str = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
   with _cache_lock:
-    if chat_id not in _mute_cache:
-      _mute_cache[chat_id] = {}
-    _mute_cache[chat_id][sender_ref] = {
+    key = _tenant_cache_key(chat_id)
+    if key not in _mute_cache:
+      _mute_cache[key] = {}
+    _mute_cache[key][sender_ref] = {
       'muted_at': now_str,
       'duration_m': duration_minutes,
       'notified': False,
@@ -1589,8 +1600,9 @@ def remove_mute(chat_id: str, sender_ref: str) -> None:
   )
   conn.commit()
   with _cache_lock:
-    if chat_id in _mute_cache:
-      _mute_cache[chat_id].pop(sender_ref, None)
+    key = _tenant_cache_key(chat_id)
+    if key in _mute_cache:
+      _mute_cache[key].pop(sender_ref, None)
   logger.info('mute removed chat_id=%s sender_ref=%s', chat_id, sender_ref)
 
 
@@ -1602,7 +1614,7 @@ def clear_mutes(chat_id: str) -> None:
   conn.execute('DELETE FROM chat_mutes WHERE chat_id = ?', (chat_id,))
   conn.commit()
   with _cache_lock:
-    _mute_cache.pop(chat_id, None)
+    _mute_cache.pop(_tenant_cache_key(chat_id), None)
   logger.info('all mutes cleared chat_id=%s', chat_id)
 
 
@@ -1610,7 +1622,7 @@ def clear_mutes(chat_id: str) -> None:
 def is_muted(chat_id: str, sender_ref: str) -> bool:
   """Check if a user is currently muted (cache-first, instant)."""
   with _cache_lock:
-    chat_mutes = _mute_cache.get(chat_id)
+    chat_mutes = _mute_cache.get(_tenant_cache_key(chat_id))
     if chat_mutes is not None:
       entry = chat_mutes.get(sender_ref)
       if entry is not None:
@@ -1636,10 +1648,10 @@ def is_muted(chat_id: str, sender_ref: str) -> bool:
   }
   active = _is_mute_active(entry)
   with _cache_lock:
-    if chat_id not in _mute_cache:
-      _mute_cache[chat_id] = {}
+    if _tenant_cache_key(chat_id) not in _mute_cache:
+      _mute_cache[_tenant_cache_key(chat_id)] = {}
     if active:
-      _mute_cache[chat_id][sender_ref] = entry
+      _mute_cache[_tenant_cache_key(chat_id)][sender_ref] = entry
     else:
       conn.execute(
         'DELETE FROM chat_mutes WHERE chat_id = ? AND sender_ref = ?',
@@ -1652,7 +1664,7 @@ def is_muted(chat_id: str, sender_ref: str) -> bool:
 def is_mute_notified(chat_id: str, sender_ref: str) -> bool:
   """Check if the first-delete notification was already sent for this mute."""
   with _cache_lock:
-    chat_mutes = _mute_cache.get(chat_id, {})
+    chat_mutes = _mute_cache.get(_tenant_cache_key(chat_id), {})
     entry = chat_mutes.get(sender_ref)
     if entry is None:
       return False
@@ -1662,7 +1674,7 @@ def is_mute_notified(chat_id: str, sender_ref: str) -> bool:
 def mark_mute_notified(chat_id: str, sender_ref: str) -> None:
   """Mark that the first-delete notification has been sent."""
   with _cache_lock:
-    chat_mutes = _mute_cache.get(chat_id, {})
+    chat_mutes = _mute_cache.get(_tenant_cache_key(chat_id), {})
     entry = chat_mutes.get(sender_ref)
     if entry is not None:
       entry['notified'] = True
@@ -1671,7 +1683,7 @@ def mark_mute_notified(chat_id: str, sender_ref: str) -> None:
 def get_mute_remaining_minutes(chat_id: str, sender_ref: str) -> int:
   """Return remaining mute minutes for a user (0 if not muted)."""
   with _cache_lock:
-    chat_mutes = _mute_cache.get(chat_id, {})
+    chat_mutes = _mute_cache.get(_tenant_cache_key(chat_id), {})
     entry = chat_mutes.get(sender_ref)
     if entry is not None:
       return _mute_remaining_minutes(entry)

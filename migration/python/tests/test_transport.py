@@ -307,3 +307,68 @@ def test_send_reliable_queues_and_flushes_in_order_on_reconnect():
             await _stop_server(server)
 
     assert asyncio.run(asyncio.wait_for(scenario(), timeout=30)) is True
+
+
+# ===========================================================================
+# (regression) handshake recv timeout: a server that ACCEPTS but NEVER sends
+#     hello_ack must NOT hang connect() forever. _open_and_pump wraps the
+#     hello_ack recv in asyncio.wait_for(open_timeout); on timeout it returns
+#     and the supervisor backs off + retries (attempt grows). Before the fix
+#     `await conn.recv()` blocked forever and attempt stayed 0.
+# ===========================================================================
+
+
+def test_connect_does_not_hang_when_no_hello_ack():
+    async def scenario():
+        async def handler(ws):
+            # Accept the connection but NEVER send hello_ack; just hold it open
+            # until the client gives up (or our own ceiling fires).
+            try:
+                await asyncio.wait_for(ws.wait_closed(), timeout=OP_TIMEOUT)
+            except Exception:
+                pass
+
+        server, url = await _start_server(handler)
+        # Small open_timeout so the missing hello_ack recv gives up fast; tiny
+        # backoff so reconnects happen quickly.
+        transport = WSClientTransport(
+            base_ms=5, max_ms=40, jitter_ratio=0, open_timeout=0.15
+        )
+
+        statuses = []
+        connect_task = None
+        try:
+            # connect() never resolves (handshake never completes); run it as a
+            # task and observe attempt growth instead of awaiting it.
+            connect_task = asyncio.create_task(
+                transport.connect(
+                    url, _hello_frame(), lambda *a: None, lambda s: statuses.append(s)
+                )
+            )
+            observed = []
+            deadline = asyncio.get_event_loop().time() + 3.0
+            while asyncio.get_event_loop().time() < deadline:
+                observed.append(transport.get_attempt())
+                if transport.get_attempt() >= 2:
+                    break
+                await asyncio.sleep(0.02)
+
+            # The handshake recv timed out (returning from _open_and_pump) and
+            # the supervisor retried -> attempt grew. Before the fix this would
+            # stay 0 forever (recv blocked) and this assertion would time out.
+            assert transport.get_attempt() >= 2, observed
+            # The handshake never completed, so the transport never reported
+            # "open" (that status is emitted only AFTER hello_ack succeeds).
+            assert "open" not in statuses, statuses
+            return True
+        finally:
+            if connect_task is not None:
+                connect_task.cancel()
+                try:
+                    await asyncio.wait_for(connect_task, timeout=OP_TIMEOUT)
+                except (asyncio.CancelledError, Exception):
+                    pass
+            await asyncio.wait_for(transport.close(), timeout=OP_TIMEOUT)
+            await _stop_server(server)
+
+    assert asyncio.run(asyncio.wait_for(scenario(), timeout=30)) is True

@@ -88,7 +88,7 @@ from .db import (
   reset_tenant_db_dir as db_reset_tenant_db_dir,
   tenant_db_context as db_tenant_db_context,
 )
-from .dashboard import record_stat, record_user_invoke, flush_to_db, start_flush_loop
+from .dashboard import DashboardStats
 from .stickers import resolve_sticker
 from .messaging.processing import (
   _append_history,
@@ -484,6 +484,11 @@ class AgentSession:
     self.pending_run_command_chat: OrderedDict[str, tuple[str, str]] = OrderedDict()
     self.idle_msg_count: Dict[str, int] = defaultdict(int)
     self.tasks: Set[asyncio.Task] = set()
+    # --- per-session dashboard stats (was: module-level singletons) ---
+    # Each account owns its own stat buffers + flush loop so the loop runs
+    # inside this session's task (where the tenant DB ContextVar is set) and
+    # writes go to this tenant's stats DB only (no cross-tenant leak).
+    self._dashboard = DashboardStats()
     # --- per-session sub-agent objects (was: module-level singletons) ---
     # Per-session for full isolation: each account's sub-agent tracker /
     # client / webhook is private. (Step 33 owns the single-port webhook
@@ -526,7 +531,7 @@ class AgentSession:
     db_token = db_set_tenant_db_dir(self.folder_path)
 
     # Start dashboard flush loop
-    dashboard_task = await start_flush_loop()
+    dashboard_task = await self._dashboard.start_flush_loop()
     self.tasks.add(dashboard_task)
 
     self.subagent_webhook.set_queue_handler(self._queue_handler)
@@ -537,7 +542,7 @@ class AgentSession:
       await stop_event.wait()
     finally:
       # Flush dashboard stats and checkpoint DBs before shutting down
-      flush_to_db()
+      self._dashboard.flush_to_db()
       db_checkpoint_all_dbs()
       db_close_all_connections()
       # Detach the queue handler so the webhook server doesn't write to a
@@ -835,7 +840,7 @@ def _register_handlers(session) -> None:
           try:
             sticker_path = create_sticker_file(media_path, upper_text, lower_text)
             await send_sticker(ws, p_chat_id, sticker_path, reply_to, request_id=_make_request_id("sticker"))
-            record_stat(p_chat_id, "stickers_sent")
+            session._dashboard.record_stat(p_chat_id, "stickers_sent")
             log_parts = ["Successfully created sticker"]
             if upper_text:
               log_parts.append(f"upper_text: {upper_text}")
@@ -996,12 +1001,12 @@ def _register_handlers(session) -> None:
 
         # --- Dashboard: record messages processed ---
         for _dp in llm1_trigger_payloads:
-          record_stat(chat_id, "messages_processed")
+          session._dashboard.record_stat(chat_id, "messages_processed")
           if bool(_dp.get("botMentioned")):
-            record_stat(chat_id, "bot_tags")
+            session._dashboard.record_stat(chat_id, "bot_tags")
           _dp_text = _clean_text(_dp.get("text"))
           if _dp_text and assistant_name_pattern().search(_dp_text):
-            record_stat(chat_id, "bot_name_mentions")
+            session._dashboard.record_stat(chat_id, "bot_name_mentions")
 
         # --- Mode-aware LLM1 decision ---
         chat_mode = db_get_mode(chat_id) if chat_type == "group" else "auto"
@@ -1056,7 +1061,7 @@ def _register_handlers(session) -> None:
               _pp_ref = _clean_text(_pp.get("senderRef"))
               _pp_name = _clean_text(_pp.get("senderName"))
               if _pp_ref:
-                record_user_invoke(chat_id, _pp_ref, _pp_name)
+                session._dashboard.record_user_invoke(chat_id, _pp_ref, _pp_name)
             logger.info(
               "prefix mode: matched %d/%d payloads; skipping LLM1",
               len(prefix_matched_payloads), len(llm1_trigger_payloads),
@@ -1077,7 +1082,7 @@ def _register_handlers(session) -> None:
               _pp_ref = _clean_text(_pp.get("senderRef"))
               _pp_name = _clean_text(_pp.get("senderName"))
               if _pp_ref:
-                record_user_invoke(chat_id, _pp_ref, _pp_name)
+                session._dashboard.record_user_invoke(chat_id, _pp_ref, _pp_name)
             logger.info(
               "hybrid mode: prefix matched %d/%d payloads; skipping LLM1",
               len(prefix_matched_payloads), len(llm1_trigger_payloads),
@@ -1140,7 +1145,7 @@ def _register_handlers(session) -> None:
                   _np_ref = _clean_text(_np.get("senderRef"))
                   _np_name = _clean_text(_np.get("senderName"))
                   if _np_ref:
-                    record_user_invoke(chat_id, _np_ref, _np_name)
+                    session._dashboard.record_user_invoke(chat_id, _np_ref, _np_name)
               logger.info(
                 "hybrid mode: prefix trigger interrupted LLM1 after %dms; merged %d new payloads",
                 llm1_ms, len(new_payloads),
@@ -1155,17 +1160,17 @@ def _register_handlers(session) -> None:
                 pass
               decision = llm1_task.result()
               llm1_ms = int((time.perf_counter() - llm1_started) * 1000)
-              record_stat(chat_id, "llm1_calls")
+              session._dashboard.record_stat(chat_id, "llm1_calls")
               if decision.input_tokens:
-                record_stat(chat_id, "llm1_input_tokens", decision.input_tokens)
+                session._dashboard.record_stat(chat_id, "llm1_input_tokens", decision.input_tokens)
               if decision.output_tokens:
-                record_stat(chat_id, "llm1_output_tokens", decision.output_tokens)
+                session._dashboard.record_stat(chat_id, "llm1_output_tokens", decision.output_tokens)
               if decision.should_response:
                 for _ap in llm1_trigger_payloads:
                   _ap_ref = _clean_text(_ap.get("senderRef"))
                   _ap_name = _clean_text(_ap.get("senderName"))
                   if _ap_ref:
-                    record_user_invoke(chat_id, _ap_ref, _ap_name)
+                    session._dashboard.record_user_invoke(chat_id, _ap_ref, _ap_name)
               logger.info(
                 "hybrid mode: LLM1 completed in %dms (no prefix interrupt); should_response=%s",
                 llm1_ms, decision.should_response,
@@ -1181,18 +1186,18 @@ def _register_handlers(session) -> None:
             prompt_override=db_prompt,
           )
           llm1_ms = int((time.perf_counter() - llm1_started) * 1000)
-          record_stat(chat_id, "llm1_calls")
+          session._dashboard.record_stat(chat_id, "llm1_calls")
           if decision.input_tokens:
-            record_stat(chat_id, "llm1_input_tokens", decision.input_tokens)
+            session._dashboard.record_stat(chat_id, "llm1_input_tokens", decision.input_tokens)
           if decision.output_tokens:
-            record_stat(chat_id, "llm1_output_tokens", decision.output_tokens)
+            session._dashboard.record_stat(chat_id, "llm1_output_tokens", decision.output_tokens)
           # Record invoking user for auto mode too
           if decision.should_response:
             for _ap in llm1_trigger_payloads:
               _ap_ref = _clean_text(_ap.get("senderRef"))
               _ap_name = _clean_text(_ap.get("senderName"))
               if _ap_ref:
-                record_user_invoke(chat_id, _ap_ref, _ap_name)
+                session._dashboard.record_user_invoke(chat_id, _ap_ref, _ap_name)
 
         # Send read receipt after LLM1 processes (regardless of decision)
         for _p in trigger_window_payloads:
@@ -1224,7 +1229,7 @@ def _register_handlers(session) -> None:
               decision.react_context_msg_id,
               request_id=_make_request_id("sticker"),
             )
-            record_stat(chat_id, "stickers_sent")
+            session._dashboard.record_stat(chat_id, "stickers_sent")
           else:
             logger.info(
               "llm1 express; sending emoji react directly (skipping llm2)",
@@ -1360,7 +1365,7 @@ def _register_handlers(session) -> None:
           )
 
         llm2_ms = int((time.perf_counter() - llm2_started) * 1000)
-        record_stat(chat_id, "llm2_calls")
+        session._dashboard.record_stat(chat_id, "llm2_calls")
         # Track LLM2 token usage if available
         if reply_msg is not None:
           _usage = getattr(reply_msg, "usage_metadata", None)
@@ -1368,11 +1373,11 @@ def _register_handlers(session) -> None:
             _in_tok = _usage.get("input_tokens", 0)
             _out_tok = _usage.get("output_tokens", 0)
             if _in_tok:
-              record_stat(chat_id, "llm2_input_tokens", _in_tok)
+              session._dashboard.record_stat(chat_id, "llm2_input_tokens", _in_tok)
             if _out_tok:
-              record_stat(chat_id, "llm2_output_tokens", _out_tok)
+              session._dashboard.record_stat(chat_id, "llm2_output_tokens", _out_tok)
         if reply_msg is None:
-          record_stat(chat_id, "errors")
+          session._dashboard.record_stat(chat_id, "errors")
           logger.warning("llm2 failed to produce reply", extra={"chat_id": chat_id})
           idle_msg_count[chat_id] += len(llm1_trigger_payloads)
           if _should_idle_trigger(chat_id, idle_msg_count[chat_id]):
@@ -1441,7 +1446,7 @@ def _register_handlers(session) -> None:
               action.get("replyTo"),
               request_id=request_id,
             )
-            record_stat(chat_id, "responses_sent")
+            session._dashboard.record_stat(chat_id, "responses_sent")
             pending_send_request_chat[request_id] = chat_id
             pending_send_request_chat.move_to_end(request_id)
             while len(pending_send_request_chat) > 4096:
@@ -1530,7 +1535,7 @@ def _register_handlers(session) -> None:
                 action.get("contextMsgId"),
                 request_id=request_id,
               )
-              record_stat(chat_id, "stickers_sent")
+              session._dashboard.record_stat(chat_id, "stickers_sent")
               # Add history entry so LLM knows which sticker was sent
               _sticker_prov_msg = WhatsAppMessage(
                 timestamp_ms=int(time.time() * 1000),
@@ -1574,7 +1579,7 @@ def _register_handlers(session) -> None:
                 action.get("replyTo"),
                 request_id=request_id,
               )
-              record_stat(chat_id, "stickers_sent")
+              session._dashboard.record_stat(chat_id, "stickers_sent")
               # Add history entry so LLM knows which sticker was sent
               _sticker_prov_msg = WhatsAppMessage(
                 timestamp_ms=int(time.time() * 1000),
@@ -1645,7 +1650,7 @@ def _register_handlers(session) -> None:
             )
             hydrate_quoted_from_history(_prov_quiz_msg, history)
             _append_history(history, _prov_quiz_msg)
-            record_stat(chat_id, "responses_sent")
+            session._dashboard.record_stat(chat_id, "responses_sent")
             action_counts[action_type] += 1
             continue
           if action_type == "mute_member":
@@ -2007,7 +2012,7 @@ context block from ``SubTaskTracker.format_context``).
                       if _conf_text:
                         _conf_rid = _make_request_id("send")
                         await send_message(ws, chat_id, _conf_text, fallback_reply_to, request_id=_conf_rid)
-                        record_stat(chat_id, "responses_sent")
+                        session._dashboard.record_stat(chat_id, "responses_sent")
                       _new_session_id = f"{chat_id}_{uuid.uuid4().hex[:8]}_{int(time.time())}"
                       _local_files: list[str] = []
                       _tmp_dir = tempfile.mkdtemp(prefix="subagent_ctx_")
