@@ -189,39 +189,6 @@ async function showModelSelectionForEdit(sock: WASocket, ctx: AccountContext, ch
   );
 }
 
-async function showModelEditForm(
-  sock: WASocket,
-  ctx: AccountContext,
-  chatId: string,
-  senderId: string,
-  modelId: string,
-): Promise<void> {
-  const models = ctx.repos!.model.getAllModels();
-  const model = models.find((m) => m.modelId === modelId);
-  if (!model) {
-    await sock.sendMessage(chatId, { text: `Model "${modelId}" not found.` });
-    return;
-  }
-
-  ctx.pendingForms.set(chatId, { type: "edit_model", modelId, senderId });
-
-  const helpText = `Edit Model: ${model.displayName}
-
-Current values:
-- name=${model.displayName}
-- desc=${model.description || ""}
-- active=${model.isActive ? "1" : "0"}
-- order=${model.sortOrder}
-- vision=${model.visionSupport ? "true" : "false"}
-
-Send your changes using | as separator:
-name=New Name|desc=New description|vision=true
-
-Or send "cancel" to cancel.`;
-
-  await sock.sendMessage(chatId, { text: helpText });
-}
-
 async function showModelAddForm(sock: WASocket, ctx: AccountContext, chatId: string, senderId: string): Promise<void> {
   ctx.pendingForms.set(chatId, { type: "add_model", senderId });
 

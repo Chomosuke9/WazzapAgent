@@ -15,7 +15,7 @@ callers — this class does not alter them.
 """
 from __future__ import annotations
 
-from typing import Awaitable, Callable, Iterable, Optional
+from typing import Awaitable, Callable, Iterable
 
 from ..history import WhatsAppMessage
 from ..llm.llm1 import call_llm1 as _default_call_llm1

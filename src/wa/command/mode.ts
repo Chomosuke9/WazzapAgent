@@ -8,7 +8,7 @@ async function handleMode({
   chatType,
   senderIsAdmin,
   senderIsOwner,
-  senderId,
+  senderId: _senderId,
   args,
   folderPath = config.dataDir,
   sock,

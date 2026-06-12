@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from collections import deque
 from typing import Deque
 
 from wasocket.correlation import make_request_id

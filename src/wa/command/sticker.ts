@@ -99,7 +99,7 @@ async function addStickerExif(webpPath: string, { packName, emoji }: { packName:
 // Static image sticker (sharp)
 // ---------------------------------------------------------------------------
 
-async function createStickerFile(mediaPath: string, upperText: string | null = null, lowerText: string | null = null): Promise<string> {
+async function createStickerFile(mediaPath: string, _upperText: string | null = null, _lowerText: string | null = null): Promise<string> {
   const ext = path.extname(mediaPath).toLowerCase();
 
   if (!SUPPORTED_IMAGE_EXT.has(ext)) {
@@ -258,7 +258,7 @@ async function createAnimatedStickerFile(
 // Command handler
 // ---------------------------------------------------------------------------
 
-async function handleSticker({ chatId, chatType, senderIsAdmin, senderIsOwner, args, msg, account, sock }: CommandContext): Promise<void> {
+async function handleSticker({ chatId, chatType: _chatType, senderIsAdmin: _senderIsAdmin, senderIsOwner: _senderIsOwner, args, msg, account, sock }: CommandContext): Promise<void> {
   const [upperText, lowerText] = parseStickerArgs(args);
 
   const { contentType, message: innerMessage } = unwrapMessage(msg!.message) || {};

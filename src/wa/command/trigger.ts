@@ -15,7 +15,7 @@ async function handleTrigger({
   chatType,
   senderIsAdmin,
   senderIsOwner,
-  senderId,
+  senderId: _senderId,
   args,
   folderPath = config.dataDir,
   sock,

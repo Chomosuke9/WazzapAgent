@@ -10,7 +10,6 @@ from .processing import (
   EMPTY_TARGET_TOKENS,
   SENDER_REF_RE,
 )
-from .format import sanitize_whatsapp_text
 
 logger = setup_logging()
 

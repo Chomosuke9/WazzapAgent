@@ -11,7 +11,6 @@ Covers:
 """
 from __future__ import annotations
 
-import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -73,15 +72,14 @@ def test_is_db_corruption_error_recognises_known_messages():
 
 
 def test_recover_corrupt_db_strips_stale_wal_files(tmp_path):
+  # Probe-first recovery only quarantines sidecars when the MAIN image is
+  # actually corrupt — a healthy DB is left untouched so its committed-but-
+  # uncheckpointed WAL frames are never discarded. Corrupt the main file so
+  # recovery engages.
   db_path = tmp_path / "stale.db"
-  conn = sqlite3.connect(str(db_path))
-  conn.execute("PRAGMA journal_mode=WAL")
-  conn.execute("CREATE TABLE t (k INTEGER PRIMARY KEY)")
-  conn.commit()
-  conn.close()
+  _corrupt(db_path)
 
-  # Plant a bogus WAL/SHM that would cause "database disk image is malformed"
-  # if SQLite tried to apply them on open.
+  # Plant stale WAL/SHM alongside the corrupt main file.
   wal = db_path.with_suffix(db_path.suffix + "-wal")
   shm = db_path.with_suffix(db_path.suffix + "-shm")
   wal.write_bytes(b"\x00" * 32)
@@ -90,11 +88,15 @@ def test_recover_corrupt_db_strips_stale_wal_files(tmp_path):
 
   db_mod._recover_corrupt_db(db_path)
 
+  # Recovery quarantines the stale sidecars (renamed aside, not deleted, so
+  # evidence is preserved) — the original paths are gone.
   assert not wal.exists()
   assert not shm.exists()
-  # Main DB still intact and queryable.
+  assert wal.with_name(wal.name + ".corrupted.bak").exists()
+
+  # A fresh connection recreates an empty, usable DB in the freed slot.
   reopened = sqlite3.connect(str(db_path))
-  reopened.execute("SELECT * FROM t").fetchall()
+  reopened.execute("CREATE TABLE t (k INTEGER PRIMARY KEY)")
   reopened.close()
 
 
@@ -181,8 +183,9 @@ def test_settings_pragmas_applied(tmp_path):
   foreign_keys = conn.execute("PRAGMA foreign_keys").fetchone()[0]
 
   assert journal_mode.lower() == "wal"
-  # synchronous=NORMAL is value 1; FULL would be 2.
-  assert synchronous == 1
+  # This module deliberately uses synchronous=FULL (value 2) as an
+  # anti-corruption durability measure; NORMAL would be 1.
+  assert synchronous == 2
   assert busy_timeout >= 5000
   assert foreign_keys == 1
 

@@ -25,13 +25,9 @@ from __future__ import annotations
 
 import asyncio
 import os
-import shutil
-import tempfile
 import time
-import uuid
-from collections import OrderedDict, defaultdict, deque
+from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Deque, Dict, Set
 
 from ..history import (
   WhatsAppMessage,
@@ -42,36 +38,19 @@ from ..history import (
   hydrate_quoted_from_history,
 )
 from ..log import setup_logging, set_chat_log_context, reset_chat_log_context
-from ..llm.llm1 import call_llm1, LLM1Decision
-from ..llm.llm2 import generate_reply
+from ..llm.llm1 import LLM1Decision
 from ..db import (
   get_mode as db_get_mode,
   get_triggers as db_get_triggers,
-  is_muted as db_is_muted,
-  is_mute_notified as db_is_mute_notified,
-  mark_mute_notified as db_mark_mute_notified,
   add_mute as db_add_mute,
   remove_mute as db_remove_mute,
   clear_mutes as db_clear_mutes,
-  get_mute_remaining_minutes as db_get_mute_remaining,
   set_permission as db_set_permission,
-  set_llm2_model as db_set_llm2_model,
-  clear_llm2_model_cache as db_clear_llm2_model_cache,
-  clear_default_llm2_model_cache as db_clear_default_llm2_model_cache,
   reset_settings_connection as db_reset_settings_connection,
   invalidate_chat_caches as db_invalidate_chat_caches,
-  close_all_connections as db_close_all_connections,
-  checkpoint_all_dbs as db_checkpoint_all_dbs,
   get_subagent_enabled as db_get_subagent_enabled,
-  set_subagent_enabled as db_set_subagent_enabled,
-  clear_subagent_enabled_cache as db_clear_subagent_enabled_cache,
-  get_idle_trigger as db_get_idle_trigger,
   is_chat_activated as db_is_chat_activated,
-  set_tenant_db_dir as db_set_tenant_db_dir,
-  reset_tenant_db_dir as db_reset_tenant_db_dir,
-  tenant_db_context as db_tenant_db_context,
 )
-from ..dashboard import DashboardStats
 from ..stickers import resolve_sticker
 from ..messaging.processing import (
   _append_history,
@@ -79,17 +58,11 @@ from ..messaging.processing import (
   _build_burst_current,
   _clean_text,
   _collect_context_ids,
-  _extract_all_send_ack_entries,
-  _extract_send_ack_context_msg_id,
-  _hydrate_provisional_context_id_from_ack,
-  _infer_media,
   _is_context_only_payload,
   _make_request_id,
   _normalize_context_msg_id,
   _normalize_preview_text,
   _payload_to_message,
-  _quoted_preview,
-  _reply_signature,
   extract_first_code_block,
 )
 from ..messaging.filtering import (
@@ -121,50 +94,24 @@ from ..messaging.gateway import (
   send_react_message,
   send_run_command,
   send_sticker,
-  send_lottie_sticker_payload,
-  send_typing,
   typing_indicator,
 )
-from ..messaging.ack_handler import handle_action_ack as _handle_action_ack
 
 from ..media import (
   _append_sticker_log_to_history,
   _cleanup_stale_media_paths,
-  _guess_mime_from_path,
   _parse_sticker_args,
   _resolve_quoted_media_attachments,
   _resolve_sticker_media,
   _store_media_path,
 )
-from .idle_trigger import IdleTrigger
-from .reply_dedup import ReplyDedup
-from .mute_gate import MuteGate
-from .llm1_router import Llm1Router
-from .llm2_responder import Llm2Responder
 
-from ..subagent import (
-  SubTaskTracker,
-  SubAgentClient,
-  SubAgentSubmitError,
-  SubAgentWebhookServer,
-)
-from ..subagent.output import (
-  StagedOutputs,
-  cleanup_input_staging,
-  format_file_list,
-  stage_input_files,
-  stage_output_files,
-)
-from ..subagent.models import SubTask
-from ..subagent.config import SUBAGENT_WAIT_TIMEOUT_S, SUBAGENT_MAX_WAIT_S, SUBAGENT_REPORT_MAX_CHARS
 
 try:
   from ..config import (
     SLOW_BATCH_LOG_MS,
     MAX_TRIGGER_BATCH_AGE_MS,
     REPLY_DEDUP_WINDOW_MS,
-    REPLY_DEDUP_MIN_CHARS,
-    ASSISTANT_ECHO_MERGE_WINDOW_MS,
     INCOMING_DEBOUNCE_SECONDS,
     INCOMING_BURST_MAX_SECONDS,
     REQUIRE_ACTIVATION,
@@ -174,8 +121,6 @@ except ImportError:
     SLOW_BATCH_LOG_MS,
     MAX_TRIGGER_BATCH_AGE_MS,
     REPLY_DEDUP_WINDOW_MS,
-    REPLY_DEDUP_MIN_CHARS,
-    ASSISTANT_ECHO_MERGE_WINDOW_MS,
     INCOMING_DEBOUNCE_SECONDS,
     INCOMING_BURST_MAX_SECONDS,
     REQUIRE_ACTIVATION,
@@ -422,10 +367,10 @@ class BatchProcessor:
         p_chat_type, p_bot_is_admin, p_bot_is_super_admin = _chat_state_from_payload(payload)
         p_reply_to = _normalize_context_msg_id(payload.get("contextMsgId"))
         try:
-          from .llm.prompt import _render_system_prompt, _load_system_prompt, _group_description_block, _chat_state_header, _current_date_str
+          from .llm.prompt import _render_system_prompt, _load_system_prompt, _group_description_block, _chat_state_header
           from .db import get_permission as _get_perm, permission_allows_delete, permission_allows_mute, permission_allows_kick, get_subagent_enabled as _get_subagent
         except ImportError:
-          from bridge.llm.prompt import _render_system_prompt, _load_system_prompt, _group_description_block, _chat_state_header, _current_date_str  # type: ignore
+          from bridge.llm.prompt import _render_system_prompt, _load_system_prompt, _group_description_block, _chat_state_header  # type: ignore
           from bridge.db import get_permission as _get_perm, permission_allows_delete, permission_allows_mute, permission_allows_kick, get_subagent_enabled as _get_subagent  # type: ignore
         p_perm = _get_perm(p_chat_id)
         p_admin_ok = p_bot_is_admin or p_bot_is_super_admin
@@ -1547,7 +1492,6 @@ class BatchProcessor:
     # --- Activation gate (safety net, primary gate is in Node.js) ---
     if REQUIRE_ACTIVATION:
       _act_sender_is_owner = bool(payload.get("senderIsOwner"))
-      _act_chat_type = str(payload.get("chatType") or "").strip().lower()
       if not _act_sender_is_owner and not db_is_chat_activated(chat_id):
         logger.debug(
           "activation gate: dropping message from unactivated chat",

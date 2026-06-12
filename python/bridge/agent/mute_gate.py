@@ -9,7 +9,7 @@ Behaviour is byte-for-byte identical to the original block.
 """
 from __future__ import annotations
 
-from typing import Awaitable, Callable, Optional
+from typing import Awaitable, Callable
 
 from ..log import setup_logging
 

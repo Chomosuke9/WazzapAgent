@@ -3,9 +3,7 @@ from __future__ import annotations
 
 import os
 import sys
-import time
 from pathlib import Path
-from unittest.mock import patch
 
 # Ensure the bridge package is importable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -71,7 +69,7 @@ class TestBuildLlm2Tools:
   def test_base_only(self):
     tools = build_llm2_tools()
     names = [t["function"]["name"] for t in tools]
-    assert names == ["reply_message", "react_to_message", "send_sticker"]
+    assert names == ["reply_message", "react_to_message", "send_sticker", "send_quiz"]
 
   def test_delete_adds_delete(self):
     tools = build_llm2_tools(allow_delete=True)
@@ -93,7 +91,7 @@ class TestBuildLlm2Tools:
   def test_all_permissions(self):
     tools = build_llm2_tools(allow_delete=True, allow_mute=True, allow_kick=True)
     names = [t["function"]["name"] for t in tools]
-    assert len(names) == 6
+    assert len(names) == 7
     assert "delete_messages" in names
     assert "mute_member" in names
     assert "kick_members" in names
@@ -105,7 +103,7 @@ class TestBuildLlm2Tools:
       allow_mute=permission_allows_mute(0),
       allow_kick=permission_allows_kick(0),
     )
-    assert len(tools) == 3
+    assert len(tools) == 4
 
   def test_permission_level_1(self):
     """Level 1: delete only."""
@@ -209,9 +207,9 @@ class TestExtractActionsFromToolCalls:
     assert actions[0]["emoji"] == "👍"
 
   def test_send_sticker(self):
-    tc = [{"name": "send_sticker", "args": {"context_msg_id": "none", "sticker_name": "laughing"}}]
+    tc = [{"name": "send_sticker", "args": {"context_msg_id": "000123", "sticker_name": "laughing"}}]
     actions = _extract_actions_from_tool_calls(
-      tc, fallback_reply_to=None, allowed_context_ids=set(),
+      tc, fallback_reply_to=None, allowed_context_ids={"000123"},
     )
     assert len(actions) == 1
     assert actions[0]["type"] == "send_sticker"

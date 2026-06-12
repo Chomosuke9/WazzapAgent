@@ -19,7 +19,7 @@ builder is accepted for injection/visibility but defaults to the real one.
 """
 from __future__ import annotations
 
-from typing import Awaitable, Callable, Iterable, Optional
+from typing import Awaitable, Callable, Iterable
 
 from ..history import WhatsAppMessage
 from ..llm.llm2 import generate_reply as _default_generate_reply

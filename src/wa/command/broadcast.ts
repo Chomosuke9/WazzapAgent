@@ -22,7 +22,7 @@ async function reconstructAndSend(
   }
 
   try {
-    const { generateWAMessageFromContent, generateMessageIDV2 } =
+    const { generateWAMessageFromContent } =
       await import("baileys");
     const wrappedMsg = generateWAMessageFromContent(targetJid, msg, {
       userJid: sock.user!.id,
@@ -74,8 +74,8 @@ async function handleBroadcastCommand({
   senderId,
   text,
   quotedMessageId,
-  contextMsgId,
-  msg,
+  contextMsgId: _contextMsgId,
+  msg: _msg,
   account,
   sock,
   repos,

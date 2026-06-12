@@ -808,7 +808,6 @@ _default_llm2_model_cache: Optional[dict] = None
 
 def clear_llm2_model_cache(chat_id: Optional[str] = None) -> None:
   """Clear the LLM2 model cache. If chat_id is provided, only that chat is invalidated. Otherwise, all chats are cleared."""
-  global _llm2_model_cache
   with _cache_lock:
     if chat_id is not None:
       if chat_id in _llm2_model_cache:

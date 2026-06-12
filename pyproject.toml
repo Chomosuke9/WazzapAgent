@@ -1,0 +1,12 @@
+[tool.ruff]
+# WazzapAgents' Python uses 2-space indentation (an intentional house style),
+# so we deliberately do NOT enable pycodestyle layout rules (E1xx) — they would
+# fight the formatting on every line. We lint with pyflakes ("F") only, which
+# catches the warnings that actually matter here: unused imports (F401),
+# undefined names (F821), unused local variables (F841), redefinitions, etc.
+# Existing `# noqa: F401` markers on intentional re-exports are honored.
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["F"]

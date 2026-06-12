@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import threading
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 from .db import (
   upsert_stats_batch,
@@ -114,7 +113,6 @@ class DashboardStats:
         ]
         upsert_user_stats_batch(rows)
 
-      total = len(stats_snapshot) + len(user_snapshot)
       logger.debug("dashboard flush: %d stat rows, %d user rows", len(stats_snapshot), len(user_snapshot))
     except Exception as e:
       with self._buffer_lock:

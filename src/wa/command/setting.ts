@@ -20,7 +20,7 @@ function formatActivationInfo(repos: AccountRepositories, chatId: string): strin
   return `${Math.floor(diffMs / 60000)} menit`;
 }
 
-async function handleSettings({ chatId, chatType, senderId, senderIsAdmin, senderIsOwner, args, sock, repos }: CommandContext): Promise<void> {
+async function handleSettings({ chatId, chatType, senderId: _senderId, senderIsAdmin, senderIsOwner, args: _args, sock, repos }: CommandContext): Promise<void> {
   const isPrivate = chatType === 'private';
   const canUse = isPrivate || senderIsOwner || senderIsAdmin;
 

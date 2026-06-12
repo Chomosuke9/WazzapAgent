@@ -9,7 +9,7 @@
     "dev": "tsx src/index.ts",
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "echo \"lint not configured\"",
+    "lint": "tsc --noEmit && ruff check python",
     "test": "node --test --import tsx 'tests/**/*.test.ts'"
   },
   "keywords": [

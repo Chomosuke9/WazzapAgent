@@ -10,11 +10,7 @@ from langchain_openai import ChatOpenAI
 
 from .. import config
 from ..config import (
-    _clean_env,
     _endpoint_base_url,
-    _parse_non_negative_int,
-    _parse_positive_float,
-    _parse_positive_int,
 )
 from ..db import (
     get_default_llm2_model,
@@ -25,7 +21,7 @@ from ..db import (
 )
 from ..db import get_llm2_model as db_get_llm2_model
 from ..db import get_permission as db_get_permission
-from ..history import WhatsAppMessage, assistant_name, format_history
+from ..history import WhatsAppMessage, format_history
 from ..log import dump_json, env_flag, setup_logging, trunc
 from ..media import build_visual_parts, redact_multimodal_content
 from ..stickers import sticker_catalog_text

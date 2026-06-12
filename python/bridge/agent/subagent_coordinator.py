@@ -28,124 +28,40 @@ import shutil
 import tempfile
 import time
 import uuid
-from collections import OrderedDict, defaultdict, deque
-from dataclasses import dataclass, field
-from typing import Deque, Dict, Set
+from collections import OrderedDict, deque
 
 from ..history import (
   WhatsAppMessage,
   assistant_name,
   assistant_sender_ref,
-  assistant_name_pattern,
-  format_history,
   hydrate_quoted_from_history,
 )
-from ..log import setup_logging, set_chat_log_context, reset_chat_log_context
-from ..llm.llm1 import call_llm1, LLM1Decision
-from ..llm.llm2 import generate_reply
-from ..db import (
-  get_mode as db_get_mode,
-  get_triggers as db_get_triggers,
-  is_muted as db_is_muted,
-  is_mute_notified as db_is_mute_notified,
-  mark_mute_notified as db_mark_mute_notified,
-  add_mute as db_add_mute,
-  remove_mute as db_remove_mute,
-  clear_mutes as db_clear_mutes,
-  get_mute_remaining_minutes as db_get_mute_remaining,
-  set_permission as db_set_permission,
-  set_llm2_model as db_set_llm2_model,
-  clear_llm2_model_cache as db_clear_llm2_model_cache,
-  clear_default_llm2_model_cache as db_clear_default_llm2_model_cache,
-  reset_settings_connection as db_reset_settings_connection,
-  invalidate_chat_caches as db_invalidate_chat_caches,
-  close_all_connections as db_close_all_connections,
-  checkpoint_all_dbs as db_checkpoint_all_dbs,
-  get_subagent_enabled as db_get_subagent_enabled,
-  set_subagent_enabled as db_set_subagent_enabled,
-  clear_subagent_enabled_cache as db_clear_subagent_enabled_cache,
-  get_idle_trigger as db_get_idle_trigger,
-  is_chat_activated as db_is_chat_activated,
-  set_tenant_db_dir as db_set_tenant_db_dir,
-  reset_tenant_db_dir as db_reset_tenant_db_dir,
-  tenant_db_context as db_tenant_db_context,
-)
-from ..dashboard import DashboardStats
+from ..log import setup_logging
 from ..stickers import resolve_sticker
 from ..messaging.processing import (
   _append_history,
-  _append_or_merge_history_payload,
-  _build_burst_current,
-  _clean_text,
-  _collect_context_ids,
-  _extract_all_send_ack_entries,
-  _extract_send_ack_context_msg_id,
-  _hydrate_provisional_context_id_from_ack,
-  _infer_media,
-  _is_context_only_payload,
   _make_request_id,
   _normalize_context_msg_id,
   _normalize_preview_text,
-  _payload_to_message,
-  _quoted_preview,
-  _reply_signature,
   extract_first_code_block,
-)
-from ..messaging.filtering import (
-  _chat_state_from_payload,
-  _message_matches_prefix,
-  _payload_has_meaningful_content,
-  _payload_triggers_llm1,
-)
-from ..llm.metadata import (
-  _build_llm1_context_metadata,
-  _resolve_group_prompt_context,
-)
-from ..messaging.moderation import (
-  _merge_payload_attachments,
 )
 from ..messaging.actions import (
   _extract_actions,
   _extract_actions_from_tool_calls,
-  _extract_reply_text,
 )
 from ..messaging.gateway import (
   send_attachment,
   send_copy_code,
   send_delete_message,
   send_kick_member,
-  send_mark_read,
   send_message,
-  send_quiz,
   send_react_message,
-  send_run_command,
-  send_sticker,
-  send_lottie_sticker_payload,
-  send_typing,
   typing_indicator,
 )
-from ..messaging.ack_handler import handle_action_ack as _handle_action_ack
 
-from ..media import (
-  _append_sticker_log_to_history,
-  _cleanup_stale_media_paths,
-  _guess_mime_from_path,
-  _parse_sticker_args,
-  _resolve_quoted_media_attachments,
-  _resolve_sticker_media,
-  _store_media_path,
-)
-from .idle_trigger import IdleTrigger
-from .reply_dedup import ReplyDedup
-from .mute_gate import MuteGate
-from .llm1_router import Llm1Router
-from .llm2_responder import Llm2Responder
 
 from ..subagent import (
-  SubTaskTracker,
-  SubAgentClient,
   SubAgentSubmitError,
-  SubAgentWebhookServer,
 )
 from ..subagent.output import (
   StagedOutputs,
@@ -155,30 +71,7 @@ from ..subagent.output import (
   stage_output_files,
 )
 from ..subagent.models import SubTask
-from ..subagent.config import SUBAGENT_WAIT_TIMEOUT_S, SUBAGENT_MAX_WAIT_S, SUBAGENT_REPORT_MAX_CHARS
-
-try:
-  from ..config import (
-    SLOW_BATCH_LOG_MS,
-    MAX_TRIGGER_BATCH_AGE_MS,
-    REPLY_DEDUP_WINDOW_MS,
-    REPLY_DEDUP_MIN_CHARS,
-    ASSISTANT_ECHO_MERGE_WINDOW_MS,
-    INCOMING_DEBOUNCE_SECONDS,
-    INCOMING_BURST_MAX_SECONDS,
-    REQUIRE_ACTIVATION,
-  )
-except ImportError:
-  from bridge.config import (  # type: ignore
-    SLOW_BATCH_LOG_MS,
-    MAX_TRIGGER_BATCH_AGE_MS,
-    REPLY_DEDUP_WINDOW_MS,
-    REPLY_DEDUP_MIN_CHARS,
-    ASSISTANT_ECHO_MERGE_WINDOW_MS,
-    INCOMING_DEBOUNCE_SECONDS,
-    INCOMING_BURST_MAX_SECONDS,
-    REQUIRE_ACTIVATION,
-  )
+from ..subagent.config import SUBAGENT_WAIT_TIMEOUT_S, SUBAGENT_MAX_WAIT_S
 
 logger = setup_logging()
 from ..messaging.gateway import _dispatch_sticker
@@ -894,7 +787,6 @@ context block from ``SubTaskTracker.format_context``).
           # An absolute ceiling (SUBAGENT_MAX_WAIT_S) prevents
           # infinite hangs.
           start_time = time.monotonic()
-          timed_out = False
           while True:
             remaining = SUBAGENT_MAX_WAIT_S - (time.monotonic() - start_time)
             if remaining <= 0:
@@ -916,7 +808,6 @@ context block from ``SubTaskTracker.format_context``).
                   f"be too complex or the sub-agent is stuck."
                 ),
               })
-              timed_out = True
               break
 
             try:
@@ -961,7 +852,6 @@ context block from ``SubTaskTracker.format_context``).
                   f"service crashed or the network is partitioned."
                 ),
               })
-              timed_out = True
               break
 
           # Acquire the per-chat lock for history mutation + send.
@@ -985,7 +875,7 @@ context block from ``SubTaskTracker.format_context``).
               bot_is_super_admin=bot_is_super_admin,
               fallback_reply_to=fallback_reply_to,
               allowed_context_ids=allowed_context_ids,
-              record_stat_fn=record_stat,
+              record_stat_fn=session._dashboard.record_stat,
               responder=session._llm2,
               pending_subagent_attachments=pending_subagent_attachments,
               pending_send_request_chat=pending_send_request_chat,
@@ -1129,7 +1019,6 @@ context block from ``SubTaskTracker.format_context``).
               ):
                 try:
                   start_time = time.monotonic()
-                  timed_out = False
                   while True:
                     remaining = SUBAGENT_MAX_WAIT_S - (time.monotonic() - start_time)
                     if remaining <= 0:
@@ -1144,7 +1033,6 @@ context block from ``SubTaskTracker.format_context``).
                         "success": False,
                         "report": f"Correction sub-agent did not finish within {int(SUBAGENT_MAX_WAIT_S)}s.",
                       })
-                      timed_out = True
                       break
                     try:
                       await asyncio.wait_for(completion_event.wait(), timeout=SUBAGENT_WAIT_TIMEOUT_S)
@@ -1166,7 +1054,6 @@ context block from ``SubTaskTracker.format_context``).
                         "success": False,
                         "report": "Correction sub-agent timed out.",
                       })
-                      timed_out = True
                       break
                   async with lock:
                     await _deliver_subagent_result(
@@ -1184,7 +1071,7 @@ context block from ``SubTaskTracker.format_context``).
                       bot_is_super_admin=bot_is_super_admin,
                       fallback_reply_to=fallback_reply_to,
                       allowed_context_ids=allowed_context_ids,
-                      record_stat_fn=record_stat,
+                      record_stat_fn=session._dashboard.record_stat,
                       responder=session._llm2,
                       pending_subagent_attachments=pending_subagent_attachments,
                       pending_send_request_chat=pending_send_request_chat,

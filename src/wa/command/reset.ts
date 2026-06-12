@@ -8,7 +8,7 @@ async function handleReset({
   chatType,
   senderIsAdmin,
   senderIsOwner,
-  contextMsgId,
+  contextMsgId: _contextMsgId,
   args,
   folderPath = config.dataDir,
   sock,

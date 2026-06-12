@@ -187,7 +187,6 @@ async function sendDebugCarousel(sock: WaSocketLike, chatId: string): Promise<vo
 
 // Default fallback image — picsum.photos is a standard dev placeholder service
 const DEBUG_IMG_DEFAULT = 'https://picsum.photos/seed/wazzap/600/400';
-const DEBUG_IMG_MIME = 'image/jpeg';
 
 async function sendDebugCarouselImg(sock: WaSocketLike, chatId: string, imageUrl: string | null): Promise<void> {
   const url = imageUrl || DEBUG_IMG_DEFAULT;

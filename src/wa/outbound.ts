@@ -36,7 +36,6 @@ import {
   normalizeMime,
   inferExtension,
 } from '../mediaHandler.js';
-import { escapeRegex } from './utils.js';
 import { actionError } from './actions.js';
 import { sendRichMessage } from './interactive/index.js';
 import config from '../config.js';

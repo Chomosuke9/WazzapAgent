@@ -15,11 +15,9 @@ These pin the contract that:
 
 from __future__ import annotations
 
-import asyncio
 import sys
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any, List, Tuple
+from typing import List, Tuple
 from unittest.mock import AsyncMock
 
 import pytest

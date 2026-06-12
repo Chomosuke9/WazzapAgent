@@ -56,14 +56,13 @@ function parseSetArgs(args: string): { phoneNumber: string; displayName: string 
 
 async function handleOwnerContact({
   chatId,
-  chatType,
-  senderIsAdmin,
+  chatType: _chatType,
+  senderIsAdmin: _senderIsAdmin,
   senderIsOwner,
   args,
   sock,
   repos,
 }: CommandContext): Promise<void> {
-  const isPrivate = chatType === "private";
   const rawArgs = typeof args === "string" ? args.trim() : "";
 
   // ── No args: send stored contact card ──

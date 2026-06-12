@@ -200,6 +200,11 @@ class SubTaskTracker:
         lines.append(
             "This task has already been delivered to the user (if there are any files attached to it)."
         )
+        lines.append(
+            "DO NOT call `execute_subtask` again for THIS SAME task — it is "
+            "already done and delivered. You MAY call it for a DIFFERENT new "
+            "task the user explicitly asks for."
+        )
         return "\n".join(lines)
 
     def clear_history_for_chat(self, chat_id: str) -> None:

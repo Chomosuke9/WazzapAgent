@@ -8,11 +8,9 @@ import os
 import sys
 from pathlib import Path
 
-import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import bridge.subagent.output
 from bridge.subagent.output import (
   MAX_FILE_SIZE_BYTES,
   StagedFile,
@@ -27,7 +25,6 @@ from bridge.subagent.output import (
 from bridge.messaging.gateway import send_attachment
 from wasocket import WaSocket
 from wasocket import protocol as wa_protocol
-import bridge.subagent.client
 from bridge.subagent.client import SubAgentClient
 
 

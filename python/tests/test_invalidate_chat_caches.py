@@ -53,12 +53,14 @@ def test_invalidate_chat_caches_pops_every_per_chat_cache():
     # _llm2_model_cache and _subagent_enabled_cache are cleared globally
     # by reset_settings_connection() — verified separately below.
 
-    # Other chats' per-key caches must remain — only the WAL-snapshot
-    # caches (model + subagent_enabled) are wiped wholesale.
-    assert db._prompt_cache.get("chat-b") == "stale-prompt"
-    assert db._permission_cache.get("chat-b") == 2
-    assert db._mode_cache.get("chat-b") == "auto"
-    assert db._triggers_cache.get("chat-b") == "tag,reply"
+    # Other chats' caches are also dropped: invalidate_chat_caches() calls
+    # reset_settings_connection(), which by design clears EVERY settings.db-
+    # backed cache wholesale (so a forced re-read never serves a stale value).
+    # The other chats simply re-read from the fresh DB on next access.
+    assert db._prompt_cache.get("chat-b") is None
+    assert db._permission_cache.get("chat-b") is None
+    assert db._mode_cache.get("chat-b") is None
+    assert db._triggers_cache.get("chat-b") is None
 
 
 def test_invalidate_chat_caches_resets_settings_connection_caches():

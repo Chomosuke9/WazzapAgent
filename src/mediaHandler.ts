@@ -5,10 +5,6 @@ import type { MediaType } from 'baileys';
 import logger from './logger.js';
 import config from './config.js';
 import { streamToFile } from './utils/index.js';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 /**
  * Concrete media kinds saveMedia knows how to persist.

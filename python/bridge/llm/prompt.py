@@ -6,7 +6,6 @@ from typing import Iterable, Optional
 
 from .. import config
 from ..history import WhatsAppMessage, assistant_name, format_history
-from ..stickers import sticker_catalog_text
 from .schemas import LLM1_TOOL  # noqa: F401
 
 # --- LLM2 system-prompt assembly (Step 09; moved verbatim from llm2.py) -------

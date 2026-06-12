@@ -4,7 +4,7 @@ import config from '../../config.js';
 import * as registry from '../../server/accountRegistry.js';
 import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
 
-async function handleModelcfg({ chatId, senderId, senderIsOwner, args, folderPath = config.dataDir, sock, repos }: CommandContext): Promise<void> {
+async function handleModelcfg({ chatId, senderId: _senderId, senderIsOwner, args, folderPath = config.dataDir, sock, repos }: CommandContext): Promise<void> {
   if (!senderIsOwner) {
     try {
       await sock.sendMessage(chatId, { text: 'Only bot owner can use `/modelcfg`.' });

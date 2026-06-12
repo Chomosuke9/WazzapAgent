@@ -47,9 +47,11 @@ def test_active_context_warns_against_reack_and_respawn():
     # Active-task header + instruction should be present.
     assert "Active sub-agent task" in block
     assert "Summarise the attached PDF" in block
-    # The new anti-loop guidance MUST be present — without it the model
-    # happily emits another "oke aku cek dulu" while the task is in flight.
-    assert "DO NOT call `execute_subtask` again" in block
+    # While a task is in flight the model MAY call execute_subtask again —
+    # that steers the running task rather than re-spawning it — so the block
+    # surfaces the steering option plus the no-re-acknowledge guard that
+    # actually stops the "oke aku cek dulu" reply loop.
+    assert "steering" in block
     assert "DO NOT re-acknowledge" in block
 
 

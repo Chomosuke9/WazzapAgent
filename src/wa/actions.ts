@@ -12,7 +12,6 @@
  *   - 'invalid_target'   — missing contextMsgId, emoji, or cross-chat reference
  *   - 'send_failed'      — socket not ready or WhatsApp API error
  */
-import logger from '../logger.js';
 import {
   normalizeContextMsgId,
   getIndexedMessageByContextId,
