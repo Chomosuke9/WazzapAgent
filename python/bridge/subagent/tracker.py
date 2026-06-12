@@ -4,19 +4,8 @@ import time
 from collections import deque
 from typing import Deque, Dict, Optional
 
-try:
-    from .config import SUBAGENT_PROGRESS_DETAIL_MAX_CHARS, SUBAGENT_REPORT_MAX_CHARS
-    from .models import ProgressEntry, SubTask
-except ImportError:
-    import sys
-    from pathlib import Path
-
-    sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
-    from bridge.subagent.config import (  # type: ignore
-        SUBAGENT_PROGRESS_DETAIL_MAX_CHARS,
-        SUBAGENT_REPORT_MAX_CHARS,
-    )
-    from bridge.subagent.models import ProgressEntry, SubTask  # type: ignore
+from .config import SUBAGENT_PROGRESS_DETAIL_MAX_CHARS, SUBAGENT_REPORT_MAX_CHARS
+from .models import ProgressEntry, SubTask
 
 
 def _truncate(text: Optional[str], limit: int) -> Optional[str]:

@@ -1,12 +1,6 @@
 from __future__ import annotations
 
-try:
-  from ..log import setup_logging
-except ImportError:
-  import sys
-  from pathlib import Path
-  sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
-  from bridge.log import setup_logging  # type: ignore
+from ..log import setup_logging
 
 logger = setup_logging()
 

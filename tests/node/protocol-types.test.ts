@@ -35,7 +35,7 @@ import type {
   // unions (proving resolution)
   InboundFrame,
   OutboundFrame,
-} from '../../migration/node/protocol/types.ts';
+} from '../../src/protocol/types.ts';
 
 // ---- one literal of each inbound *Payload ----
 const helloPayload: HelloPayload = { folderPath: '/tenants/acme', protocolVersion: '2.0' };

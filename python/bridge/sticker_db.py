@@ -43,12 +43,13 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from . import config
+from .log import setup_logging
+
 try:
-  from .log import setup_logging
+  from .db import current_tenant_db_root as _current_tenant_db_root
 except ImportError:
-  import sys
-  sys.path.append(str(Path(__file__).resolve().parent.parent))
-  from bridge.log import setup_logging  # type: ignore
+  from bridge.db import current_tenant_db_root as _current_tenant_db_root  # type: ignore
 
 logger = setup_logging()
 
@@ -82,9 +83,9 @@ _DB_BUSY_TOKENS = (
   "database is busy",
 )
 
-DB_BUSY_TIMEOUT_SECONDS = float(os.getenv("DB_BUSY_TIMEOUT_SECONDS", "30"))
-DB_OPERATION_RETRY_MAX = int(os.getenv("DB_OPERATION_RETRY_MAX", "8"))
-DB_OPERATION_RETRY_BASE = float(os.getenv("DB_OPERATION_RETRY_BASE_SECONDS", "0.05"))
+DB_BUSY_TIMEOUT_SECONDS = config.db_busy_timeout_seconds()
+DB_OPERATION_RETRY_MAX = config.db_operation_retry_max()
+DB_OPERATION_RETRY_BASE = config.db_operation_retry_base()
 
 
 def _is_corruption_error(exc: BaseException) -> bool:
@@ -106,10 +107,19 @@ def _is_busy_error(exc: BaseException) -> bool:
 # ---------------------------------------------------------------------------
 
 def _resolve_db_path() -> Path:
+  # Per-tenant routing (Step 33 / CONTRACT.md §8): when an AgentSession has
+  # bound a tenant, resolve under ``<folder_path>/db/stickers.db`` so each
+  # account owns its own sticker catalog with no cross-talk. Falls back to the
+  # legacy global env path / DATA_DIR when no tenant is bound.
+  root = _current_tenant_db_root()
+  if root is not None:
+    path = root / "stickers.db"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
   global _DB_PATH
   if _DB_PATH is not None:
     return _DB_PATH
-  raw = os.getenv("BOT_STICKERS_DB_PATH") or os.getenv("STICKERS_DB_PATH")
+  raw = config.stickers_db_path_raw()
   if raw and raw.strip():
     _DB_PATH = Path(raw.strip())
   else:
@@ -119,7 +129,7 @@ def _resolve_db_path() -> Path:
 
 
 def _sticker_upload_dir() -> Path:
-  raw = os.getenv("STICKER_UPLOAD_DIR")
+  raw = config.sticker_upload_dir_raw()
   if raw and raw.strip():
     d = Path(raw.strip())
   else:
@@ -170,24 +180,33 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
 
 
 def _get_conn() -> sqlite3.Connection:
-  conn: Optional[sqlite3.Connection] = getattr(_LOCAL, "sticker_conn", None)
+  db_path = _resolve_db_path()
+  store = getattr(_LOCAL, "sticker_conns", None)
+  if store is None:
+    store = {}
+    _LOCAL.sticker_conns = store
+  key = str(db_path)
+  conn: Optional[sqlite3.Connection] = store.get(key)
   if conn is not None:
     return conn
-  db_path = _resolve_db_path()
   conn = _new_conn(db_path)
   _ensure_tables(conn)
-  _LOCAL.sticker_conn = conn
+  store[key] = conn
   return conn
 
 
 def _drop_conn() -> None:
-  conn: Optional[sqlite3.Connection] = getattr(_LOCAL, "sticker_conn", None)
+  store = getattr(_LOCAL, "sticker_conns", None)
+  if not store:
+    return
+  db_path = str(_resolve_db_path())
+  conn: Optional[sqlite3.Connection] = store.get(db_path)
   if conn is not None:
     try:
       conn.close()
     except Exception:
       pass
-    _LOCAL.sticker_conn = None
+    store.pop(db_path, None)
 
 
 def _backup_corrupt(db_path: Path) -> None:

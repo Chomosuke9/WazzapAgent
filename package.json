@@ -2,16 +2,15 @@
   "name": "wazzapagents",
   "version": "1.0.0",
   "description": "WhatsApp → LLM gateway using Baileys v7 and outbound WebSocket to LLM service.",
-  "main": "src/index.js",
+  "main": "src/index.ts",
   "type": "module",
   "scripts": {
     "postinstall": "node scripts/patch-baileys.js",
-    "dev": "tsx migration/node/index.js",
-    "start": "tsx migration/node/index.js",
+    "dev": "tsx src/index.ts",
+    "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "lint": "echo \"lint not configured\"",
-    "test": "node --test --import tsx 'tests/**/*.test.mjs' 'tests/**/*.test.ts'",
-    "stress:db": "node tests/db-stress/stress.mjs"
+    "test": "node --test --import tsx 'tests/**/*.test.ts'"
   },
   "keywords": [
     "whatsapp",

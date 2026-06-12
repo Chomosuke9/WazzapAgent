@@ -33,12 +33,15 @@ after the `hello`/`hello_ack` handshake (CONTRACT.md §1.1).
      ↕                ↕                 (Baileys v7 socket, per-tenant auth)
 ┌──────────────────────────────────────────────────────────────────┐
 │  Node.js Gateway — WS SERVER, listens on WS_LISTEN_PORT (:3000)    │
-│  migration/node/                                                   │
+│  src/  (TypeScript)                                                │
 │   server/        wsServer.ts (accept), accountRegistry.ts (bind)   │
 │   account/       baileysFactory, accountContext, actionDispatcher, │
-│                  eventForwarder   (one AccountEntry per folder_path)│
-│   wa/            inbound / outbound / actions / moderation / cmds   │
-│   protocol/      types.ts (wire types, CONTRACT §5)                 │
+│                  eventForwarder   (one AccountEntry per folder_path:│
+│                  owns its Database + repositories)                 │
+│   db/            Database + schema/ + repositories/                │
+│   wa/            domain/ + inbound/outbound/actions/moderation +   │
+│                  commands/ (CommandRegistry)                       │
+│   protocol/      types.ts + ports.ts (wire types, CONTRACT §5)     │
 └──────────────────────────────────────────────────────────────────┘
         ▲  hello / hello_ack (§1.1)          ▲
         │  incoming_message, whatsapp_status,│  actions: send_message,
@@ -49,11 +52,13 @@ after the `hello`/`hello_ack` handshake (CONTRACT.md §1.1).
 │ Python WaSocket A      │          │ Python WaSocket B      │
 │ folder_path = tenants/a│          │ folder_path = tenants/b│
 │  wasocket/ (SDK §4)    │          │  wasocket/ (SDK §4)    │
-│  bridge/session.py     │          │  bridge/session.py     │
-│   ├ debounce/batching  │          │   ├ debounce/batching  │
-│   ├ LLM1 router        │          │   ├ LLM1 router        │
-│   ├ LLM2 + tools       │          │   ├ LLM2 + tools       │
-│   └ action dispatch    │          │   └ action dispatch    │
+│  bridge/  AgentSession │          │  bridge/  AgentSession │
+│  (composition root)    │          │  (composition root)    │
+│   wiring agent/ collabs:          │   wiring agent/ collabs:
+│   ├ BatchProcessor     │          │   ├ BatchProcessor     │
+│   ├ Llm1Router         │          │   ├ Llm1Router         │
+│   ├ Llm2Responder      │          │   ├ Llm2Responder      │
+│   └ SubAgentCoordinator│          │   └ SubAgentCoordinator│
 └────────────────────────┘          └────────────────────────┘
    <tenants/a>/{auth,db,media,stickers}   <tenants/b>/{auth,db,media,stickers}
               (CONTRACT §8 — fully isolated per tenant)
@@ -83,8 +88,9 @@ See [AGENTS.md](./AGENTS.md) for ADRs, terminology, and detailed module descript
    `WS_LISTEN_PORT` and, per tenant `folder_path`, creates/resumes a Baileys
    socket.
 5. **Then start the Python bridge** (the dialing client(s)):
-   `python -m bridge.main` (from `migration/python`). Each configured account
-   dials `NODE_URL`, sends `hello { folderPath }`, and awaits `hello_ack`.
+   `python -m bridge.main` (from the repo root, with `PYTHONPATH=python`). Each
+   configured account dials `NODE_URL`, sends `hello { folderPath }`, and awaits
+   `hello_ack`.
 6. Scan the QR printed in the Node logs to pair each WhatsApp account (auth is
    stored under each tenant's `<folder_path>/auth`).
 
@@ -100,12 +106,12 @@ resolves accounts in this order (first match wins):
    the shared `NODE_URL`.
 2. `FOLDER_PATHS` — comma-separated tenant folders, all sharing `NODE_URL`.
 3. **Single-account fallback** — `FOLDER_PATH` (or `DATA_DIR`, or the repo
-   default `migration/data`), sharing `NODE_URL`. This preserves single-account
+   default `data`), sharing `NODE_URL`. This preserves single-account
    boot when no multi-account list is configured.
 
 ```dotenv
 # single account
-FOLDER_PATH=./migration/data
+FOLDER_PATH=./data
 NODE_URL=ws://localhost:3000
 
 # …or multiple accounts, one Baileys socket / WaSocket per folder
@@ -120,7 +126,7 @@ handshake, and exposes typed action methods and an `on(event)` decorator:
 
 ```python
 import asyncio
-from wasocket import make_wa_socket   # migration/python/wasocket
+from wasocket import make_wa_socket   # python/wasocket
 
 async def main():
     sock = make_wa_socket("./tenants/acct-a")   # folder_path == account key
@@ -719,22 +725,3 @@ can assert tenant ownership.
 - **Interactive messages** (`viewOnceMessage` + `additionalNodes`) only render on mobile clients, not WhatsApp Web.
 - **LLM1 is skipped in private chats** — all DMs get a full LLM2 response (confidence 100).
 
-## Example LLM WebSocket (Python) — DEPRECATED (legacy topology)
-
-> **Deprecated.** `examples/llm_ws_echo.py` and the old `LLM_WS_ENDPOINT` model
-> assumed the **pre-migration** direction (Python as the WS server, Node as the
-> client). The topology is now reversed — Node serves on `WS_LISTEN_PORT` and
-> the Python `WaSocket` SDK dials `NODE_URL`. For new code use
-> `make_wa_socket(folder_path)` (see "Embedding a `WaSocket` directly" above and
-> CONTRACT.md §4). The example below is kept for backward-compat reference only.
-
-See `examples/llm_ws_echo.py` for a minimal server that:
-- Listens on `ws://0.0.0.0:8080/ws`.
-- Logs `incoming_message` payload including `contextMsgId` and `senderRef`.
-- Sends `send_message`, `delete_message`, `react_message`, and `kick_member` examples.
-
-Run:
-```bash
-pip install websockets==12.* pydantic
-python examples/llm_ws_echo.py
-```

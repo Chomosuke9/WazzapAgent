@@ -25,6 +25,8 @@ from bridge.subagent.output import (
   stage_output_files,
 )
 from bridge.messaging.gateway import send_attachment
+from wasocket import WaSocket
+from wasocket import protocol as wa_protocol
 import bridge.subagent.client
 from bridge.subagent.client import SubAgentClient
 
@@ -508,12 +510,42 @@ class TestFormatFileList:
 # send_attachment gateway helper
 # ---------------------------------------------------------------------------
 
-class FakeWS:
-  def __init__(self):
-    self.sent: list[str] = []
+class FakeWS(WaSocket):
+  """A real :class:`wasocket.WaSocket` wired to a recording transport.
 
-  async def send(self, payload: str) -> None:
-    self.sent.append(payload)
+  Step 12 moved the bridge's transport seam onto the SDK's PUBLIC API: the
+  gateway ``send_*`` helpers now call public action methods (``ws.send_message``
+  etc.) and pass the bridge's own ``request_id`` instead of reaching into a
+  private transport attribute. This fake is therefore a genuine ``WaSocket``
+  whose transport is a tiny recorder injected through the PUBLIC ``transport=``
+  constructor seam (no private-attribute reach-in). ``self.sent`` holds the
+  EXACT wire strings the SDK emits via :func:`wasocket.protocol.encode` — the
+  same JSON frames the gateway produced before the seam moved.
+
+  Because the gateway passes its own ``request_id``, the SDK registers the
+  pending future but returns immediately (fire-and-forget) without awaiting an
+  ack, so these calls complete without a live Node server.
+  """
+
+  class _Recorder:
+    """Records each frame the SDK hands the transport, encoded to the wire."""
+
+    def __init__(self) -> None:
+      self.frames: list[str] = []
+
+    async def send(self, frame) -> None:
+      # ``frame`` is a protocol dataclass; encode it exactly as the real
+      # transport's ``_encode`` would, so recorded bytes match the wire.
+      self.frames.append(wa_protocol.encode(frame))
+
+  def __init__(self) -> None:
+    recorder = FakeWS._Recorder()
+    super().__init__("/tenant-fake", transport=recorder)
+    self._recorder = recorder
+
+  @property
+  def sent(self) -> list[str]:
+    return self._recorder.frames
 
 
 class TestSendAttachment:
@@ -533,7 +565,10 @@ class TestSendAttachment:
     payload = msg["payload"]
     assert payload["chatId"] == "123@s.whatsapp.net"
     assert payload["requestId"] == "req-1"
-    assert "text" not in payload
+    # The single protocol encoder (wasocket.protocol.encode) serializes the
+    # optional ``text`` field explicitly as null when not provided; either way
+    # no text bubble is sent alongside the attachment.
+    assert payload.get("text") is None
     assert payload["attachments"] == [{
       "kind": "document",
       "path": "/data/media/subagent_out/sess/file.pdf",

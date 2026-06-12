@@ -9,39 +9,19 @@ try:
 except ImportError:
   requests = None  # type: ignore
 
-try:
-  from ..log import setup_logging
-except ImportError:
-  import sys
-  from pathlib import Path
-  sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
-  from bridge.log import setup_logging  # type: ignore
+from ..log import setup_logging
 
 logger = setup_logging()
 
-try:
-  from .config import (
-    SUBAGENT_URL,
-    SUBAGENT_WEBHOOK_URL,
-    SUBAGENT_SUBMIT_RETRY_MAX,
-    SUBAGENT_SUBMIT_RETRY_BASE_BACKOFF,
-    SUBAGENT_SUBMIT_RETRY_MAX_BACKOFF,
-    SUBAGENT_HTTP_TIMEOUT,
-    SUBAGENT_MAX_INLINE_FILE_BYTES,
-  )
-except ImportError:
-  import sys
-  from pathlib import Path
-  sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
-  from bridge.subagent.config import (  # type: ignore
-    SUBAGENT_URL,
-    SUBAGENT_WEBHOOK_URL,
-    SUBAGENT_SUBMIT_RETRY_MAX,
-    SUBAGENT_SUBMIT_RETRY_BASE_BACKOFF,
-    SUBAGENT_SUBMIT_RETRY_MAX_BACKOFF,
-    SUBAGENT_HTTP_TIMEOUT,
-    SUBAGENT_MAX_INLINE_FILE_BYTES,
-  )
+from .config import (
+  SUBAGENT_URL,
+  SUBAGENT_WEBHOOK_URL,
+  SUBAGENT_SUBMIT_RETRY_MAX,
+  SUBAGENT_SUBMIT_RETRY_BASE_BACKOFF,
+  SUBAGENT_SUBMIT_RETRY_MAX_BACKOFF,
+  SUBAGENT_HTTP_TIMEOUT,
+  SUBAGENT_MAX_INLINE_FILE_BYTES,
+)
 
 
 class SubAgentSubmitError(RuntimeError):

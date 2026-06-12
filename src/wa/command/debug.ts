@@ -1,0 +1,300 @@
+import logger from '../../logger.js';
+import { isOwnerJid } from '../domain/participants.js';
+import type { WaSocketLike } from '../../protocol/ports.js';
+import { sendNativeFlow, sendCarousel, sendRichMessage, sendList, sendCombinedButtons } from '../interactive/index.js';
+import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
+
+// ---------------------------------------------------------------------------
+// /debug command
+// ---------------------------------------------------------------------------
+
+const DEBUG_TYPES = ['buttons', 'menu', 'list', 'rich', 'combined', 'broadcast', 'carousel', 'carousel-img', 'all'];
+
+async function sendDebugButtons(sock: WaSocketLike, chatId: string): Promise<void> {
+  // quick_reply × 3
+  await sendNativeFlow(sock, chatId, '[DEBUG] quick_reply buttons', [
+    { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Option A', id: 'debug_qr_a' }) },
+    { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Option B', id: 'debug_qr_b' }) },
+    { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Option C', id: 'debug_qr_c' }) },
+  ], { footer: 'Tap any button to test' });
+
+  // cta_url
+  await sendNativeFlow(sock, chatId, '[DEBUG] cta_url button', [
+    {
+      name: 'cta_url',
+      buttonParamsJson: JSON.stringify({
+        display_text: 'Open Link',
+        url: 'https://github.com/chomosuke9/wazzapagents',
+        merchant_url: 'https://github.com/chomosuke9/wazzapagents',
+      }),
+    },
+  ], { footer: 'Opens a URL' });
+
+  // cta_copy
+  await sendNativeFlow(sock, chatId, '[DEBUG] cta_copy button', [
+    {
+      name: 'cta_copy',
+      buttonParamsJson: JSON.stringify({ display_text: 'Copy Code', id: 'debug_copy', copy_code: 'DEBUG-CODE-123' }),
+    },
+  ], { footer: 'Tap to copy code to clipboard' });
+
+  // cta_call
+  await sendNativeFlow(sock, chatId, '[DEBUG] cta_call button', [
+    {
+      name: 'cta_call',
+      buttonParamsJson: JSON.stringify({ display_text: 'Call Now', id: 'debug_call', phone_number: '+621234567890' }),
+    },
+  ], { footer: 'Tap to call' });
+}
+
+async function sendDebugMenu(sock: WaSocketLike, chatId: string): Promise<void> {
+  await sendNativeFlow(sock, chatId, '[DEBUG] single_select (menu/dropdown)', [
+    {
+      name: 'single_select',
+      buttonParamsJson: JSON.stringify({
+        title: 'Pilih opsi',
+        sections: [
+          {
+            title: 'Kategori 1',
+            rows: [
+              { title: 'Item A', description: 'Deskripsi item A', id: 'debug_menu_a' },
+              { title: 'Item B', description: 'Deskripsi item B', id: 'debug_menu_b' },
+            ],
+          },
+          {
+            title: 'Kategori 2',
+            rows: [
+              { title: 'Item C', id: 'debug_menu_c' },
+              { title: 'Item D', id: 'debug_menu_d' },
+            ],
+          },
+        ],
+      }),
+    },
+  ], { footer: 'Tap to open dropdown menu' });
+}
+
+async function sendDebugList(sock: WaSocketLike, chatId: string): Promise<void> {
+  await sendList(sock, chatId, {
+    title: '[DEBUG] List Message',
+    description: 'Tap tombol untuk membuka daftar pilihan',
+    buttonText: 'Buka Daftar',
+    footer: 'Pilih salah satu item',
+    sections: [
+      {
+        title: 'Kategori A',
+        rows: [
+          { rowId: 'debug_list_a1', title: 'Item A1', description: 'Deskripsi item A1' },
+          { rowId: 'debug_list_a2', title: 'Item A2', description: 'Deskripsi item A2' },
+        ],
+      },
+      {
+        title: 'Kategori B',
+        rows: [
+          { rowId: 'debug_list_b1', title: 'Item B1' },
+          { rowId: 'debug_list_b2', title: 'Item B2' },
+        ],
+      },
+    ],
+  });
+}
+
+async function sendDebugRichMessage(sock: WaSocketLike, chatId: string): Promise<void> {
+  // Styled text tanpa tombol
+  await sendRichMessage(sock, chatId, {
+    title: '[DEBUG] Rich Message',
+    subtitle: 'Subtitle teks',
+    text: 'Pesan styled tanpa tombol. Header + body + footer dengan badge AI (private) atau tanpa badge (group).',
+    footer: 'Footer teks',
+  });
+  // Styled text dengan tombol
+  await sendRichMessage(sock, chatId, {
+    title: '[DEBUG] Rich Message + Buttons',
+    text: 'Pesan styled dengan tombol quick_reply.',
+    footer: 'Tap tombol di bawah',
+    buttons: [
+      { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Pilihan A', id: 'debug_rich_a' }) },
+      { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Pilihan B', id: 'debug_rich_b' }) },
+    ],
+  });
+}
+
+async function sendDebugCombined(sock: WaSocketLike, chatId: string): Promise<void> {
+  await sendCombinedButtons(sock, chatId, '[DEBUG] semua tipe tombol dalam satu pesan', [
+    { type: 'reply', displayText: 'Quick Reply', id: 'debug_comb_reply' },
+    { type: 'url', displayText: 'Buka URL', url: 'https://github.com/chomosuke9/wazzapagents' },
+    { type: 'copy', displayText: 'Salin Kode', copyCode: 'COMBINED-123' },
+    { type: 'call', displayText: 'Telepon', phoneNumber: '+621234567890' },
+  ], { title: '[DEBUG] Combined Buttons', footer: 'url + reply + copy + call' });
+}
+
+async function sendDebugBroadcast(sock: WaSocketLike, chatId: string): Promise<void> {
+  await sendRichMessage(sock, chatId, {
+    text: 'Ini adalah contoh pesan broadcast.\n\nPesan ini biasanya dikirim ke semua group yang diikuti bot.',
+    footer: 'Broadcast 📢',
+    badge: false,
+  });
+}
+
+async function sendDebugCarousel(sock: WaSocketLike, chatId: string): Promise<void> {
+  await sendCarousel(sock, chatId, [
+    {
+      body: 'Kartu 1 — quick_reply buttons',
+      footer: 'Footer kartu 1',
+      buttons: [
+        { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Pilih Ini', id: 'debug_c1_qr' }) },
+        {
+          name: 'cta_url',
+          buttonParamsJson: JSON.stringify({
+            display_text: 'Buka Link',
+            url: 'https://github.com/chomosuke9/wazzapagents',
+            merchant_url: 'https://github.com/chomosuke9/wazzapagents',
+          }),
+        },
+      ],
+    },
+    {
+      body: 'Kartu 2 — cta_copy & cta_call',
+      footer: 'Footer kartu 2',
+      buttons: [
+        { name: 'cta_copy', buttonParamsJson: JSON.stringify({ display_text: 'Salin Kode', id: 'debug_c2_copy', copy_code: 'CAROUSEL-456' }) },
+        { name: 'cta_call', buttonParamsJson: JSON.stringify({ display_text: 'Hubungi', id: 'debug_c2_call', phone_number: '+621234567890' }) },
+      ],
+    },
+    {
+      body: 'Kartu 3 — single_select',
+      footer: 'Footer kartu 3',
+      buttons: [
+        {
+          name: 'single_select',
+          buttonParamsJson: JSON.stringify({
+            title: 'Pilih dari menu',
+            sections: [
+              {
+                title: 'Pilihan',
+                rows: [
+                  { title: 'Opsi X', id: 'debug_c3_x' },
+                  { title: 'Opsi Y', id: 'debug_c3_y' },
+                ],
+              },
+            ],
+          }),
+        },
+      ],
+    },
+  ], { text: '[DEBUG] carousel message' });
+}
+
+// Default fallback image — picsum.photos is a standard dev placeholder service
+const DEBUG_IMG_DEFAULT = 'https://picsum.photos/seed/wazzap/600/400';
+const DEBUG_IMG_MIME = 'image/jpeg';
+
+async function sendDebugCarouselImg(sock: WaSocketLike, chatId: string, imageUrl: string | null): Promise<void> {
+  const url = imageUrl || DEBUG_IMG_DEFAULT;
+  await sendCarousel(sock, chatId, [
+    {
+      image: { url },
+      body: 'Kartu 1 — header image + quick_reply',
+      footer: 'Footer kartu 1',
+      buttons: [
+        { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Pilih Ini', id: 'debug_ci1_qr' }) },
+        {
+          name: 'cta_url',
+          buttonParamsJson: JSON.stringify({
+            display_text: 'Buka Link',
+            url: 'https://github.com/chomosuke9/wazzapagents',
+            merchant_url: 'https://github.com/chomosuke9/wazzapagents',
+          }),
+        },
+      ],
+    },
+    {
+      image: { url },
+      body: 'Kartu 2 — header image + cta_copy & cta_call',
+      footer: 'Footer kartu 2',
+      buttons: [
+        { name: 'cta_copy', buttonParamsJson: JSON.stringify({ display_text: 'Salin Kode', id: 'debug_ci2_copy', copy_code: 'IMG-CAROUSEL-789' }) },
+        { name: 'cta_call', buttonParamsJson: JSON.stringify({ display_text: 'Hubungi', id: 'debug_ci2_call', phone_number: '+621234567890' }) },
+      ],
+    },
+    {
+      // No image — compare rendering with vs without image
+      body: 'Kartu 3 — tanpa header image (baseline)',
+      footer: 'Footer kartu 3',
+      buttons: [
+        { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Baseline', id: 'debug_ci3_qr' }) },
+      ],
+    },
+  ], { text: `[DEBUG] carousel + image header (${url})` });
+}
+
+async function handleDebugCommand({ chatId, senderId, args, sock }: CommandContext): Promise<void> {
+  if (!isOwnerJid(senderId)) {
+    logger.info({ senderId, chatId }, '/debug rejected: not owner');
+    try {
+      await sock.sendMessage(chatId, { text: 'Only bot owners can use `/debug`.' });
+    } catch (err) {
+      logger.warn({ err }, 'failed sending debug rejection');
+    }
+    return;
+  }
+
+  const [subTypeRaw = '', ...restParts] = (args || '').trim().split(/\s+/);
+  const subType = subTypeRaw.toLowerCase();
+  const extraArg = restParts.join(' ').trim();
+
+  if (!subType || !DEBUG_TYPES.includes(subType)) {
+    try {
+      await sock.sendMessage(chatId, {
+        text: [
+          'Usage: `/debug` <type>',
+          '',
+          `Types: ${DEBUG_TYPES.join(', ')}`,
+          '',
+          '- buttons      → quick_reply, cta_url, cta_copy, cta_call',
+          '- menu         → single_select dropdown',
+          '- list         → listMessage (sendList)',
+          '- rich         → sendRichMessage tanpa & dengan tombol',
+          '- combined     → semua tipe tombol dalam satu pesan',
+          '- broadcast    → preview format pesan broadcast',
+          '- carousel     → swipeable cards (tanpa header image, eksperimental)',
+          '- carousel-img → swipeable cards dengan header image (eksperimental)',
+          '                 Opsional: `/debug` carousel-img <url>',
+          '- all          → buttons + menu + list + rich + combined + broadcast',
+        ].join('\n'),
+      });
+    } catch (err) {
+      logger.warn({ err }, 'failed sending debug usage');
+    }
+    return;
+  }
+
+  const send = async (
+    fn: (sock: WaSocketLike, chatId: string, ...fnArgs: any[]) => Promise<unknown>,
+    label: string,
+    ...fnArgs: any[]
+  ): Promise<void> => {
+    try {
+      await fn(sock, chatId, ...fnArgs);
+      logger.info({ chatId, label }, 'debug interactive message sent');
+    } catch (err: any) {
+      logger.warn({ err, label }, 'debug send failed');
+      try {
+        await sock.sendMessage(chatId, { text: `❌ Gagal mengirim ${label}: ${err?.message || err}` });
+      } catch (e) { /* ignore */ }
+    }
+  };
+
+  if (subType === 'buttons' || subType === 'all') await send(sendDebugButtons, 'buttons');
+  if (subType === 'menu' || subType === 'all') await send(sendDebugMenu, 'menu');
+  if (subType === 'list' || subType === 'all') await send(sendDebugList, 'list');
+  if (subType === 'rich' || subType === 'all') await send(sendDebugRichMessage, 'rich');
+  if (subType === 'combined' || subType === 'all') await send(sendDebugCombined, 'combined');
+  if (subType === 'broadcast' || subType === 'all') await send(sendDebugBroadcast, 'broadcast');
+  if (subType === 'carousel') await send(sendDebugCarousel, 'carousel');
+  if (subType === 'carousel-img') await send(sendDebugCarouselImg, 'carousel-img', extraArg || null);
+}
+
+export { handleDebugCommand };
+
+export const debugCommand: CommandHandler = { name: "debug", aliases: ["debugs"], run: handleDebugCommand };

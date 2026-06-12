@@ -1,7 +1,7 @@
 // button-command-sock.test.ts — regression guard for the interactive-button
 // command-dispatch bug.
 //
-// `handleButtonResponse` (migration/node/wa/connection.ts) handles WhatsApp
+// `handleButtonResponse` (src/wa/connection.ts) handles WhatsApp
 // button / list taps. For a `/`-prefixed button id it builds a command context
 // and dispatches via `handleCommandListener`. The command handlers read
 // `context.sock` (e.g. handleHelp calls `context.sock.sendMessage(...)`). The
@@ -28,11 +28,8 @@ process.env.LOG_LEVEL = 'silent';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const db = await import('../../migration/node/db.ts');
-const { handleButtonResponse } = await import('../../migration/node/wa/connection.ts');
-const { createAccountContext } = await import('../../migration/node/account/accountContext.ts');
-
-await db.init();
+const { handleButtonResponse } = await import('../../src/wa/connection.ts');
+const { createAccountContext } = await import('../../src/account/accountContext.ts');
 
 /** Minimal fake Baileys socket that records every sendMessage call. */
 function makeSock() {
@@ -80,11 +77,6 @@ test('button tap of a /-command threads sock into the dispatched command context
 });
 
 test.after(() => {
-  try {
-    db.closeAllDbs?.();
-  } catch {
-    /* ignore */
-  }
   try {
     fs.rmSync(TMP_DATA_DIR, { recursive: true, force: true });
   } catch {

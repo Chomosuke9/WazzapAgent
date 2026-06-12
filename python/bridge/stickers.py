@@ -23,54 +23,82 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .log import setup_logging
+from .sticker_db import get_sticker as _db_get_sticker
+from .sticker_db import list_stickers as _db_list_stickers
+
 try:
-  from .log import setup_logging
-  from .sticker_db import get_sticker as _db_get_sticker
-  from .sticker_db import list_stickers as _db_list_stickers
-except ImportError:
-  import sys
-  sys.path.append(str(Path(__file__).resolve().parent.parent))
-  from bridge.log import setup_logging  # type: ignore
-  from bridge.sticker_db import get_sticker as _db_get_sticker  # type: ignore
-  from bridge.sticker_db import list_stickers as _db_list_stickers  # type: ignore
+  from .db import current_tenant_db_root as _current_tenant_db_root
+except ImportError:  # pragma: no cover - import path fallback
+  from bridge.db import current_tenant_db_root as _current_tenant_db_root  # type: ignore
 
 logger = setup_logging()
 
 STICKER_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "stickers"
 STICKER_EXTENSIONS = {".webp", ".png", ".jpg", ".jpeg", ".gif"}
 
-# name_without_ext (lowered) → absolute path  (filesystem catalog only)
-_catalog: dict[str, str] = {}
-_catalog_loaded = False
+# Per-tenant filesystem catalog cache (CONTRACT.md §8). Keyed by the RESOLVED
+# sticker directory (str) → { name_without_ext(lowered): absolute_path }. Each
+# tenant's ``<folder_path>/stickers`` is scanned independently so one account's
+# file stickers never leak into another's catalog. The key fully determines the
+# value, so this is a tenant-keyed cache (the sanctioned pattern used by the
+# in-memory caches in ``db/core.py``), NOT shared mutable tenant state. When no
+# tenant is bound (single-account / tests) the legacy module-level ``STICKER_DIR``
+# is used as the key, so single-account behaviour is unchanged.
+_catalogs: dict[str, dict[str, str]] = {}
 
 
-def _scan() -> None:
-  global _catalog, _catalog_loaded
-  _catalog_loaded = True
-  _catalog = {}
+def _current_sticker_dir() -> Path:
+  """Resolve the active tenant's filesystem sticker directory.
 
-  if not STICKER_DIR.is_dir():
-    STICKER_DIR.mkdir(parents=True, exist_ok=True)
-    logger.info("sticker directory created: %s", STICKER_DIR)
-    return
+  When an :class:`~bridge.session.AgentSession` has bound a tenant, resolve
+  ``<folder_path>/stickers`` (CONTRACT.md §8 — sibling of the tenant's ``db``
+  root). Otherwise fall back to the legacy module-level ``STICKER_DIR``
+  (single-account / tests — unchanged)."""
+  root = _current_tenant_db_root()
+  if root is not None:
+    return root.parent / "stickers"
+  return STICKER_DIR
 
-  for f in sorted(STICKER_DIR.iterdir()):
+
+def _scan_dir(sticker_dir: Path) -> dict[str, str]:
+  """Scan a single sticker directory and return its name→path catalog.
+
+  Scanning rules (extensions, lowercased stem keys, sorted iteration) are
+  identical to the previous module-global ``_scan`` — only the target
+  directory is now tenant-resolved."""
+  catalog: dict[str, str] = {}
+
+  if not sticker_dir.is_dir():
+    sticker_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("sticker directory created: %s", sticker_dir)
+    return catalog
+
+  for f in sorted(sticker_dir.iterdir()):
     if not f.is_file():
       continue
     if f.suffix.lower() not in STICKER_EXTENSIONS:
       continue
     name = f.stem.lower()
-    _catalog[name] = str(f)
+    catalog[name] = str(f)
 
-  if _catalog:
-    logger.info("loaded %d sticker(s): %s", len(_catalog), list(_catalog.keys()))
+  if catalog:
+    logger.info("loaded %d sticker(s) from %s: %s", len(catalog), sticker_dir, list(catalog.keys()))
   else:
-    logger.info("no stickers found in %s", STICKER_DIR)
+    logger.info("no stickers found in %s", sticker_dir)
+  return catalog
 
 
-def _ensure_loaded() -> None:
-  if not _catalog_loaded:
-    _scan()
+def _current_catalog() -> dict[str, str]:
+  """Return the active tenant's filesystem catalog, scanning + caching once
+  per resolved sticker directory."""
+  sticker_dir = _current_sticker_dir()
+  key = str(sticker_dir)
+  catalog = _catalogs.get(key)
+  if catalog is None:
+    catalog = _scan_dir(sticker_dir)
+    _catalogs[key] = catalog
+  return catalog
 
 
 def _chat_has_user_stickers(chat_id: str) -> bool:
@@ -91,7 +119,7 @@ def sticker_catalog_text(chat_id: str | None = None) -> str:
     default filesystem catalog as fallback.
   - If *chat_id* is None → filesystem catalog only (backwards-compatible).
   """
-  _ensure_loaded()
+  catalog = _current_catalog()
 
   if chat_id:
     try:
@@ -105,9 +133,9 @@ def sticker_catalog_text(chat_id: str | None = None) -> str:
       return "\n".join(f"- {name}" for name in sorted(db_names))
 
   # No user stickers (or no chat_id) → fall back to filesystem defaults
-  if not _catalog:
+  if not catalog:
     return "(no stickers available)"
-  return "\n".join(f"- {name}" for name in sorted(_catalog.keys()))
+  return "\n".join(f"- {name}" for name in sorted(catalog.keys()))
 
 
 def resolve_sticker(name: str, chat_id: str | None = None) -> dict | None:
@@ -126,7 +154,6 @@ def resolve_sticker(name: str, chat_id: str | None = None) -> dict | None:
 
   When *chat_id* is None → filesystem catalog only (backwards-compatible).
   """
-  _ensure_loaded()
   normalized = name.strip().lower()
 
   if chat_id:
@@ -140,7 +167,7 @@ def resolve_sticker(name: str, chat_id: str | None = None) -> dict | None:
     # No user stickers for this chat → fall through to filesystem
 
   # Filesystem catalog (default) — wrap as dict for uniform interface
-  path = _catalog.get(normalized)
+  path = _current_catalog().get(normalized)
   if path:
     return {"file_path": path, "lottie_payload": None}
   return None
@@ -151,7 +178,7 @@ def sticker_names(chat_id: str | None = None) -> list[str]:
 
   Follows the same override logic as ``sticker_catalog_text``.
   """
-  _ensure_loaded()
+  catalog = _current_catalog()
 
   if chat_id:
     try:
@@ -163,4 +190,4 @@ def sticker_names(chat_id: str | None = None) -> list[str]:
     if db_names:
       return sorted(db_names)
 
-  return sorted(_catalog.keys())
+  return sorted(catalog.keys())

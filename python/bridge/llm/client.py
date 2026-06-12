@@ -1,18 +1,12 @@
 # File: python/bridge/llm/client.py
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 
 from langchain_openai import ChatOpenAI
 
-try:
-  from ..config import _parse_positive_int, _parse_positive_float, _parse_non_negative_int, _parse_non_negative_float, _clean_env, _endpoint_base_url
-except ImportError:  # allow running as script
-  import sys
-  from pathlib import Path
-  sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
-  from bridge.config import _parse_positive_int, _parse_positive_float, _parse_non_negative_int, _parse_non_negative_float, _clean_env, _endpoint_base_url  # type: ignore
+from .. import config
+from ..config import _clean_env, _endpoint_base_url  # noqa: F401  (re-exported via this module)
 
 
 @dataclass(frozen=True)
@@ -25,50 +19,37 @@ class LLM1Target:
 
 def _llm1_history_limit() -> int:
   # Prefer LLM1-specific limit; fallback to global history limit.
-  raw = os.getenv("LLM1_HISTORY_LIMIT")
-  if raw is None or not raw.strip():
-    raw = os.getenv("HISTORY_LIMIT")
-  return _parse_positive_int(raw, 20)
+  return config.llm1_history_limit()
 
 
 def _llm1_message_max_chars() -> int:
-  return _parse_positive_int(os.getenv("LLM1_MESSAGE_MAX_CHARS"), 500)
+  return config.llm1_message_max_chars()
 
 
 def _llm1_timeout(default: float = 8.0) -> float:
-  return _parse_positive_float(os.getenv("LLM1_TIMEOUT"), default)
+  return config.llm1_timeout(default)
 
 
 def _llm1_sdk_max_retries() -> int:
-  return _parse_non_negative_int(os.getenv("LLM1_SDK_MAX_RETRIES"), 0)
+  return config.llm1_sdk_max_retries()
 
 
 def _llm1_temperature() -> float:
-  return _parse_non_negative_float(os.getenv("LLM1_TEMPERATURE"), 0.0)
+  return config.llm1_temperature()
 
 
 def _llm1_max_tokens() -> int | None:
-  raw = os.getenv("LLM1_MAX_TOKENS")
-  if raw is None:
-    return None
-  cleaned = raw.strip()
-  if not cleaned:
-    return None
-  try:
-    parsed = int(cleaned)
-  except (TypeError, ValueError):
-    return None
-  return parsed if parsed > 0 else None
+  return config.llm1_max_tokens()
 
 
 def _chat_base_url() -> str | None:
-  return _endpoint_base_url(os.getenv("LLM1_ENDPOINT"))
+  return config.llm1_endpoint_base_url()
 
 
 def _llm1_targets() -> list[LLM1Target]:
-  primary_model = _clean_env(os.getenv("LLM1_MODEL")) or "gpt-4o-mini"
-  primary_url = _endpoint_base_url(os.getenv("LLM1_ENDPOINT"))
-  primary_api_key = os.getenv("LLM1_API_KEY") or os.getenv("OPENAI_API_KEY", "")
+  primary_model = config.llm1_model_clean() or "gpt-4o-mini"
+  primary_url = config.llm1_endpoint_base_url()
+  primary_api_key = config.llm1_api_key()
 
   targets: list[LLM1Target] = []
   if primary_url:
@@ -81,9 +62,9 @@ def _llm1_targets() -> list[LLM1Target]:
       )
     )
 
-  fallback_model_raw = _clean_env(os.getenv("LLM1_FALLBACK_MODEL"))
-  fallback_url_raw = _clean_env(os.getenv("LLM1_FALLBACK_ENDPOINT"))
-  fallback_api_key_raw = _clean_env(os.getenv("LLM1_FALLBACK_API_KEY"))
+  fallback_model_raw = config.llm1_fallback_model_clean()
+  fallback_url_raw = config.llm1_fallback_endpoint_clean()
+  fallback_api_key_raw = config.llm1_fallback_api_key_clean()
   fallback_enabled = any((fallback_model_raw, fallback_url_raw, fallback_api_key_raw))
   if not fallback_enabled:
     return targets
@@ -118,9 +99,9 @@ def get_llm1(
   api_key: str | None = None,
   timeout: float = 8.0,
 ) -> ChatOpenAI:
-  resolved_model = model or _clean_env(os.getenv("LLM1_MODEL")) or "gpt-4o-mini"
+  resolved_model = model or config.llm1_model_clean() or "gpt-4o-mini"
   resolved_base_url = base_url if base_url is not None else _chat_base_url()
-  resolved_api_key = api_key if api_key is not None else (os.getenv("LLM1_API_KEY") or os.getenv("OPENAI_API_KEY", ""))
+  resolved_api_key = api_key if api_key is not None else config.llm1_api_key()
   max_tokens = _llm1_max_tokens()
   kwargs = {
     "model": resolved_model,

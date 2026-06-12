@@ -32,13 +32,16 @@ accounts** (tenants), one per `folder_path`, each fully isolated (CONTRACT.md §
      ↕              ↕
 ┌──────────────────────────────────────────────────────────┐
 │  Node.js Gateway — WS SERVER, listens on WS_LISTEN_PORT    │
-│  migration/node/                                           │
-│  ├─ server/   wsServer (accept), accountRegistry (bind)    │
+│  src/  (TypeScript)                                        │
+│  ├─ server/   WsServer (accept), AccountRegistry (bind)    │
 │  ├─ account/  baileysFactory, accountContext,              │
 │  │            actionDispatcher, eventForwarder             │
-│  │            (one AccountEntry per folder_path)           │
-│  ├─ wa/       inbound / outbound / actions / moderation    │
-│  └─ protocol/ types.ts (wire types, CONTRACT §5)           │
+│  │            (one AccountEntry per folder_path: owns its  │
+│  │             Database + repositories, no module globals) │
+│  ├─ db/       Database + schema/ + repositories/           │
+│  ├─ wa/       domain/ + inbound/outbound/actions/          │
+│  │            moderation + commands/ (CommandRegistry)     │
+│  └─ protocol/ types.ts + ports.ts (wire types, CONTRACT §5)│
 └──────────────────────────────────────────────────────────┘
         ▲  hello / hello_ack (§1.1)        ▲
         │  incoming_message, whatsapp_status, control        │  actions (Py→Node):
@@ -48,16 +51,18 @@ accounts** (tenants), one per `folder_path`, each fully isolated (CONTRACT.md §
 │ Python WaSocket A       │                  │ Python WaSocket B       │
 │ folder_path=tenants/a   │                  │ folder_path=tenants/b   │
 │  wasocket/ (SDK §4)     │                  │  wasocket/ (SDK §4)     │
-│  bridge/session.py:     │                  │  bridge/session.py:     │
-│  ├─ Mute enforcement    │                  │  ├─ Mute enforcement    │
-│  ├─ Activation gate     │                  │  ├─ Activation gate     │
-│  ├─ debounce/batch      │                  │  ├─ debounce/batch      │
-│  ├─ LLM1 router         │                  │  ├─ LLM1 router         │
-│  ├─ LLM2 + tools        │                  │  ├─ LLM2 + tools        │
-│  ├─ Sub-agent integ.    │                  │  ├─ Sub-agent integ.    │
-│  ├─ Reply dedup/echo    │                  │  ├─ Reply dedup/echo    │
-│  ├─ Idle trigger        │                  │  ├─ Idle trigger        │
-│  └─ Action dispatch     │                  │  └─ Action dispatch     │
+│  bridge/ AgentSession   │                  │  bridge/ AgentSession   │
+│   = composition root,   │                  │   = composition root,   │
+│   wiring agent/ collabs:│                  │   wiring agent/ collabs:│
+│  ├─ MuteGate            │                  │  ├─ MuteGate            │
+│  ├─ BatchProcessor      │                  │  ├─ BatchProcessor      │
+│  ├─ Llm1Router          │                  │  ├─ Llm1Router          │
+│  ├─ Llm2Responder       │                  │  ├─ Llm2Responder       │
+│  ├─ SubAgentCoordinator │                  │  ├─ SubAgentCoordinator │
+│  ├─ ReplyDedup          │                  │  ├─ ReplyDedup          │
+│  ├─ IdleTrigger         │                  │  ├─ IdleTrigger         │
+│  ├─ AckHydrator         │                  │  ├─ AckHydrator         │
+│  └─ EventRouter         │                  │  └─ EventRouter         │
 └─────────────────────────┘                  └─────────────────────────┘
  <tenants/a>/{auth,db,media,stickers}   <tenants/b>/{auth,db,media,stickers}
             (CONTRACT §8 — fully isolated per tenant)
@@ -65,153 +70,174 @@ accounts** (tenants), one per `folder_path`, each fully isolated (CONTRACT.md §
 
 The bridge loads an accounts list (`bridge/accounts.py`) and runs one
 `WaSocket`/`AgentSession` per `folder_path`; a single account is the degenerate
-case.
+case. `AgentSession` is a thin composition root that builds and wires the
+injectable `bridge/agent/` collaborators above (no business logic in nested
+closures).
 
 ---
 
 ## Directory Structure
 
-> **Post-migration layout (`migration/`)** — the live, multi-account runtime.
-> The original `src/` (Node) and `python/` (Python) trees below are the
-> pre-migration source and are kept **read-only** for reference; the modules
-> they describe map onto the `migration/` tree.
+> **Current layout (post-refactor).** The runtime lives in two top-level trees,
+> `src/` (Node gateway, TypeScript) and `python/` (bridge + WaSocket SDK), with
+> `data/` as the single-account default tenant folder. The earlier staging tree
+> no longer exists — its Node and Python subtrees were promoted to `src/` and
+> `python/` as the only runtime. `CONTRACT.md` remains the source of truth for
+> the wire protocol and per-tenant folder layout.
 
 ```
-migration/node/               Node.js gateway runtime (WS SERVER, TS)
-  index.ts                    Bootstrap: config, ws server, per-tenant accounts
-  config.ts                   Env parsing (WS_LISTEN_PORT, data dirs, DB paths)
+src/                          Node.js gateway runtime (WS SERVER, TypeScript)
+  index.ts                    Composition root: config, ws server, per-tenant accounts (wiring only)
+  config.ts                   Single config source — all process.env reads (WS_LISTEN_PORT, dirs, DB paths)
+  logger.ts                   Structured pino logger
+  mediaHandler.ts             Media download from Baileys, validation, path resolution
   server/
-    wsServer.ts               WS server: accept clients on WS_LISTEN_PORT, heartbeat
+    wsServer.ts               WS server: accept clients on WS_LISTEN_PORT, per-connection heartbeat
     accountRegistry.ts        Bind each client to its folder_path AccountEntry
-  account/
-    baileysFactory.ts         Create/resume the per-tenant Baileys socket + dirs
-    accountContext.ts         Per-account caches / identifiers / sendQueue
-    actionDispatcher.ts       Dispatch Python→Node actions for one account
+  account/                    Per-tenant aggregate (one AccountEntry per folder_path)
+    baileysFactory.ts         Create/resume the per-tenant Baileys socket + dirs; owns Database + repos
+    accountContext.ts         Per-account caches / identifiers / sendQueue / forwarder / repos
+    actionDispatcher.ts       Dispatch Python→Node actions for one account (per-action handlers)
     eventForwarder.ts         Forward Node→Python events (per-account reliableQueue)
+  db/                         Per-tenant SQLite, NO module-global handles (CONTRACT §8 isolation)
+    Database.ts               Class: owns one tenant's connections (open/recover/migrate/close)
+    schema/index.ts           Table creation + migrations
+    repositories/             Domain repositories over an injected Database:
+      BaseRepository.ts       Shared base (connection access, helpers)
+      SettingsRepository.ts   Per-chat settings, modes, triggers, prompts, mutes
+      StatsRepository.ts      Dashboard stats
+      ModelRepository.ts      Per-chat / default LLM2 model config
+      ActivationRepository.ts Activation codes / activation state
+      index.ts                AccountRepositories bundle + createRepositories(db)
   protocol/
-    types.ts                  Wire types (CONTRACT §5): frames, WaStatus, AccountEntry
-  wa/                         WhatsApp modules (inbound/outbound/actions/moderation/cmds)
-migration/python/             Python bridge + WaSocket SDK (WS CLIENTS)
+    types.ts                  Wire types (CONTRACT §5): frames, WaStatus, AccountEntry, payloads
+    ports.ts                  Interfaces breaking the account/↔wa/ cycle: WaSocketLike, AccountForwarder
+  wa/                         WhatsApp modules
+    index.ts                  Barrel re-export + concurrency helpers (withTimeout, etc.)
+    domain/                   WA-domain primitives (moved off the flat src/ root)
+      caches.ts               In-memory bounded caches: groups, messages, participants, quizMessageIds
+      identifiers.ts          contextMsgId (6-digit per-chat sequence), senderRef, quoted resolution
+      participants.ts         Group role/name caching, owner detection
+      groupContext.ts         Group metadata caching + invalidation
+      messageParser.ts        Baileys message unwrapping (viewOnce, interactive, buttons)
+    connection.ts             Baileys v7 socket lifecycle, button/list response handler
+    inbound.ts                Incoming WA → normalized incoming_message payload
+    outbound.ts               Send text/media/mentions to WhatsApp
+    actions.ts                React / delete message wrappers
+    moderation.ts             Kick members from group (validation chain)
+    runCommand.ts             Gateway-side handler for Python's run_command action
+    sendQueue.ts              Per-JID send queue to preserve WhatsApp message ordering
+    presence.ts               Mark read, typing indicator
+    events.ts                 Synthetic context events (action log, group join, role change)
+    utils.ts                  Concurrency helpers: semaphore, withRetry, escapeRegex
+    commands/                 Typed command dispatch (no switch, no alias drift)
+      CommandRegistry.ts      Map<name, CommandHandler>; aliases declared on each handler
+      CommandContext.ts       Strict typed context threaded to handlers (sock, account, repos, …)
+    command/                  Per-command handler modules (one CommandHandler each)
+      index.ts                Barrel re-export of all handlers + parseSlashCommand
+      parseCommand.ts         Raw command text → {command, args} parsing
+      activate.ts             /activate <code> — Activate chat with activation code
+      addsticker.ts           /addsticker — Add sticker to catalog (static/Lottie)
+      announcement.ts         /announcement — Send group announcement (@all)
+      broadcast.ts            /broadcast <text> — Broadcast to all groups (owner only)
+      catch.ts                /catch — Catch a message for later retrieval
+      dashboard.ts            /dashboard — Show chat statistics
+      debug.ts                /debug — Show debug info
+      generate.ts             /generate <prompt> — Generate image (owner only)
+      groupStatus.ts          /group-status — Show/edit group description
+      groupStatusHelpers.ts   Pure helper functions (no side effects)
+      help.ts                 /help — Show command list
+      idle.ts                 /idle <min-max> — Configure idle trigger range
+      info.ts                 /info — Show bot info
+      join.ts                 /join <link> — Join group via invite link
+      mode.ts                 /mode <auto|prefix|hybrid> — Set chat response mode
+      model.ts                /model <name> — Set per-chat LLM2 model
+      modelcfg.ts             /modelcfg — Configure default model config
+      monitor.ts              /monitor — Show dashboard monitor (owner only)
+      ownerContact.ts         /owner-contact — Show bot owner contact info
+      permission.ts           /permission <level> — Set moderation permission level
+      prompt.ts               /prompt <text> — Set per-chat system prompt override
+      removesticker.ts        /remove-sticker <name> — Remove sticker from catalog
+      reset.ts                /reset — Clear chat memory (/reset global = all chats)
+      revoke.ts               /revoke — Revoke group invite link (owner only)
+      setting.ts              /setting — Show/edit per-chat settings
+      sticker.ts              /sticker [upper#lower] — Create meme sticker (ffmpeg/sharp)
+      subagent.ts             /subagent <on|off> — Toggle sub-agent per chat
+      trigger.ts              /trigger <type> — Set prefix triggers (tag, reply, name, join)
+    interactive/              Interactive message modules (NativeFlow)
+      index.ts                Barrel re-export + sendCopyCode
+      sendInteractive.ts      Quick reply, CTA URL, copy, call, combined buttons, list, native flow, rich message (sendRichMessage)
+      sendButtons.ts          Legacy proto-based buttons (sendLegacyButtons, sendTemplate)
+      sendCarousel.ts         Swipeable carousel cards
+  utils/                      Generic Node helpers (cachedAuthState, misc)
+  types/                      Ambient TS declarations
+
+python/                       Python bridge + WaSocket SDK (WS CLIENTS)
   wasocket/                   make_wa_socket SDK (CONTRACT §4)
     __init__.py               Re-exports make_wa_socket, WaSocket, WhatsAppMessage
-    socket.py                 WaSocket class + make_wa_socket factory
+    socket.py                 WaSocket class + make_wa_socket factory (optional caller request_id seam)
     transport.py              WSClientTransport: dial NODE_URL, reconnect, heartbeat
     protocol.py / events.py   Frame dataclasses (§6) + WhatsAppMessage model (§7)
     correlation.py / errors.py requestId correlation + WaSocketError hierarchy (§2/§3)
   bridge/
-    main.py                   Boot: load accounts, build one AgentSession per account
+    main.py                   Boot: load accounts, gather one AgentSession per account
     accounts.py               Multi-account config loader (ACCOUNTS_JSON/FOLDER_PATHS)
-    session.py                AgentSession: per-account state, handlers, run lifecycle
-    db.py                     Per-tenant SQLite CRUD (resolves under <folder_path>/db)
-    (llm/ messaging/ subagent/ tools/ — same modules as the python/bridge tree)
+    config.py                 Single config source (env reads, debounce/burst constants)
+    session.py                AgentSession: thin composition root — builds & wires agent/ collaborators
+    log.py                    Structured logging setup
+    history.py                WhatsAppMessage dataclass, history formatting (tenant-scoped assistant name)
+    dashboard.py              Stats buffer, 60s flush, dashboard text formatting
+    stickers.py / sticker_db.py  Sticker catalog scanning + per-tenant sticker DB
+    agent/                    Injectable per-account collaborators (one responsibility each)
+      llm1_router.py          Llm1Router — decision/gating
+      llm2_responder.py       Llm2Responder — response generation only
+      batch_processor.py      BatchProcessor — debounce/burst/prefix-interrupt loop
+      subagent_coordinator.py SubAgentCoordinator — sub-agent submit/wait/correction/steering
+      mute_gate.py            MuteGate — inbound mute enforcement
+      idle_trigger.py         IdleTrigger — probabilistic re-engagement
+      reply_dedup.py          ReplyDedup — duplicate/near-duplicate reply suppression
+      ack_hydrator.py         AckHydrator — hydrate provisional history on action_ack
+      event_router.py         EventRouter — control-event (clear_history/invalidate_*) handling
+    db/                       Per-domain repositories over the shared per-tenant core
+      core.py                 Per-tenant connection routing (ContextVar) + tenant-keyed caches
+      settings_repository.py / models_repository.py / moderation_repository.py
+      stats_repository.py / activation_repository.py
+      __init__.py             Repository bundle assembly
+    media/                    Media + sticker resolution (moved off session.py)
+      resolver.py             Resolve context_msg_id media paths for tool input
+      visual.py               Visual attachment processing (base64, size limits)
+    llm/                      LLM pipeline
+      llm1.py                 Decision router internals
+      llm2.py                 Response generation internals
+      schemas.py              Tool schemas (JSON Schema / OpenAI function calling)
+      prompt.py               System prompt assembly (all assembly consolidated here)
+      client.py               LLM client factory, fallback targets
+      metadata.py             Context metadata: bot mention, reply signals, window stats
+      tool_utils.py           Cross-provider tool-call extraction
+    messaging/                Message processing pipeline
+      processing.py           Burst building, payload normalization, dedup, code block extraction
+      filtering.py            Trigger check, prefix/trigger mode, echo filtering
+      actions.py              Action extraction from LLM2 tool calls and text output
+      gateway.py              Send action commands over WS to Node (via SDK, no private bypass)
+      ack_handler.py          Action-ack routing helper
+      moderation.py           Permission checks, moderation payload merge
+      format.py               WhatsApp text sanitization (Markdown → WhatsApp bold)
+    tools/                    Tool implementations (PIL sticker creation, thumbnails)
+    subagent/                 Sub-agent integration (tracker, client, webhook_server, output, config)
+  systemprompt.txt            LLM2 system prompt template
+  tests/                      Python tests (pytest) — SDK as wasocket.*, bridge as bridge.*
 
-src/                          Node.js gateway runtime
-  index.js                    Bootstrap: DB init, WA socket, WS client, action dispatcher
-  wsClient.js                 WS client: send() (best-effort) / sendReliable() (queued)
-  config.js                   Env parsing, runtime paths (data/auth, data/media, etc.)
-  logger.js                   Structured pino logger
-  utils.js                    Text normalization, ID helpers
-  db.js                       SQLite via better-sqlite3: settings, models, stats, mutes
-  caches.js                   In-memory LRU caches: groups, messages, participants
-  mediaHandler.js             Media download from Baileys, validation, path resolution
-  messageParser.js            Baileys message unwrapping (viewOnce, interactive, buttons)
-  identifiers.js              contextMsgId (6-digit per-chat sequence), senderRef management
-  participants.js             Group role/name caching, owner detection
-  groupContext.js              Group metadata caching + invalidation
-  src/wa/                     WhatsApp modules
-    index.js                  Barrel re-export
-    connection.js             Baileys v7 socket lifecycle, button/list response handler
-    inbound.js                Incoming WA → normalized incoming_message payload
-    outbound.js               Send text/media/mentions to WhatsApp
-    actions.js                React / delete message wrappers
-    moderation.js              Kick members from group (validation chain)
-    runCommand.js             Gateway-side handler for Python's run_command action
-    sendQueue.js              Per-JID send queue to preserve WhatsApp message ordering
-    presence.js                Mark read, typing indicator
-    commandHandler.js          Central slash command dispatcher (activation gate)
-    commands.js               Command alias normalization
-    events.js                 Synthetic context events (action log, group join, role change)
-    utils.js                  Concurrency helpers: semaphore, withRetry, escapeRegex
-    command/                  Per-command handler modules
-      index.js                Barrel re-export of all handlers + parseSlashCommand
-      parseCommand.js         Raw command text → {command, args} parsing
-      activate.js             /activate <code> — Activate chat with activation code
-      addsticker.js           /addsticker — Add sticker to catalog (static/Lottie)
-      announcement.js          /announcement — Send group announcement (@all)
-      broadcast.js            /broadcast <text> — Broadcast to all groups (owner only)
-      catch.js                /catch — Catch a message for later retrieval
-      dashboard.js            /dashboard — Show chat statistics
-      debug.js                /debug — Show debug info
-      generate.js             /generate <prompt> — Generate image (owner only)
-      groupStatus.js          /group-status — Show/edit group description
-      groupStatusHelpers.js   Pure helper functions (no side effects)
-      help.js                 /help — Show command list
-      idle.js                 /idle <min-max> — Configure idle trigger range
-      info.js                 /info — Show bot info
-      join.js                 /join <link> — Join group via invite link
-      mode.js                 /mode <auto|prefix|hybrid> — Set chat response mode
-      model.js                /model <name> — Set per-chat LLM2 model
-      modelcfg.js             /modelcfg — Configure default model config
-      monitor.js              /monitor — Show dashboard monitor (owner only)
-      ownerContact.js         /owner-contact — Show bot owner contact info
-      permission.js           /permission <level> — Set moderation permission level
-      prompt.js               /prompt <text> — Set per-chat system prompt override
-      removesticker.js        /remove-sticker <name> — Remove sticker from catalog
-      reset.js                /reset — Clear chat memory (/reset global = all chats)
-      revoke.js               /revoke — Revoke group invite link (owner only)
-      setting.js              /setting — Show/edit per-chat settings
-      sticker.js              /sticker [upper#lower] — Create meme sticker (ffmpeg/sharp)
-      subagent.js             /subagent <on|off> — Toggle sub-agent per chat
-      trigger.js              /trigger <type> — Set prefix triggers (tag, reply, name, join)
-    interactive/              Interactive message modules (NativeFlow)
-      index.js                Barrel re-export + sendCopyCode
-      sendInteractive.js      Quick reply, CTA URL, copy, call, combined buttons, list, native flow, rich message (sendRichMessage)
-      sendButtons.js          Legacy proto-based buttons (sendLegacyButtons, sendTemplate)
-      sendCarousel.js         Swipeable carousel cards
-python/bridge/                Python LLM bridge
-  main.py                     WS server on `LLM_WS_ENDPOINT` port (default 8080), message batching, debounce, main loop
-  config.py                   Env parsing, debounce/burst constants
-  db.py                       SQLite CRUD: settings, models, stats, mutes, activation
-  history.py                  WhatsAppMessage dataclass, history formatting
-  media.py                    Visual attachment processing (base64, size limits)
-  stickers.py                 Sticker catalog scanning (data/stickers/)
-  commands.py                  Legacy slash command handler (Python side, /sticker, /reset, /dump)
-  dashboard.py                Stats buffer, 60s flush, dashboard text formatting
-  log.py                      Structured logging setup
-  llm/                        LLM pipeline
-    llm1.py                   Decision router: should-respond / express-only
-    llm2.py                   Response generation: reply + tool calls
-    schemas.py                Tool schemas (JSON Schema / OpenAI function calling)
-    prompt.py                  System prompt assembly, history, metadata injection
-    client.py                 LLM client factory, fallback targets
-    metadata.py               Context metadata: bot mention, reply signals, window stats
-    tool_utils.py             Cross-provider tool-call extraction
-  messaging/                  Message processing pipeline
-    processing.py             Burst building, payload normalization, dedup, code block extraction
-    filtering.py              Trigger check, prefix/trigger mode, echo filtering
-    actions.py                 Action extraction from LLM2 tool calls and text output
-    gateway.py                Send action commands over WS to Node
-    moderation.py             Permission checks, moderation payload merge
-    format.py                 WhatsApp text sanitization (Markdown → WhatsApp bold)
-  tools/                      Tool implementations
-    sticker.py                PIL-based sticker creation (text overlay, EXIF metadata)
-  subagent/                   Sub-agent integration
-    __init__.py               Re-export SubTaskTracker, SubAgentClient, SubAgentSubmitError, SubAgentWebhookServer
-    tracker.py                SubTaskTracker — tracks in-flight & recently finished tasks
-    client.py                 SubAgentClient — HTTP client for sub-agent /execute API
-    webhook_server.py         SubAgentWebhookServer — always-on aiohttp server for callbacks
-    output.py                 StagedOutputs — input/output file staging across processes
-    models.py                 SubTask dataclass, session_id management
-    config.py                 SUBAGENT_WAIT_TIMEOUT_S, SUBAGENT_MAX_WAIT_S, etc.
-python/systemprompt.txt       LLM2 system prompt template
-data/                         Runtime artifacts (git-ignored)
+data/                         Single-account default tenant folder (git-ignored)
   auth/                       Baileys multi-file auth state
-  media/                      Downloaded inbound media
+  db/                         Per-tenant SQLite DBs
+  media/                      Downloaded inbound media + staged sub-agent output
   stickers/                   Sticker catalog for LLM2 tool
-examples/                     Example LLM WebSocket server (llm_ws_echo.py)
-website/                     Docusaurus documentation site (Indonesian + English)
-docs/llm-architecture/         Architecture docs for LLM/agent developers
+
+tests/                        Node tests (*.test.ts) — node/ unit + e2e/ end-to-end
+website/                      Docusaurus documentation site (Indonesian + English)
+docs/llm-architecture/        Architecture docs for LLM/agent developers
   00-overview.md → 05-state-data-and-db.md
+CONTRACT.md  README.md  AGENTS.md  REFACTOR_PLAN.md  steps/
 ```
 
 ---
@@ -284,15 +310,18 @@ because:
 - **EXIF metadata**: WhatsApp stickers require a custom EXIF payload
   (`sticker-pack-id`, `sticker-pack-name`) that ffmpeg can't embed correctly.
   The Python code builds this binary TIFF structure manually.
-- **The Node sticker path** (`src/wa/command/sticker.js`) does use ffmpeg for
+- **The Node sticker path** (`src/wa/command/sticker.ts`) does use ffmpeg for
   animated stickers (video → WebP conversion) and sharp for static resizing.
   Both approaches converge on the same WhatsApp EXIF format.
 
-### ADR-4: Why `wsClient.sendReliable()` for state-sync events
+### ADR-4: Why reliable per-account queueing for state-sync events
 
 The WebSocket connection between Node and Python can drop during reconnection.
-`send()` drops messages if disconnected; `sendReliable()` queues them and
-flushes on reconnect. Used for events that must not be lost:
+Node sends Node→Python frames through the account registry: `sendToClient()`
+is best-effort (dropped if that account's client is not OPEN), while
+`sendReliableToClient()` enqueues the frame on the per-account `reliableQueue`
+(CONTRACT.md §5) and flushes it when that account's client reconnects. The
+reliable path is used for events that must not be lost:
 
 - `whatsapp_status` (connection state changes)
 - `clear_history` (history invalidation)
@@ -301,8 +330,8 @@ flushes on reconnect. Used for events that must not be lost:
 - `invalidate_chat_settings` (after mode/prompt/permission/trigger change)
 - `set_subagent_enabled` (toggle sub-agent per chat)
 
-Regular `incoming_message` events use `send()` because they're transient — the
-next burst will include newer state anyway.
+Regular `incoming_message` events use the best-effort path because they're
+transient — the next burst will include newer state anyway.
 
 ### ADR-5: Why contextMsgId is a per-chat 6-digit counter
 
@@ -416,8 +445,9 @@ Node→Python frame carries `folderPath` for tenant routing.
    Map the tool call to an action dict with `type`, `chatId`, etc.
 4. **Implement the action handler** — in `python/bridge/messaging/gateway.py`,
    add a `send_<action>()` function that sends the action over WS to Node.
-5. **Handle the action in Node** — in `src/index.js`, add a case to
-   `dispatchCommand()` that calls the appropriate `src/wa/` module.
+5. **Handle the action in Node** — add a per-action handler to the dispatch
+   map in `src/account/actionDispatcher.ts` that calls the appropriate
+   `src/wa/` module (no central switch — one handler per action).
 6. **Update the protocol** — add the action to the README protocol section
    and document `action_ack`/`error` responses.
 
@@ -449,7 +479,7 @@ See `.env.example` for the complete reference.
 `ACCOUNTS_JSON` (path to a JSON accounts file; per-account `node_url` overrides
 `NODE_URL`), `FOLDER_PATHS` (comma-separated tenant folders sharing `NODE_URL`),
 `FOLDER_PATH` (single-account fallback; or `DATA_DIR`, or repo default
-`migration/data`). Each tenant folder is `<folder_path>/{auth,db,media,stickers}`
+`data`). Each tenant folder is `<folder_path>/{auth,db,media,stickers}`
 (CONTRACT.md §8). Resolution order: `ACCOUNTS_JSON` → `FOLDER_PATHS` →
 single-account fallback.
 
@@ -555,19 +585,23 @@ these for exact cost calculation.
 
 ### WebSocket reconnection
 
-- If the Python bridge restarts, Node's `wsClient` reconnects with exponential
-  backoff + symmetric jitter (`WS_RECONNECT_MS` base, `WS_RECONNECT_MAX_MS` cap,
+- If the connection drops, the Python `WaSocket` transport
+  (`python/wasocket/transport.py`) reconnects with exponential backoff +
+  symmetric jitter (`WS_RECONNECT_MS` base, `WS_RECONNECT_MAX_MS` cap,
   `WS_RECONNECT_JITTER_RATIO` +/- spread; the jittered delay is also clamped to
-  the cap) and flushes queued `sendReliable()` messages after reconnect. The
+  the cap) and flushes its bounded reliable queue (`hello`) after reconnect. The
   `attempt` counter is reset only after the socket has stayed OPEN for a short
   grace period, so a server that accepts the handshake and kicks immediately
-  still sees exponential backoff. A per-connection heartbeat uses the canonical
-  `ws`-docs `isAlive` pattern: the interval at `WS_HEARTBEAT_INTERVAL_MS` is
-  both pinger and reaper, so the interval itself is the detection granularity
-  and there is no second timer to race. This mirrors the Python server's symmetrical
-  `ping_interval=20, ping_timeout=20` in `python/bridge/main.py`.
-- If Node restarts, Python must reconnect. There's no persistent queue on the
-  Python side — in-flight batches are lost.
+  still sees exponential backoff. On the Node side, the WS server
+  (`src/server/wsServer.ts`) runs a per-connection heartbeat using the canonical
+  `ws`-docs `isAlive` pattern: a single interval at `WS_HEARTBEAT_INTERVAL_MS`
+  is both pinger and reaper, so the interval itself is the detection granularity
+  and there is no second timer to race. Reliable Node→Python control events are
+  queued per account on the registry (`sendReliableToClient`) and flushed when
+  that account's client reconnects. This mirrors the Python transport's
+  symmetrical `ping_interval=20, ping_timeout=20`.
+- If Node restarts, every Python client must reconnect. There's no persistent
+  queue on the Python side for outbound actions — in-flight batches are lost.
 
 ### Message dedup, echo merge, and ordering
 
@@ -653,7 +687,8 @@ Messages from muted users are completely invisible to LLM1/LLM2.
 - When `REQUIRE_ACTIVATION=true`, all chats must be activated via
   `/activate <code>` before the bot responds. Only `/info` and `/activate`
   commands are exempt. The gate is enforced at two levels:
-  1. **Node.js** (commandHandler.js): Blocks non-exempt commands before dispatch.
+  1. **Node.js** (`src/wa/commands/CommandRegistry.ts`, `dispatchCommand`):
+     Blocks non-exempt commands before dispatch.
   2. **Python bridge** (main.py): Drops incoming_message payloads from
      unactivated chats before they enter the debounce/batch pipeline.
 
@@ -693,7 +728,7 @@ The sub-agent system delegates complex tasks to an external service (WazzapSubAg
 - The `send_quiz` LLM2 tool sends a multiple-choice quiz with quick-reply buttons.
 - Quiz buttons use `id="qz:<label>"` format. When tapped, the reply is
   forwarded to Python as plain text.
-- `src/caches.js` exports a `quizMessageIds` Set (bounded to 2000 entries) that
+- `src/wa/domain/caches.ts` exports a `quizMessageIds` Set (bounded to 2000 entries) that
   tracks WhatsApp message IDs of sent quizzes. The Node inbound handler uses
   this set to distinguish quiz button replies (→ forward to LLM) from settings
   menu replies (→ handle locally, suppress LLM).
@@ -713,8 +748,9 @@ The sub-agent system delegates complex tasks to an external service (WazzapSubAg
 
 ### Message send queue (JID-level)
 
-- `src/wa/sendQueue.js` implements `withJidQueue(chatId, fn)` — a per-JID
-  serialization queue. All `send_message` actions from `src/index.js` go
+- `src/wa/sendQueue.ts` implements `withJidQueue(chatId, fn)` — a per-JID
+  serialization queue. All `send_message` actions dispatched in
+  `src/account/actionDispatcher.ts` go
   through this to preserve WhatsApp message ordering. Without this, rapid
   sequential sends could arrive out of order because Baileys' socket write
   is async.
@@ -730,21 +766,26 @@ The sub-agent system delegates complex tasks to an external service (WazzapSubAg
 
 ## Build, Test, and Development Commands
 
-- **Install Node deps**: `pnpm install` (Node 18+; project is ESM)
+- **Install Node deps**: `pnpm install` (Node 18+; project is ESM + TypeScript via `tsx`)
 - **Install Python deps**: `pip install -r requirements.txt` (Python 3.10+)
-- **Run gateway**: `pnpm dev` (same as `pnpm start`) — starts WA socket + WS client
-- **Run Python bridge**: `python -m bridge.main`
-- **Run echo server** (for testing): `pip install websockets==12.* pydantic && python examples/llm_ws_echo.py`
+- **Run gateway**: `pnpm dev` (same as `pnpm start`, runs `tsx src/index.ts`) —
+  binds the WS server on `WS_LISTEN_PORT` and creates/resumes a Baileys socket per tenant
+- **Run Python bridge**: `python -m bridge.main` (dials `NODE_URL` per account)
+- **Typecheck**: `pnpm typecheck` (`tsc --noEmit`) → must be 0 errors
 - **Lint**: `pnpm lint` (currently placeholder)
-- **Tests**: No test framework wired yet. If adding: `vitest` as dev dependency,
-  test files named `*.test.ts|js`, mock all network services.
+- **Node tests**: `pnpm test` (`node --test --import tsx 'tests/**/*.test.ts'`) —
+  unit (`tests/node/`) + end-to-end (`tests/e2e/`); a scripted `stub_node_server`
+  drives the SDK handshake. Wrap any socket/server test in `timeout --signal=KILL N`.
+- **Python tests**: `PYTHONPATH=python python -m pytest python/tests -q` —
+  import the SDK as `wasocket.*` and the bridge as `bridge.*`.
 
 ## Coding Style & Naming Conventions
 
-- **Language**: Modern JavaScript (ESM, Node ≥18). Prefer async/await, top-level imports.
-- **Formatting**: 2-space indentation, single quotes, no trailing commas (in JS).
+- **Language**: TypeScript on the Node side (ESM, Node ≥18) and Python 3.10+ on
+  the bridge. Prefer async/await, top-level imports.
+- **Formatting**: 2-space indentation, single quotes, no trailing commas (TS/JS).
   Python follows PEP 8 with the existing project style.
-- **Logging**: Use `logger` from `src/logger.js` (Node) or `bridge/log.py` (Python).
+- **Logging**: Use `logger` from `src/logger.ts` (Node) or `bridge/log.py` (Python).
   Prefer structured context objects over string interpolation.
 - **Paths in payloads**: Stay workspace-relative (`data/media/...`) as shown in README.
 - **Naming**: camelCase in JS, snake_case in Python. Don't mix within the same file.
@@ -764,7 +805,7 @@ The sub-agent system delegates complex tasks to an external service (WazzapSubAg
 - Never commit `data/auth/`. `.env` contains secrets.
 - Rotate `LLM_WS_TOKEN`, LLM API keys, and Baileys auth if leaked.
 - Media handler enforces size limits (`DOWNLOAD_TIMEOUT_MS`, validation in
-  `mediaHandler.js`) to prevent OOM from large WhatsApp media.
+  `mediaHandler.ts`) to prevent OOM from large WhatsApp media.
 - Activation codes gate access when `REQUIRE_ACTIVATION=true`.
 - Permission system controls tool availability (delete, mute, kick).
 - Sub-agent communication uses a shared filesystem contract or base64 inlining

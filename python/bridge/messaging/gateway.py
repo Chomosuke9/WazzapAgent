@@ -2,23 +2,26 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import os
-import time
 
-try:
-  from ..log import setup_logging
-  from .processing import _normalize_context_msg_id
-  from .format import sanitize_whatsapp_text
-except ImportError:
-  import sys
-  from pathlib import Path
-  sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
-  from bridge.log import setup_logging  # type: ignore
-  from bridge.messaging.processing import _normalize_context_msg_id  # type: ignore
-  from bridge.messaging.format import sanitize_whatsapp_text  # type: ignore
+from ..log import setup_logging
+from .processing import _normalize_context_msg_id
+from .format import sanitize_whatsapp_text
 
 logger = setup_logging()
+
+
+# Step 12: the bridge's outbound action helpers below send EXCLUSIVELY through
+# the public WaSocket SDK action methods (``ws.send_message`` etc.), passing the
+# bridge's own ``request_id``. This replaces the former private-transport bypass
+# and hand-rolled ``json`` framing: the wire protocol is now encoded in exactly
+# one place (``wasocket/protocol.py``), and the SDK's ``PendingAcks`` ack/timeout
+# net covers these sends too. The bridge's own ``requestId``->pending-map
+# correlation + the Step-29 ``action_ack`` EVENT hydration are unchanged — the
+# SAME ``request_id`` still goes on the wire, and the SDK does NOT block these
+# calls on the ack (it registers the pending future and returns immediately for
+# a caller-supplied ``request_id``), preserving the prior best-effort,
+# fire-and-forget timing the bridge relies on.
 
 
 async def send_message(
@@ -44,19 +47,7 @@ async def send_message(
       "text_len": len(text or ""),
     },
   )
-  await ws.send(
-    json.dumps(
-      {
-        "type": "send_message",
-        "payload": {
-          "requestId": request_id,
-          "chatId": chat_id,
-          "text": text,
-          "replyTo": reply_to,
-        },
-      }
-    )
-  )
+  await ws.send_message(chat_id, text, reply_to=reply_to, request_id=request_id)
 
 
 async def send_attachment(
@@ -109,13 +100,6 @@ async def send_attachment(
     attachment["mime"] = mime
   if thumbnail_base64:
     attachment["thumbnailBase64"] = thumbnail_base64
-  payload: dict = {
-    "requestId": request_id,
-    "chatId": chat_id,
-    "attachments": [attachment],
-  }
-  if normalized_reply_to:
-    payload["replyTo"] = normalized_reply_to
   logger.debug(
     "outbound",
     extra={
@@ -130,7 +114,12 @@ async def send_attachment(
       "reply_to": normalized_reply_to,
     },
   )
-  await ws.send(json.dumps({"type": "send_message", "payload": payload}))
+  await ws.send_message(
+    chat_id,
+    reply_to=normalized_reply_to,
+    attachments=[attachment],
+    request_id=request_id,
+  )
 
 
 async def send_delete_message(
@@ -152,17 +141,8 @@ async def send_delete_message(
       "context_msg_id": normalized_context_msg_id,
     },
   )
-  await ws.send(
-    json.dumps(
-      {
-        "type": "delete_message",
-        "payload": {
-          "requestId": request_id,
-          "chatId": chat_id,
-          "contextMsgId": normalized_context_msg_id,
-        },
-      }
-    )
+  await ws.delete_message(
+    chat_id, normalized_context_msg_id, request_id=request_id
   )
 
 
@@ -188,19 +168,12 @@ async def send_kick_member(
       "auto_reply_anchor": auto_reply_anchor,
     },
   )
-  await ws.send(
-    json.dumps(
-      {
-        "type": "kick_member",
-        "payload": {
-          "requestId": request_id,
-          "chatId": chat_id,
-          "targets": targets,
-          "mode": mode,
-          "autoReplyAnchor": auto_reply_anchor,
-        },
-      }
-    )
+  await ws.kick(
+    chat_id,
+    targets,
+    mode=mode,
+    auto_reply_anchor=auto_reply_anchor,
+    request_id=request_id,
   )
 
 
@@ -229,13 +202,6 @@ async def send_run_command(
   normalized_context_msg_id = (
     _normalize_context_msg_id(context_msg_id) if context_msg_id else None
   )
-  payload: dict = {
-    "requestId": request_id,
-    "chatId": chat_id,
-    "command": command_text,
-  }
-  if normalized_context_msg_id:
-    payload["contextMsgId"] = normalized_context_msg_id
   logger.debug(
     "outbound",
     extra={
@@ -246,7 +212,12 @@ async def send_run_command(
       "context_msg_id": normalized_context_msg_id,
     },
   )
-  await ws.send(json.dumps({"type": "run_command", "payload": payload}))
+  await ws.run_command(
+    chat_id,
+    command_text,
+    context_msg_id=normalized_context_msg_id,
+    request_id=request_id,
+  )
 
 
 async def send_react_message(
@@ -270,18 +241,8 @@ async def send_react_message(
       "emoji": emoji,
     },
   )
-  await ws.send(
-    json.dumps(
-      {
-        "type": "react_message",
-        "payload": {
-          "requestId": request_id,
-          "chatId": chat_id,
-          "contextMsgId": normalized_context_msg_id,
-          "emoji": emoji,
-        },
-      }
-    )
+  await ws.react(
+    chat_id, normalized_context_msg_id, emoji, request_id=request_id
   )
 
 
@@ -304,15 +265,8 @@ async def send_sticker(
       "reply_to": normalized_reply_to,
     },
   )
-  payload: dict = {
-    "requestId": request_id,
-    "chatId": chat_id,
-    "attachments": [{"kind": "sticker", "path": sticker_path}],
-  }
-  if normalized_reply_to:
-    payload["replyTo"] = normalized_reply_to
-  await ws.send(
-    json.dumps({"type": "send_message", "payload": payload})
+  await ws.send_sticker(
+    chat_id, sticker_path, reply_to=normalized_reply_to, request_id=request_id
   )
 
 
@@ -349,18 +303,11 @@ async def send_lottie_sticker_payload(
       "reply_to": normalized_reply_to,
     },
   )
-  payload: dict = {
-    "requestId": request_id,
-    "chatId": chat_id,
-    "lottiePayload": lottie_payload_json,
-  }
-  if normalized_reply_to:
-    payload["replyTo"] = normalized_reply_to
-  await ws.send(
-    json.dumps({
-      "type": "relay_lottie_sticker",
-      "payload": payload,
-    })
+  await ws.relay_lottie_sticker(
+    chat_id,
+    lottie_payload_json,
+    reply_to=normalized_reply_to,
+    request_id=request_id,
   )
 
 
@@ -408,17 +355,14 @@ async def send_quiz(
       "reply_to": normalized_reply_to,
     },
   )
-  payload: dict = {
-    "requestId": request_id,
-    "chatId": chat_id,
-    "question": question,
-    "choices": choices,
-  }
-  if normalized_reply_to:
-    payload["replyTo"] = normalized_reply_to
-  if footer:
-    payload["footer"] = footer
-  await ws.send(json.dumps({"type": "send_quiz", "payload": payload}))
+  await ws.send_quiz(
+    chat_id,
+    question,
+    choices,
+    reply_to=normalized_reply_to,
+    footer=footer,
+    request_id=request_id,
+  )
 
 
 async def send_copy_code(
@@ -454,17 +398,14 @@ async def send_copy_code(
       "display_text": display_text,
     },
   )
-  payload: dict = {
-    "requestId": request_id,
-    "chatId": chat_id,
-    "code": code,
-    "displayText": display_text,
-  }
-  if normalized_reply_to:
-    payload["replyTo"] = normalized_reply_to
-  if quoted_preview_text:
-    payload["quotedPreviewText"] = quoted_preview_text
-  await ws.send(json.dumps({"type": "send_copy_code", "payload": payload}))
+  await ws.send_copy_code(
+    chat_id,
+    code,
+    display_text=display_text,
+    reply_to=normalized_reply_to,
+    quoted_preview_text=quoted_preview_text,
+    request_id=request_id,
+  )
 
 
 async def send_mark_read(
@@ -476,11 +417,8 @@ async def send_mark_read(
   """Send a read receipt signal to the gateway."""
   if not message_id:
     return
-  payload: dict = {"chatId": chat_id, "messageId": message_id}
-  if participant:
-    payload["participant"] = participant
   try:
-    await ws.send(json.dumps({"type": "mark_read", "payload": payload}))
+    await ws.mark_read(chat_id, message_id, participant)
   except Exception as err:
     logger.debug("send_mark_read failed: %s", err)
 
@@ -489,9 +427,7 @@ async def send_typing(ws, chat_id: str, composing: bool = True):
   """Send typing presence to the gateway."""
   presence_type = "composing" if composing else "paused"
   try:
-    await ws.send(
-      json.dumps({"type": "send_presence", "payload": {"chatId": chat_id, "type": presence_type}})
-    )
+    await ws.send_presence(chat_id, presence_type)
   except Exception as err:
     logger.debug("send_typing failed: %s", err)
 
@@ -522,3 +458,46 @@ async def typing_indicator(ws, chat_id: str, interval: float = 8.0):
     with contextlib.suppress(asyncio.CancelledError):
       await task
     await send_typing(ws, chat_id, composing=False)
+
+
+async def _dispatch_sticker(
+  ws,
+  chat_id: str,
+  sticker_info: dict,
+  reply_to: str | None,
+  *,
+  request_id: str,
+) -> None:
+  """Send a sticker using the correct transport based on its type.
+
+  ``sticker_info`` is the dict returned by ``resolve_sticker()``:
+    - ``lottie_payload`` set  -> relay full Lottie payload via Node (animation preserved)
+    - ``file_path`` set       -> send regular .webp via send_message/attachment
+
+  (Step 10: relocated from ``bridge.session`` so the batch + sub-agent
+  collaborators can share it without importing ``session``.)
+  """
+  lottie_payload = sticker_info.get("lottie_payload")
+  file_path = sticker_info.get("file_path")
+
+  if lottie_payload:
+    await send_lottie_sticker_payload(
+      ws,
+      chat_id,
+      lottie_payload,
+      reply_to,
+      request_id=request_id,
+    )
+  elif file_path:
+    await send_sticker(
+      ws,
+      chat_id,
+      file_path,
+      reply_to,
+      request_id=request_id,
+    )
+  else:
+    logger.warning(
+      "_dispatch_sticker: sticker_info has no file_path or lottie_payload chat_id=%s",
+      chat_id,
+    )

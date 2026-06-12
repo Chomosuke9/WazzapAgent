@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import time
 from typing import Awaitable, Callable, Dict, Optional, Tuple
 
@@ -19,17 +18,9 @@ except ImportError:  # pragma: no cover - import-time guard
   web = None  # type: ignore
   aiohttp = None  # type: ignore
 
-try:
-  from ..log import setup_logging
-  from .config import SUBAGENT_WEBHOOK_PORT
-  from .tracker import SubTaskTracker
-except ImportError:
-  import sys
-  from pathlib import Path
-  sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
-  from bridge.log import setup_logging  # type: ignore
-  from bridge.subagent.config import SUBAGENT_WEBHOOK_PORT  # type: ignore
-  from bridge.subagent.tracker import SubTaskTracker  # type: ignore
+from ..log import setup_logging
+from .config import SUBAGENT_WEBHOOK_PORT, subagent_webhook_max_body_bytes_raw
+from .tracker import SubTaskTracker
 
 logger = setup_logging()
 
@@ -73,7 +64,7 @@ class SubAgentWebhookServer:
     # ``_keeper_task`` holds the always-on background task.
     self._shutdown = False
     self._keeper_task: asyncio.Task | None = None
-    _raw = os.getenv("SUBAGENT_WEBHOOK_MAX_BODY_BYTES", str(200 * 1024 * 1024))
+    _raw = subagent_webhook_max_body_bytes_raw()
     try:
       self._client_max_size = int(_raw)
     except ValueError:

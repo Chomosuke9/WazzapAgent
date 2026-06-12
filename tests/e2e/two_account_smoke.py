@@ -4,7 +4,7 @@
 Automated proof of the reversed multi-account topology (CONTRACT.md §1/§4/§8):
 
   * Node SERVES, Python WaSocket clients DIAL. Here a stub Node server stands in
-    for the real `migration/node/server/wsServer.ts` because this sandbox has NO
+    for the real `src/server/wsServer.ts` because this sandbox has NO
     real WhatsApp pairing and NO LLM credentials (see tests/e2e/two-account.md).
   * Two `WaSocket` + `AgentSession` pairs, each bound to a DISTINCT tenant
     `folder_path`, each dial their OWN stub Node server and reach `ready`
@@ -35,12 +35,12 @@ import sys
 import tempfile
 from pathlib import Path
 
-# --- import wiring: locate migration/python + its tests dir (for the stub) ---
+# --- import wiring: locate python/ + its tests dir (for the stub) ---
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-_MIGRATION_PY = _REPO_ROOT / "migration" / "python"
-_MIGRATION_TESTS = _MIGRATION_PY / "tests"
-sys.path.insert(0, str(_MIGRATION_PY))      # wasocket / bridge packages
-sys.path.insert(0, str(_MIGRATION_TESTS))   # stub_node_server
+_PYTHON_DIR = _REPO_ROOT / "python"
+_PYTHON_TESTS = _PYTHON_DIR / "tests"
+sys.path.insert(0, str(_PYTHON_DIR))      # wasocket / bridge packages
+sys.path.insert(0, str(_PYTHON_TESTS))   # stub_node_server
 
 from wasocket import make_wa_socket  # noqa: E402
 from bridge import db as db_mod  # noqa: E402

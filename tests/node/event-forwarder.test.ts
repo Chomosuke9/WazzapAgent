@@ -6,13 +6,13 @@ import {
   forwardIncoming,
   forwardStatus,
   normalizeWaStatus,
-} from '../../migration/node/account/eventForwarder.ts';
+} from '../../src/account/eventForwarder.ts';
 import {
   getOrCreate,
   bindClient,
   flushReliableQueue,
   remove,
-} from '../../migration/node/server/accountRegistry.ts';
+} from '../../src/server/accountRegistry.ts';
 
 // The `ws` OPEN constant value is 1 (per the WebSocket spec / ws library).
 const OPEN = 1;

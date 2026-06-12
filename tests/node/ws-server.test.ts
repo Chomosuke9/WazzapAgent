@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import WebSocket, { type WebSocketServer } from 'ws';
 
-import { startWsServer } from '../../migration/node/server/wsServer.ts';
-import { __setSocketCreatorForTests } from '../../migration/node/account/baileysFactory.ts';
+import { startWsServer } from '../../src/server/wsServer.ts';
+import { __setSocketCreatorForTests } from '../../src/account/baileysFactory.ts';
 import {
   get,
   remove,
   sendReliableToClient,
-} from '../../migration/node/server/accountRegistry.ts';
-import config from '../../migration/node/config.ts';
+} from '../../src/server/accountRegistry.ts';
+import config from '../../src/config.ts';
 
 // ---------------------------------------------------------------------------
 // Offline Baileys fake. The factory's socket creator is stubbed so `hello` ->

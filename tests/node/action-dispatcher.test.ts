@@ -1,18 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type WebSocket from 'ws';
-import type { AccountEntry } from '../../migration/node/protocol/types.ts';
+import type { AccountEntry } from '../../src/protocol/types.ts';
 
 import {
   getOrCreate,
   bindClient,
   remove,
-} from '../../migration/node/server/accountRegistry.ts';
-import { createAccountContext } from '../../migration/node/account/accountContext.ts';
+} from '../../src/server/accountRegistry.ts';
+import { createAccountContext } from '../../src/account/accountContext.ts';
 import {
   dispatchAction,
   type DispatchDeps,
-} from '../../migration/node/account/actionDispatcher.ts';
+} from '../../src/account/actionDispatcher.ts';
 
 // The `ws` OPEN constant value is 1 (per the WebSocket spec / ws library).
 const OPEN = 1;

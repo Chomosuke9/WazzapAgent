@@ -1,76 +1,49 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Iterable, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-try:
-    from ..config import (
-        _clean_env,
-        _endpoint_base_url,
-        _parse_non_negative_int,
-        _parse_positive_float,
-        _parse_positive_int,
-    )
-    from ..db import (
-        get_default_llm2_model,
-        get_model_vision_support,
-        permission_allows_delete,
-        permission_allows_kick,
-        permission_allows_mute,
-    )
-    from ..db import get_llm2_model as db_get_llm2_model
-    from ..db import get_permission as db_get_permission
-    from ..history import WhatsAppMessage, assistant_name, format_history
-    from ..log import dump_json, env_flag, setup_logging, trunc
-    from ..media import build_visual_parts, redact_multimodal_content
-    from ..stickers import sticker_catalog_text
-    from .error_utils import _error_chain, _is_timeout_error
-    from .prompt import _truncate_message
-    from .schemas import build_llm2_tools
-except ImportError:  # allow running as script
-    import sys
-    from pathlib import Path
-
-    sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
-    from bridge.config import (  # type: ignore
-        _clean_env,
-        _endpoint_base_url,
-        _parse_non_negative_int,
-        _parse_positive_float,
-        _parse_positive_int,
-    )
-    from bridge.db import (
-        get_model_vision_support,
-        permission_allows_delete,
-        permission_allows_kick,
-        permission_allows_mute,
-    )
-    from bridge.db import get_permission as db_get_permission  # type: ignore
-    from bridge.history import (  # type: ignore
-        WhatsAppMessage,
-        assistant_name,
-        format_history,
-    )
-    from bridge.llm.error_utils import _error_chain, _is_timeout_error  # type: ignore
-    from bridge.llm.prompt import _truncate_message  # type: ignore
-    from bridge.llm.schemas import build_llm2_tools  # type: ignore
-    from bridge.log import dump_json, env_flag, setup_logging, trunc  # type: ignore
-    from bridge.media import (  # type: ignore
-        build_visual_parts,
-        redact_multimodal_content,
-    )
-    from bridge.stickers import sticker_catalog_text  # type: ignore
+from .. import config
+from ..config import (
+    _clean_env,
+    _endpoint_base_url,
+    _parse_non_negative_int,
+    _parse_positive_float,
+    _parse_positive_int,
+)
+from ..db import (
+    get_default_llm2_model,
+    get_model_vision_support,
+    permission_allows_delete,
+    permission_allows_kick,
+    permission_allows_mute,
+)
+from ..db import get_llm2_model as db_get_llm2_model
+from ..db import get_permission as db_get_permission
+from ..history import WhatsAppMessage, assistant_name, format_history
+from ..log import dump_json, env_flag, setup_logging, trunc
+from ..media import build_visual_parts, redact_multimodal_content
+from ..stickers import sticker_catalog_text
+from .error_utils import _error_chain, _is_timeout_error
+from .prompt import (  # noqa: F401
+    _chat_state_header,
+    _context_injection_block,
+    _current_date_str,
+    _format_current_window,
+    _group_description_block,
+    _load_system_prompt,
+    _normalize_chat_type,
+    _render_system_prompt,
+    _truncate_message,
+)
+from .schemas import build_llm2_tools
 
 logger = setup_logging()
-SYSTEM_PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "systemprompt.txt"
-_SYSTEM_PROMPT_CACHE: str | None = None
 
 
 @dataclass(frozen=True)
@@ -82,23 +55,23 @@ class LLM2Target:
 
 
 def _llm2_message_max_chars() -> int:
-    return _parse_positive_int(os.getenv("LLM2_MESSAGE_MAX_CHARS"), 0)
+    return config.llm2_message_max_chars()
 
 
 def _llm2_timeout() -> float:
-    return _parse_positive_float(os.getenv("LLM2_TIMEOUT"), 20.0)
+    return config.llm2_timeout()
 
 
 def _llm2_retry_max() -> int:
-    return _parse_non_negative_int(os.getenv("LLM2_RETRY_MAX"), 0)
+    return config.llm2_retry_max()
 
 
 def _llm2_retry_backoff_seconds() -> float:
-    return _parse_positive_float(os.getenv("LLM2_RETRY_BACKOFF_SECONDS"), 0.8)
+    return config.llm2_retry_backoff_seconds()
 
 
 def _llm2_sdk_max_retries() -> int:
-    return _parse_non_negative_int(os.getenv("LLM2_SDK_MAX_RETRIES"), 0)
+    return config.llm2_sdk_max_retries()
 
 
 def get_llm2_model_for_chat(chat_id: str) -> str:
@@ -130,9 +103,9 @@ def get_llm2_model_for_chat(chat_id: str) -> str:
 
 
 def _llm2_targets() -> list[LLM2Target]:
-    primary_model = _clean_env(os.getenv("LLM2_MODEL")) or "gpt-4.1"
-    primary_endpoint = _endpoint_base_url(os.getenv("LLM2_ENDPOINT"))
-    primary_api_key = _clean_env(os.getenv("LLM2_API_KEY")) or ""
+    primary_model = config.llm2_model_clean() or "gpt-4.1"
+    primary_endpoint = config.llm2_endpoint_base_url()
+    primary_api_key = config.llm2_api_key_clean() or ""
 
     targets = [
         LLM2Target(
@@ -143,9 +116,9 @@ def _llm2_targets() -> list[LLM2Target]:
         )
     ]
 
-    fallback_model_raw = _clean_env(os.getenv("LLM2_FALLBACK_MODEL"))
-    fallback_endpoint_raw = _clean_env(os.getenv("LLM2_FALLBACK_ENDPOINT"))
-    fallback_api_key_raw = _clean_env(os.getenv("LLM2_FALLBACK_API_KEY"))
+    fallback_model_raw = config.llm2_fallback_model_clean()
+    fallback_endpoint_raw = config.llm2_fallback_endpoint_clean()
+    fallback_api_key_raw = config.llm2_fallback_api_key_clean()
     fallback_enabled = any(
         (fallback_model_raw, fallback_endpoint_raw, fallback_api_key_raw)
     )
@@ -178,364 +151,25 @@ def _llm2_targets() -> list[LLM2Target]:
     return targets
 
 
-def _load_system_prompt() -> str:
-    global _SYSTEM_PROMPT_CACHE
-    if _SYSTEM_PROMPT_CACHE is not None:
-        return _SYSTEM_PROMPT_CACHE
-    text = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8").strip()
-    _SYSTEM_PROMPT_CACHE = text
-    return _SYSTEM_PROMPT_CACHE
-
-
-_DELETE_RULES = """<delete>
-DELETE is ALLOWED for this chat. Use the delete_messages tool to remove rule-violating messages.
-Only delete messages with clear justification.
-</delete>"""
-
-_MUTE_RULES = """<mute>
-MUTE is ALLOWED for this chat. Use the mute_member tool to auto-delete all messages from a user for a specified duration.
-Use for persistent rule violators. Muted user's messages are auto-deleted for the specified duration.
-To unmute a currently muted user, call mute_member with duration_minutes=0.
-</mute>"""
-
-_KICK_RULES = """<kick>
-KICK is ALLOWED for this chat. Use the kick_members tool to remove disruptive members.
-Only kick with clear justification. Cannot kick admins.
-</kick>"""
-
-# Injected into the system prompt only when /subagent on is set for this chat
-# (i.e. allow_subagent=True). Tells LLM2 when to delegate via the
-# execute_subtask tool and what the sub-agent can / cannot do, so the model
-# does not silently forget the tool exists or use it for trivial replies.
-# Mirrors the structure of _DELETE_RULES / _MUTE_RULES / _KICK_RULES.
-_SUBAGENT_RULES = """<subagent>
-SUB-AGENT is ALLOWED. Use `execute_subtask` for tasks needing a real compute environment: file processing, code execution, file analysis, web scraping, producing attachments, or anything you can't answer from knowledge alone. Assume full internet + system access — it can do almost anything.
-IT'S THE ONLY WAY TO ACTUALLY DO WHAT AGENTS ARE MEANT TO DO. DO NOT HALLUCINATE AND SAY YOU ALREADY DID SOMETHING WITHOUT USING THIS.
-You can't access the internet, manipulate files, or perform any actions that require system-level access. But the sub-agent can do anything you tell it to do. Use it for anything you need to do.
-Do not say "Sorry, as an AI assistant, I can't do that." or any similar phrases, unless the sub-agent cannot handle the task.
-
-Do NOT use for: conversational replies, greetings, opinions, knowledge-only answers, moderation, or tasks covered by built-in commands.
-Never use `execute_subtask` for tasks built-in commands can handle (stickers, status, help, etc.). Sub-agent is sandboxed — no WhatsApp access.
-
-Rules:
-- Call `execute_subtask` immediately when applicable. Acknowledgement goes in `confirmation_text`, NOT as a separate `reply_message`.
-- Sub-agent has NO chat history. Write `instruction` as a self-contained brief. Pass `context_msg_ids` for needed messages (media or text), or `null`.
-- Text-only messages (e.g. pasted story) are auto-converted to `.txt` for the sub-agent.
-- To revise a previously sent file: pass its `[#NNNNNN]` in `context_msg_ids` — bridge resolves the path automatically.
-- `high_quality=true` for complex reasoning, image/code gen/editing. `high_quality=false` (default) for routine tasks.
-- NEVER say "I don't know / I can't / I'm not sure" if a sub-agent could find or compute the answer. Uncertainty without attempting a sub-agent is a failure. It's your knowledge and capability extension — use it.
-
-Additionally, you could steer the sub-agent mid task by using `execute_subtask` again.
-
-If a sub-agent IS currently running (its memory is alive), the you can steer it mid-task by calling `execute_subtask` again — e.g. if the first instruction said "draw a dog" but the user changes their mind, just say: "Change the dog to a cat but keep everything else the same."
-If this is the LAST chance (re-invoke after sub-agent delivered its result), the you can protest/correct using the same memory — e.g. "The zip you sent shows as a compressed file, not an image. Send the image directly as a PNG, not zipped."
-
-WARNING: DETERMINE THE CORRECT TARGET ID BEFORE USING IT. MOST OF THE TIME, SUB-AGENT ACTIONS FAIL BECAUSE YOU USED THE WRONG TARGET ID AND MAKING SUB-AGENT CONFUSED.
-WARNING: CREATE AN INSTRUCTION THAT DESCRIBES WHAT YOUR GOAL IS, SUB-AGENT HAS NO CHAT HISTORY. WRITE `instruction` AS A SELF-CONTAINED BRIEF. IT HAS NO CONTEXT ABOUT PREVIOUS MESSAGES OR INSTRUCTIONS.
-WARNING: SUB-AGENT HAS NO CLUE ABOUT YOUR PREVIOUS INSTRUCTIONS. IF NO SUB-AGENT RUNNING, THAT MEANS SUB-AGENT'S MEMORY ALREADY DELETED. YOU NEED TO MAKE A VERY CLEAR INSTRUCTION. TREAT IT AS A COMPLETELY NEW MEMORY.
-</subagent>"""
-_SUBAGENT_OFF_RULES = """
-Sub-agent isn't allowed.
-You don't have:
-    - Access to the internet, files, or any external resources.
-    - Any capability beyond a regular chatbot.
-    - Ability to send files, images, audio, or any media.
-DO NOT hallucinate and say "I'm gonna do that" (that means you're telling the user you will start your work, but in reality you're actually just saying some bullshit and not actually doing anything).
-"""
-
-
-def _current_date_str() -> str:
-    """Return today's date as a human-readable string, respecting CONTEXT_TIME_UTC_OFFSET_HOURS."""
-    import os as _os
-    from datetime import datetime as _dt
-    from datetime import timedelta as _td
-    from datetime import timezone as _tz
-
-    raw = _os.getenv("CONTEXT_TIME_UTC_OFFSET_HOURS")
-    try:
-        offset_hours = float(raw) if raw and raw.strip() else None
-    except (TypeError, ValueError):
-        offset_hours = None
-    if offset_hours is not None:
-        now = _dt.now(tz=_tz((_td(hours=offset_hours))))
-    else:
-        now = _dt.now()
-    return now.strftime("%A, %d %B %Y")
-
-
-def _render_system_prompt(
-    base_system: str,
-    *,
-    prompt_override: str | None = None,
-    allow_delete: bool = False,
-    allow_mute: bool = False,
-    allow_kick: bool = False,
-    allow_subagent: bool = False,
-    sticker_catalog: str | None = None,
-) -> str:
-    overide_text = (prompt_override or "").strip()
-    configured_assistant_name = assistant_name()
-    current_date = _current_date_str()
-    catalog = (
-        f"<sticker_catalog>\nAvailable stickers:\n{sticker_catalog}\n</sticker_catalog>"
-        if sticker_catalog
-        else ""
-    )
-    return (
-        base_system.replace("{{prompt_override}}", overide_text)
-        .replace("{{ prompt_override }}", overide_text)
-        .replace("{{assistant_name}}", configured_assistant_name)
-        .replace("{{ assistant_name }}", configured_assistant_name)
-        .replace("{{current_date}}", current_date)
-        .replace("{{ current_date }}", current_date)
-        .replace("{{sticker_catalog}}", catalog)
-        .replace("{{ sticker_catalog }}", catalog)
-        .replace("{{delete_rules}}", _DELETE_RULES if allow_delete else "")
-        .replace("{{ delete_rules }}", _DELETE_RULES if allow_delete else "")
-        .replace("{{mute_rules}}", _MUTE_RULES if allow_mute else "")
-        .replace("{{ mute_rules }}", _MUTE_RULES if allow_mute else "")
-        .replace("{{kick_rules}}", _KICK_RULES if allow_kick else "")
-        .replace("{{ kick_rules }}", _KICK_RULES if allow_kick else "")
-        .replace(
-            "{{subagent_rules}}",
-            _SUBAGENT_RULES if allow_subagent else _SUBAGENT_OFF_RULES,
-        )
-        .replace(
-            "{{ subagent_rules }}",
-            _SUBAGENT_RULES if allow_subagent else _SUBAGENT_OFF_RULES,
-        )
-    )
-
-
-def _group_description_block(group_description: str | None) -> str:
-    cleaned = (group_description or "").strip()
-    if cleaned:
-        return cleaned
-    return "(none)"
-
-
-def _format_current_window(msg: WhatsAppMessage) -> str:
-    # Burst windows are already serialized as multi-line chat entries.
-    text = (msg.text or "").strip()
-    if text.startswith("Burst messages ("):
-        return text
-    return format_history([msg], history=[msg])
-
-
-def _normalize_chat_type(chat_type: str | None) -> str:
-    lowered = (chat_type or "").strip().lower()
-    if lowered in {"private", "group"}:
-        return lowered
-    return "private"
-
-
-def _chat_state_header(
-    chat_type: str, bot_is_admin: bool, bot_is_super_admin: bool
-) -> str:
-    normalized_type = _normalize_chat_type(chat_type)
-    if normalized_type == "group":
-        scope_line = (
-            "This is a group chat. You're in a chat with multiple people at once."
-        )
-    else:
-        scope_line = (
-            "This is a private chat. You're directly chatting with one other person."
-        )
-    if bot_is_super_admin:
-        role_line = "You are a super admin (owner)."
-    elif bot_is_admin:
-        role_line = "You are an admin."
-    else:
-        role_line = "You are a regular member."
-    return f"{scope_line}\n{role_line}"
-
-
-def _context_injection_block(
-    current_payload: dict | None,
-    *,
-    chat_type: str,
-    bot_is_admin: bool,
-    bot_is_super_admin: bool,
-    chat_id: str | None = None,
-) -> str:
-    payload = current_payload if isinstance(current_payload, dict) else {}
-    bot_mentioned = bool(
-        payload.get("botMentionedInWindow", payload.get("botMentioned"))
-    )
-    replied_to_bot = bool(
-        payload.get("repliedToBotInWindow", payload.get("repliedToBot"))
-    )
-    mention_count = payload.get("botMentionCountInWindow")
-    if mention_count is None:
-        mentioned = payload.get("mentionedJids")
-        if isinstance(mentioned, list):
-            mention_count = len(mentioned)
-        elif payload.get("botMentioned") is not None:
-            mention_count = 1 if bool(payload.get("botMentioned")) else 0
-        else:
-            mention_count = None
-    since_assistant = payload.get("messagesSinceAssistantReply")
-    assistant_replies_by_window = payload.get("assistantRepliesByWindow")
-    human_window = payload.get("humanMessagesInWindow")
-    explicit_join_events = payload.get("explicitJoinEventsInWindow")
-    explicit_join_participants = payload.get("explicitJoinParticipantsInWindow")
-    quoted_has_media = payload.get("quotedHasMedia")
-    llm1_reason_raw = payload.get("llm1Reason")
-
-    def _count_phrase(value, singular: str, plural: str) -> str:
-        if value is None:
-            return f"unknown {plural}"
-        if isinstance(value, int):
-            return f"{value} {singular if value == 1 else plural}"
-        return f"{value} {plural}"
-
-    def _is_singular_count(value) -> bool:
-        return isinstance(value, int) and value == 1
-
-    try:
-        mention_count = int(mention_count)
-    except (TypeError, ValueError):
-        pass
-
-    mention_count_text = _count_phrase(mention_count, "time", "times")
-    if isinstance(mention_count, int):
-        if mention_count > 0:
-            mention_line = f"- You have been mentioned {mention_count_text} in the current message window."
-        elif bot_mentioned:
-            mention_line = "- You have been mentioned in the current message window."
-        else:
-            mention_line = (
-                "- You have not been mentioned in the current message window."
-            )
-    elif bot_mentioned:
-        mention_line = "- You have been mentioned in the current message window."
-    else:
-        mention_line = "- You have not been mentioned in the current message window."
-
-    if replied_to_bot:
-        reply_line = "- A message in the current message window replies to you."
-    else:
-        reply_line = "- No message in the current message window replies to you."
-
-    if quoted_has_media is None:
-        quoted_payload = payload.get("quoted")
-        if isinstance(quoted_payload, dict):
-            quoted_type = str(quoted_payload.get("type") or "").strip().lower()
-            quoted_has_media = any(
-                token in quoted_type
-                for token in ("sticker", "image", "video", "audio", "document")
-            )
-        else:
-            quoted_has_media = False
-    else:
-        quoted_has_media = bool(quoted_has_media)
-
-    if quoted_has_media:
-        quoted_media_line = "- The quoted message includes media."
-    else:
-        quoted_media_line = "- The quoted message does not include media."
-
-    since_assistant_text = _count_phrase(since_assistant, "message", "messages")
-    human_window_text = _count_phrase(human_window, "human message", "human messages")
-
-    assistant_reply_lines: list[str] = []
-    if isinstance(assistant_replies_by_window, dict):
-        assistant_reply_values: list[tuple[int, int | str]] = []
-        for raw_window, raw_count in assistant_replies_by_window.items():
-            try:
-                window = int(raw_window)
-            except (TypeError, ValueError):
-                continue
-            assistant_reply_values.append((window, raw_count))
-        assistant_reply_values.sort(key=lambda item: item[0])
-        for window, count in assistant_reply_values:
-            count_text = _count_phrase(count, "reply", "replies")
-            assistant_reply_lines.append(
-                f"- You have sent {count_text} in the last {window} messages."
-            )
-
-    if not assistant_reply_lines:
-        fallback_recent = payload.get("assistantRepliesInLast20")
-        fallback_text = _count_phrase(fallback_recent, "reply", "replies")
-        assistant_reply_lines.append(
-            f"- You have sent {fallback_text} in the last 20 messages."
-        )
-
-    if _is_singular_count(human_window):
-        human_window_line = (
-            f"- There is {human_window_text} in the current message window."
-        )
-    else:
-        human_window_line = (
-            f"- There are {human_window_text} in the current message window."
-        )
-
-    join_event_text = _count_phrase(explicit_join_events, "event", "events")
-    join_participant_text = _count_phrase(
-        explicit_join_participants, "participant", "participants"
-    )
-    if isinstance(explicit_join_events, int):
-        if explicit_join_events > 0:
-            join_event_line = (
-                "- Explicit system member-join signals in the current message window: "
-                f"{join_event_text} ({join_participant_text})."
-            )
-        else:
-            join_event_line = (
-                "- No explicit system member-join signal in the current message window."
-            )
-    else:
-        join_event_line = "- Explicit system member-join signal count is unknown for the current message window."
-
-    llm1_reason = ""
-    if isinstance(llm1_reason_raw, str):
-        llm1_reason = " ".join(llm1_reason_raw.split())
-    elif llm1_reason_raw is not None:
-        llm1_reason = " ".join(str(llm1_reason_raw).split())
-    if llm1_reason:
-        llm1_reason_line = f"\nInvoke reason: {llm1_reason}\n\n"
-    else:
-        llm1_reason_line = "\n"
-
-    assistant_reply_block = "\n".join(assistant_reply_lines)
-    chat_state_text = _chat_state_header(chat_type, bot_is_admin, bot_is_super_admin)
-
-    return (
-        "Current message metadata:\n"
-        "Helper:\n"
-        "- `current message window` = only `current messages(burst)` (excludes `older messages`).\n"
-        f"{mention_line}\n"
-        f"{reply_line}\n"
-        f"{quoted_media_line}\n"
-        f"- Your last reply was {since_assistant_text} ago.\n"
-        f"{assistant_reply_block}\n"
-        f"{human_window_line}\n"
-        f"{join_event_line}\n"
-        f"{llm1_reason_line}"
-        "Chat state:\n"
-        f"{chat_state_text}"
-    )
-
-
 def get_llm2(
     *,
     model: str | None = None,
     base_url: str | None = None,
     api_key: str | None = None,
 ) -> ChatOpenAI:
-    resolved_model = model or (_clean_env(os.getenv("LLM2_MODEL")) or "gpt-4.1")
-    temperature = float(os.getenv("LLM2_TEMPERATURE", "0.5"))
+    resolved_model = model or (config.llm2_model_clean() or "gpt-4.1")
+    temperature = float(config.llm2_temperature_raw())
     timeout = _llm2_timeout()
     max_retries = _llm2_sdk_max_retries()
     resolved_base_url = (
         base_url
         if base_url is not None
-        else _endpoint_base_url(os.getenv("LLM2_ENDPOINT"))
+        else config.llm2_endpoint_base_url()
     )
     resolved_api_key = (
         api_key
         if api_key is not None
-        else (_clean_env(os.getenv("LLM2_API_KEY")) or "")
+        else (config.llm2_api_key_clean() or "")
     )
     kwargs = {
         "model": resolved_model,

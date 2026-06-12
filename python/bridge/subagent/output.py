@@ -43,13 +43,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-try:
-  from ..log import setup_logging
-except ImportError:
-  import sys
-  from pathlib import Path as _Path
-  sys.path.append(str(_Path(__file__).resolve().parent.parent.parent))
-  from bridge.log import setup_logging  # type: ignore
+from ..log import setup_logging
+from .config import media_dir_env, subagent_input_staging_dir_env
 
 try:
   from ..tools.thumbnail import generate_document_thumbnail
@@ -70,7 +65,7 @@ def _project_root() -> Path:
   return Path(__file__).resolve().parent.parent.parent.parent
 
 def _media_dir() -> Path:
-  raw = os.getenv("MEDIA_DIR")
+  raw = media_dir_env()
   if raw:
     return Path(raw).expanduser().resolve()
   return (_project_root() / "data" / "media").resolve()
@@ -91,7 +86,7 @@ def input_staging_root() -> Path:
   which is writable for native (non-docker) deployments and avoids assuming
   ``/storage`` exists with the right permissions on the host.
   """
-  raw = os.getenv("SUBAGENT_INPUT_STAGING_DIR")
+  raw = subagent_input_staging_dir_env()
   if raw:
     return Path(raw).expanduser().resolve()
   return (_project_root() / "data" / "subagent_in").resolve()

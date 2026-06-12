@@ -1,43 +1,23 @@
 from __future__ import annotations
 
-import os
 import re
 
-try:
-  from ..history import WhatsAppMessage, assistant_name
-  from ..db import get_prompt as db_get_prompt
-  from ..log import setup_logging
-  from ..config import HISTORY_LIMIT
-  from ..messaging.processing import (
-    _clean_text,
-    _infer_media,
-    _infer_quoted_media,
-    _quoted_from_payload,
-  )
-  from ..messaging.filtering import (
-    _is_provisional_assistant_echo,
-    _payload_is_human,
-    _payload_has_explicit_join_event,
-  )
-except ImportError:
-  import sys
-  from pathlib import Path
-  sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
-  from bridge.history import WhatsAppMessage, assistant_name  # type: ignore
-  from bridge.db import get_prompt as db_get_prompt  # type: ignore
-  from bridge.log import setup_logging  # type: ignore
-  from bridge.config import HISTORY_LIMIT  # type: ignore
-  from bridge.messaging.processing import (  # type: ignore
-    _clean_text,
-    _infer_media,
-    _infer_quoted_media,
-    _quoted_from_payload,
-  )
-  from bridge.messaging.filtering import (  # type: ignore
-    _is_provisional_assistant_echo,
-    _payload_is_human,
-    _payload_has_explicit_join_event,
-  )
+from ..history import WhatsAppMessage, assistant_name
+from ..db import get_prompt as db_get_prompt
+from ..log import setup_logging
+from .. import config
+from ..config import HISTORY_LIMIT
+from ..messaging.processing import (
+  _clean_text,
+  _infer_media,
+  _infer_quoted_media,
+  _quoted_from_payload,
+)
+from ..messaging.filtering import (
+  _is_provisional_assistant_echo,
+  _payload_is_human,
+  _payload_has_explicit_join_event,
+)
 
 logger = setup_logging()
 
@@ -77,9 +57,7 @@ def _assistant_replies_in_recent(
 
 
 def _llm1_history_limit_for_metadata() -> int:
-  raw = os.getenv("LLM1_HISTORY_LIMIT")
-  if raw is None or not raw.strip():
-    raw = os.getenv("HISTORY_LIMIT")
+  raw = config.llm1_history_limit_raw()
   try:
     parsed = int(raw) if raw is not None else HISTORY_LIMIT
   except (TypeError, ValueError):

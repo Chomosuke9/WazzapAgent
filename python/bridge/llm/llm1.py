@@ -31,7 +31,6 @@ the message is skipped (should_response=False, confidence=10).
 from __future__ import annotations
 
 import json
-import os
 import time
 import logging
 import re
@@ -41,71 +40,37 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from pydantic import ValidationError
 
-try:
-  from ..history import WhatsAppMessage
-  from ..log import setup_logging, trunc, dump_json, env_flag
-  from ..media import build_visual_parts, llm1_media_enabled, redact_multimodal_content
-  from ..stickers import sticker_catalog_text
-  from .schemas import LLM1Decision, build_llm1_tools, LLM1_TOOL, LLM1_REACT_TOOL  # noqa: F401
-  from .client import (  # noqa: F401
-    LLM1Target,
-    _llm1_history_limit,
-    _llm1_message_max_chars,
-    _llm1_timeout,
-    _llm1_sdk_max_retries,
-    _llm1_temperature,
-    _llm1_max_tokens,
-    _clean_env,
-    _endpoint_base_url,
-    _chat_base_url,
-    _llm1_targets,
-    get_llm1,
-  )
-  from .prompt import (  # noqa: F401
-    _truncate_text,
-    _truncate_burst_text,
-    _truncate_message,
-    _render_prompt_override,
-    _group_description_block,
-    _format_current_window,
-    build_llm1_prompt,
-    _metadata_block,
-  )
-  from .error_utils import _is_timeout_error, _error_chain
-except ImportError:  # allow running as script
-  import sys
-  from pathlib import Path
-  sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
-  from bridge.history import WhatsAppMessage  # type: ignore
-  from bridge.log import setup_logging, trunc, dump_json, env_flag  # type: ignore
-  from bridge.media import build_visual_parts, llm1_media_enabled, redact_multimodal_content  # type: ignore
-  from bridge.llm.schemas import LLM1Decision, build_llm1_tools, LLM1_TOOL, LLM1_REACT_TOOL  # type: ignore  # noqa: F401
-  from bridge.llm.client import (  # type: ignore  # noqa: F401
-    LLM1Target,
-    _llm1_history_limit,
-    _llm1_message_max_chars,
-    _llm1_timeout,
-    _llm1_sdk_max_retries,
-    _llm1_temperature,
-    _llm1_max_tokens,
-    _clean_env,
-    _endpoint_base_url,
-    _chat_base_url,
-    _llm1_targets,
-    get_llm1,
-  )
-  from bridge.llm.prompt import (  # type: ignore  # noqa: F401
-    _truncate_text,
-    _truncate_burst_text,
-    _truncate_message,
-    _render_prompt_override,
-    _group_description_block,
-    _format_current_window,
-    build_llm1_prompt,
-    _metadata_block,
-  )
-  from bridge.llm.error_utils import _is_timeout_error, _error_chain  # type: ignore
-  from bridge.stickers import sticker_catalog_text  # type: ignore
+from .. import config
+from ..history import WhatsAppMessage
+from ..log import setup_logging, trunc, dump_json, env_flag
+from ..media import build_visual_parts, llm1_media_enabled, redact_multimodal_content
+from ..stickers import sticker_catalog_text
+from .schemas import LLM1Decision, build_llm1_tools, LLM1_TOOL, LLM1_REACT_TOOL  # noqa: F401
+from .client import (  # noqa: F401
+  LLM1Target,
+  _llm1_history_limit,
+  _llm1_message_max_chars,
+  _llm1_timeout,
+  _llm1_sdk_max_retries,
+  _llm1_temperature,
+  _llm1_max_tokens,
+  _clean_env,
+  _endpoint_base_url,
+  _chat_base_url,
+  _llm1_targets,
+  get_llm1,
+)
+from .prompt import (  # noqa: F401
+  _truncate_text,
+  _truncate_burst_text,
+  _truncate_message,
+  _render_prompt_override,
+  _group_description_block,
+  _format_current_window,
+  build_llm1_prompt,
+  _metadata_block,
+)
+from .error_utils import _is_timeout_error, _error_chain
 
 logger = setup_logging()
 
@@ -250,8 +215,8 @@ async def call_llm1(
   group_description: str | None = None,
   prompt_override: str | None = None,
 ) -> LLM1Decision:
-  primary_endpoint = _endpoint_base_url(os.getenv("LLM1_ENDPOINT"))
-  fallback_endpoint = _endpoint_base_url(os.getenv("LLM1_FALLBACK_ENDPOINT"))
+  primary_endpoint = config.llm1_endpoint_base_url()
+  fallback_endpoint = config.llm1_fallback_endpoint_base_url()
   # If LLM1 is not configured, allow responding by default.
   if not primary_endpoint and not fallback_endpoint:
     logger.debug("LLM1 disabled (no LLM1_ENDPOINT set); defaulting to respond")

@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createAccountContext } from '../../migration/node/account/accountContext.ts';
+import { createAccountContext } from '../../src/account/accountContext.ts';
 import {
   nextContextMsgId,
   rememberSenderRef,
   resolveSenderByRef,
-} from '../../migration/node/identifiers.ts';
+} from '../../src/wa/domain/identifiers.ts';
 
 // Step 16: two AccountContexts keyed by the SAME chatId must keep fully
 // independent per-account state. These tests prove the contextMsgId counter and

@@ -8,41 +8,24 @@ from __future__ import annotations
 import asyncio
 import threading
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Optional
 
-try:
-  from .db import (
-    upsert_stats_batch,
-    upsert_user_stats_batch,
-    get_stats,
-    get_top_users,
-  )
-  from .log import setup_logging
-except ImportError:
-  import sys
-  sys.path.append(str(Path(__file__).resolve().parent.parent))
-  from bridge.db import upsert_stats_batch, upsert_user_stats_batch, get_stats, get_top_users  # type: ignore
-  from bridge.log import setup_logging  # type: ignore
+from .db import (
+  upsert_stats_batch,
+  upsert_user_stats_batch,
+  get_stats,
+  get_top_users,
+)
+from .log import setup_logging
+from . import config
 
 logger = setup_logging()
 
 FLUSH_INTERVAL_SECONDS = 60
 
-# ---------------------------------------------------------------------------
-# In-memory accumulators
-# ---------------------------------------------------------------------------
-
-# (chat_id, period_type, period_key, stat_key) → increment
-_stats_buffer: dict[tuple[str, str, str, str], int] = {}
-# (chat_id, period_type, period_key, sender_ref) → (sender_name, increment)
-_user_stats_buffer: dict[tuple[str, str, str, str], tuple[str, int]] = {}
-_buffer_lock = threading.Lock()
-
 
 def _utc_offset_hours() -> float:
-  import os
-  raw = os.getenv("CONTEXT_TIME_UTC_OFFSET_HOURS")
+  raw = config.context_time_utc_offset_raw()
   if raw is None:
     return 0.0
   try:
@@ -66,78 +49,119 @@ def _period_keys() -> list[tuple[str, str]]:
   ]
 
 
-def record_stat(chat_id: str, stat_key: str, increment: int = 1) -> None:
-  """Thread-safe increment of a stat for all periods."""
-  periods = _period_keys()
-  with _buffer_lock:
-    for period_type, period_key in periods:
-      key = (chat_id, period_type, period_key, stat_key)
-      _stats_buffer[key] = _stats_buffer.get(key, 0) + increment
+# ---------------------------------------------------------------------------
+# Per-session in-memory accumulators + flush loop
+# ---------------------------------------------------------------------------
 
+class DashboardStats:
+  """Per-AgentSession dashboard stats buffers and flush loop.
 
-def record_user_invoke(chat_id: str, sender_ref: str, sender_name: str) -> None:
-  """Track which user invoked the bot."""
-  periods = _period_keys()
-  with _buffer_lock:
-    for period_type, period_key in periods:
-      key = (chat_id, period_type, period_key, sender_ref)
-      existing = _user_stats_buffer.get(key)
-      if existing:
-        _user_stats_buffer[key] = (sender_name, existing[1] + 1)
-      else:
-        _user_stats_buffer[key] = (sender_name, 1)
+  Each session owns its own buffers and runs its own flush loop inside the
+  session's task, where the tenant DB ContextVar is already set, so writes go
+  to the correct tenant's stats DB (no cross-tenant leak).
+  """
 
+  def __init__(self) -> None:
+    # (chat_id, period_type, period_key, stat_key) → increment
+    self._stats_buffer: dict[tuple[str, str, str, str], int] = {}
+    # (chat_id, period_type, period_key, sender_ref) → (sender_name, increment)
+    self._user_stats_buffer: dict[tuple[str, str, str, str], tuple[str, int]] = {}
+    self._buffer_lock = threading.Lock()
 
-def flush_to_db() -> None:
-  """Write accumulated stats to SQLite. Called periodically and on shutdown."""
-  with _buffer_lock:
-    stats_snapshot = dict(_stats_buffer)
-    _stats_buffer.clear()
-    user_snapshot = dict(_user_stats_buffer)
-    _user_stats_buffer.clear()
+  def record_stat(self, chat_id: str, stat_key: str, increment: int = 1) -> None:
+    """Thread-safe increment of a stat for all periods."""
+    periods = _period_keys()
+    with self._buffer_lock:
+      for period_type, period_key in periods:
+        key = (chat_id, period_type, period_key, stat_key)
+        self._stats_buffer[key] = self._stats_buffer.get(key, 0) + increment
 
-  if not stats_snapshot and not user_snapshot:
-    return
-
-  try:
-    if stats_snapshot:
-      rows = [
-        (chat_id, pt, pk, sk, inc)
-        for (chat_id, pt, pk, sk), inc in stats_snapshot.items()
-      ]
-      upsert_stats_batch(rows)
-
-    if user_snapshot:
-      rows = [
-        (chat_id, pt, pk, sr, name, inc)
-        for (chat_id, pt, pk, sr), (name, inc) in user_snapshot.items()
-      ]
-      upsert_user_stats_batch(rows)
-
-    total = len(stats_snapshot) + len(user_snapshot)
-    logger.debug("dashboard flush: %d stat rows, %d user rows", len(stats_snapshot), len(user_snapshot))
-  except Exception as e:
-    with _buffer_lock:
-      for key, inc in stats_snapshot.items():
-        _stats_buffer[key] = _stats_buffer.get(key, 0) + inc
-      for key, (name, inc) in user_snapshot.items():
-        existing = _user_stats_buffer.get(key)
+  def record_user_invoke(self, chat_id: str, sender_ref: str, sender_name: str) -> None:
+    """Track which user invoked the bot."""
+    periods = _period_keys()
+    with self._buffer_lock:
+      for period_type, period_key in periods:
+        key = (chat_id, period_type, period_key, sender_ref)
+        existing = self._user_stats_buffer.get(key)
         if existing:
-          _user_stats_buffer[key] = (name or existing[0], existing[1] + inc)
+          self._user_stats_buffer[key] = (sender_name, existing[1] + 1)
         else:
-          _user_stats_buffer[key] = (name, inc)
-    logger.warning("dashboard flush failed: %s", e)
+          self._user_stats_buffer[key] = (sender_name, 1)
 
+  def flush_to_db(self) -> None:
+    """Write accumulated stats to SQLite. Called periodically and on shutdown."""
+    with self._buffer_lock:
+      stats_snapshot = dict(self._stats_buffer)
+      self._stats_buffer.clear()
+      user_snapshot = dict(self._user_stats_buffer)
+      self._user_stats_buffer.clear()
 
-async def start_flush_loop() -> asyncio.Task:
-  """Start background task that flushes stats to DB every FLUSH_INTERVAL_SECONDS."""
-  async def _loop():
-    while True:
-      await asyncio.sleep(FLUSH_INTERVAL_SECONDS)
-      flush_to_db()
+    if not stats_snapshot and not user_snapshot:
+      return
 
-  task = asyncio.create_task(_loop())
-  return task
+    try:
+      if stats_snapshot:
+        rows = [
+          (chat_id, pt, pk, sk, inc)
+          for (chat_id, pt, pk, sk), inc in stats_snapshot.items()
+        ]
+        upsert_stats_batch(rows)
+
+      if user_snapshot:
+        rows = [
+          (chat_id, pt, pk, sr, name, inc)
+          for (chat_id, pt, pk, sr), (name, inc) in user_snapshot.items()
+        ]
+        upsert_user_stats_batch(rows)
+
+      total = len(stats_snapshot) + len(user_snapshot)
+      logger.debug("dashboard flush: %d stat rows, %d user rows", len(stats_snapshot), len(user_snapshot))
+    except Exception as e:
+      with self._buffer_lock:
+        for key, inc in stats_snapshot.items():
+          self._stats_buffer[key] = self._stats_buffer.get(key, 0) + inc
+        for key, (name, inc) in user_snapshot.items():
+          existing = self._user_stats_buffer.get(key)
+          if existing:
+            self._user_stats_buffer[key] = (name or existing[0], existing[1] + inc)
+          else:
+            self._user_stats_buffer[key] = (name, inc)
+      logger.warning("dashboard flush failed: %s", e)
+
+  async def start_flush_loop(self) -> asyncio.Task:
+    """Start background task that flushes stats to DB every FLUSH_INTERVAL_SECONDS."""
+    async def _loop():
+      while True:
+        await asyncio.sleep(FLUSH_INTERVAL_SECONDS)
+        self.flush_to_db()
+
+    task = asyncio.create_task(_loop())
+    return task
+
+  def get_dashboard_text(self, chat_id: str) -> str:
+    """Generate full dashboard text for a chat."""
+    # Flush buffer first to include latest data.
+    self.flush_to_db()
+
+    periods = _period_keys()
+    labels = {"daily": "Today", "weekly": "This Week", "monthly": "This Month"}
+
+    sections: list[str] = ["*Dashboard*\n"]
+    for period_type, period_key in periods:
+      label = labels.get(period_type, period_type)
+      sections.append(_format_period_stats(chat_id, period_type, period_key, label))
+
+    # Top users from monthly period
+    monthly_key = next((pk for pt, pk in periods if pt == "monthly"), None)
+    if monthly_key:
+      top = get_top_users(chat_id, "monthly", monthly_key, limit=5)
+      if top:
+        sections.append("*Top Users (This Month)*")
+        for i, (ref, name, count) in enumerate(top, 1):
+          display = name if name else ref
+          sections.append(f"  {i}. {display} ({ref}) — {count}x")
+
+    return "\n\n".join(sections)
 
 
 # ---------------------------------------------------------------------------
@@ -154,9 +178,6 @@ def _format_tokens(count: int) -> str:
 
 def _format_period_stats(chat_id: str, period_type: str, period_key: str, label: str) -> str:
   """Format stats for one period."""
-  # Flush buffer first to include latest data
-  flush_to_db()
-
   stats = get_stats(chat_id, period_type, period_key)
   if not stats:
     return f"*{label}* ({period_key})\n  No data yet."
@@ -188,26 +209,3 @@ def _format_period_stats(chat_id: str, period_type: str, period_key: str, label:
     f"  Errors: {errors}",
   ]
   return "\n".join(lines)
-
-
-def get_dashboard_text(chat_id: str) -> str:
-  """Generate full dashboard text for a chat."""
-  periods = _period_keys()
-  labels = {"daily": "Today", "weekly": "This Week", "monthly": "This Month"}
-
-  sections: list[str] = ["*Dashboard*\n"]
-  for period_type, period_key in periods:
-    label = labels.get(period_type, period_type)
-    sections.append(_format_period_stats(chat_id, period_type, period_key, label))
-
-  # Top users from monthly period
-  monthly_key = next((pk for pt, pk in periods if pt == "monthly"), None)
-  if monthly_key:
-    top = get_top_users(chat_id, "monthly", monthly_key, limit=5)
-    if top:
-      sections.append("*Top Users (This Month)*")
-      for i, (ref, name, count) in enumerate(top, 1):
-        display = name if name else ref
-        sections.append(f"  {i}. {display} ({ref}) — {count}x")
-
-  return "\n\n".join(sections)

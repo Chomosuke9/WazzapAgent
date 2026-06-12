@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import contextvars
 import logging
-import os
 import sys
 from typing import Any
 
 from dotenv import load_dotenv
 
 try:
-  from .config import _parse_positive_int
+  from . import config
+  from .config import env_flag
 except ImportError:
-  from bridge.config import _parse_positive_int  # type: ignore
+  from bridge import config  # type: ignore
+  from bridge.config import env_flag  # type: ignore
 
 
 LOG_RECORD_BUILTINS = {
@@ -47,32 +48,25 @@ LOG_RECORD_BUILTINS = {
 }
 
 
-def env_flag(name: str, default: bool = False) -> bool:
-  raw = os.getenv(name)
-  if raw is None:
-    return default
-  return raw.strip().lower() in {"1", "true", "yes", "on"}
-
-
 def _level_from_env() -> int:
   load_dotenv()
-  level = os.getenv("BRIDGE_LOG_LEVEL", "INFO").upper()
+  level = config.bridge_log_level().upper()
   return getattr(logging, level, logging.INFO)
 
 
 def _extras_limit_from_env() -> int:
   load_dotenv()
-  return _parse_positive_int(os.getenv("BRIDGE_LOG_EXTRAS_LIMIT"), 4000)
+  return config.bridge_log_extras_limit()
 
 
 def _chat_label_width_from_env() -> int:
   load_dotenv()
-  return _parse_positive_int(os.getenv("BRIDGE_LOG_CHAT_LABEL_WIDTH"), 24)
+  return config.bridge_log_chat_label_width()
 
 
 def _chat_label_default_from_env() -> str:
   load_dotenv()
-  value = " ".join(str(os.getenv("BRIDGE_LOG_CHAT_LABEL_DEFAULT", "system")).split()).strip()
+  value = " ".join(str(config.bridge_log_chat_label_default_raw()).split()).strip()
   return value or "system"
 
 

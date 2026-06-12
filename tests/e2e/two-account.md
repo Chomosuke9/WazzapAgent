@@ -59,7 +59,7 @@ EXIT=0
 ### Prerequisites
 
 - Python 3.10+ with the bridge deps importable (`websockets`, plus what
-  `migration/python/bridge` imports). If your default `python3` lacks
+  `python/bridge` imports). If your default `python3` lacks
   `websockets`, use the project's pyenv interpreter, e.g.
   `~/.pyenv/versions/3.12.13/bin/python3`.
 - No network, no LLM keys, no WhatsApp pairing required — the stub server
@@ -83,7 +83,7 @@ ps -eo pid,comm,args | grep -iE "two_account_smoke|stub_node|wsServer" | grep -v
 
 ### Related coverage
 
-`migration/python/tests/test_multi_account.py` covers the same two-account
+`python/tests/test_multi_account.py` covers the same two-account
 boot + per-tenant DB isolation + distinct-webhook-port invariants as a unit
 test (also `asyncio.run`, no pytest-asyncio). The e2e script is the
 fresh-clone, single-command proof; the unit test is the in-suite regression
@@ -122,7 +122,7 @@ pnpm dev
 
 # 2) Start the Python bridge. It loads the accounts config and dials NODE_URL
 #    once per tenant, sending `hello { folderPath }` and awaiting `hello_ack`.
-python -m bridge.main      # from migration/python
+python -m bridge.main      # from python
 ```
 
 ### 2.3 Pair / resume

@@ -20,12 +20,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type WebSocket from 'ws';
 
-const db = await import('../../migration/node/db.ts');
-const registry = await import('../../migration/node/server/accountRegistry.ts');
-const { handleButtonResponse } = await import('../../migration/node/wa/connection.ts');
-const { createAccountContext } = await import('../../migration/node/account/accountContext.ts');
+const { Database } = await import('../../src/db/Database.ts');
+const { createRepositories } = await import('../../src/db/repositories/index.ts');
+const registry = await import('../../src/server/accountRegistry.ts');
+const { handleButtonResponse } = await import('../../src/wa/connection.ts');
+const { createAccountContext } = await import('../../src/account/accountContext.ts');
 
-await db.init();
+// Step 05: each AccountContext carries its tenant's repositories. The button
+// handler's model_select path writes via `ctx.repos.model`, so attach a real
+// (per-test-dir) Database + repository bundle.
+const database = new Database(path.join(TMP_DATA_DIR, 'db'));
+database.open();
+const repos = createRepositories(database);
 
 // The `ws` OPEN constant value is 1 (per the WebSocket spec / ws library).
 const OPEN = 1;
@@ -68,6 +74,7 @@ test('/model (model_select) routes set_llm2_model + invalidate_llm2_model to ONL
   const chatId = '111@s.whatsapp.net'; // private chat -> no group metadata needed
 
   const ctxA = createAccountContext(folderA);
+  ctxA.repos = repos;
   registry.getOrCreate(folderB); // account B exists but is NOT the acting account
 
   const clientA = new FakeWebSocket();
@@ -115,6 +122,7 @@ test('control event emitted while the account is unbound is queued, then flushed
   const chatId = '222@s.whatsapp.net';
 
   const ctxC = createAccountContext(folderC);
+  ctxC.repos = repos;
   registry.getOrCreate(folderC); // entry exists, but NO client bound yet
 
   const sock = makeSock();
@@ -154,7 +162,7 @@ test('control event emitted while the account is unbound is queued, then flushed
 
 test.after(() => {
   try {
-    db.closeAllDbs?.();
+    database.close();
   } catch {
     /* ignore */
   }

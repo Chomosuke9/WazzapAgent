@@ -2,29 +2,15 @@ from __future__ import annotations
 
 import re
 
-try:
-  from ..log import setup_logging
-  from ..llm.tool_utils import extract_tool_args, get_tool_call_name
-  from .processing import (
-    _normalize_context_msg_id,
-    _normalize_preview_text,
-    EMPTY_TARGET_TOKENS,
-    SENDER_REF_RE,
-  )
-  from .format import sanitize_whatsapp_text
-except ImportError:
-  import sys
-  from pathlib import Path
-  sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
-  from bridge.log import setup_logging  # type: ignore
-  from bridge.llm.tool_utils import extract_tool_args, get_tool_call_name  # type: ignore
-  from bridge.messaging.processing import (  # type: ignore
-    _normalize_context_msg_id,
-    _normalize_preview_text,
-    EMPTY_TARGET_TOKENS,
-    SENDER_REF_RE,
-  )
-  from bridge.messaging.format import sanitize_whatsapp_text  # type: ignore
+from ..log import setup_logging
+from ..llm.tool_utils import extract_tool_args, get_tool_call_name
+from .processing import (
+  _normalize_context_msg_id,
+  _normalize_preview_text,
+  EMPTY_TARGET_TOKENS,
+  SENDER_REF_RE,
+)
+from .format import sanitize_whatsapp_text
 
 logger = setup_logging()
 

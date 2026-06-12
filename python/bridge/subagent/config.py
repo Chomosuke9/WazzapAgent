@@ -3,13 +3,7 @@ from __future__ import annotations
 
 import os
 
-try:
-  from ..config import _parse_positive_float, _parse_non_negative_int
-except ImportError:
-  import sys
-  from pathlib import Path
-  sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
-  from bridge.config import _parse_positive_float, _parse_non_negative_int  # type: ignore
+from ..config import _parse_positive_float, _parse_non_negative_int
 
 SUBAGENT_URL = os.getenv("SUBAGENT_URL", "http://localhost:5000")
 SUBAGENT_WEBHOOK_PORT = _parse_non_negative_int(os.getenv("SUBAGENT_WEBHOOK_PORT"), 8081)
@@ -61,3 +55,28 @@ SUBAGENT_PROGRESS_DETAIL_MAX_CHARS = _parse_non_negative_int(
 SUBAGENT_MAX_INLINE_FILE_BYTES = _parse_non_negative_int(
   os.getenv("SUBAGENT_MAX_INLINE_FILE_BYTES"), 50 * 1024 * 1024
 )
+
+
+# ---------------------------------------------------------------------------
+# Call-time env accessors (Step 14 — centralization).
+#
+# Read on each call (not frozen at import) to preserve historical behaviour;
+# parsing/defaults are byte-identical to the original inline reads. These keep
+# ``os.getenv`` confined to config modules while logic modules (main.py,
+# subagent/output.py, subagent/webhook_server.py) import these accessors.
+# ---------------------------------------------------------------------------
+
+def subagent_webhook_url_env() -> str | None:
+  return os.getenv("SUBAGENT_WEBHOOK_URL")
+
+
+def media_dir_env() -> str | None:
+  return os.getenv("MEDIA_DIR")
+
+
+def subagent_input_staging_dir_env() -> str | None:
+  return os.getenv("SUBAGENT_INPUT_STAGING_DIR")
+
+
+def subagent_webhook_max_body_bytes_raw() -> str:
+  return os.getenv("SUBAGENT_WEBHOOK_MAX_BODY_BYTES", str(200 * 1024 * 1024))

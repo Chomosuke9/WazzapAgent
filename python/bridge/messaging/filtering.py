@@ -1,26 +1,13 @@
 from __future__ import annotations
 
-try:
-  from ..history import WhatsAppMessage, assistant_name_pattern
-  from ..log import setup_logging
-  from ..config import ASSISTANT_ECHO_MERGE_WINDOW_MS
-  from .processing import (
-    _clean_text,
-    _reply_signature,
-    _is_context_only_payload,
-  )
-except ImportError:
-  import sys
-  from pathlib import Path
-  sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
-  from bridge.history import WhatsAppMessage, assistant_name_pattern  # type: ignore
-  from bridge.log import setup_logging  # type: ignore
-  from bridge.config import ASSISTANT_ECHO_MERGE_WINDOW_MS  # type: ignore
-  from bridge.messaging.processing import (  # type: ignore
-    _clean_text,
-    _reply_signature,
-    _is_context_only_payload,
-  )
+from ..history import WhatsAppMessage, assistant_name_pattern
+from ..log import setup_logging
+from ..config import ASSISTANT_ECHO_MERGE_WINDOW_MS
+from .processing import (
+  _clean_text,
+  _reply_signature,
+  _is_context_only_payload,
+)
 
 logger = setup_logging()
 

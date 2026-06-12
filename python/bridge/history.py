@@ -1,32 +1,84 @@
 from __future__ import annotations
 
-import os
+import contextlib
+import contextvars
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, Optional, Sequence
 
+from . import config
+
 DEFAULT_ASSISTANT_NAME = "LLM"
 ASSISTANT_CONTEXT_SENDER_REF = "You"
 
+# Per-tenant assistant identity (CONTRACT.md §8 — multi-account). An
+# :class:`~bridge.session.AgentSession` binds its own identity for the duration
+# of its work via :func:`set_tenant_assistant_name`; while bound, all name
+# resolution uses THAT tenant's identity instead of the process-global
+# ``ASSISTANT_NAME`` env. When UNSET (default ``None`` — single-account / tests)
+# the legacy env-based resolution below is used UNCHANGED, so single-account
+# behaviour is byte-for-byte identical. This ContextVar is context-local (it
+# does not leak across tenants), mirroring the ``_tenant_db_dir`` ContextVar in
+# ``db/core.py`` — it is NOT shared mutable tenant state.
+_tenant_assistant_name: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+  "bridge_tenant_assistant_name", default=None
+)
+
+# Legacy env-path caches (single-account fast path; semantics unchanged).
 _last_env_value: str | None = object()  # type: ignore[assignment]
 _cached_names: list[str] = []
 _cached_pattern: re.Pattern | None = None
 
+# Per-tenant compiled-pattern cache, keyed by the resolved names tuple. The key
+# fully determines the value, so this is a keyed cache (sanctioned pattern),
+# NOT shared mutable tenant state.
+_pattern_by_names: dict[tuple[str, ...], re.Pattern] = {}
+
+
+def set_tenant_assistant_name(name: str | None) -> contextvars.Token:
+  """Bind the current (async) context to *name* as the tenant's assistant
+  identity until :func:`reset_tenant_assistant_name`. Pass ``None`` to select
+  the legacy env-based identity (single-account)."""
+  return _tenant_assistant_name.set(name)
+
+
+def reset_tenant_assistant_name(token: contextvars.Token) -> None:
+  """Undo a previous :func:`set_tenant_assistant_name` using its token."""
+  _tenant_assistant_name.reset(token)
+
+
+@contextlib.contextmanager
+def tenant_assistant_name_context(name: str | None):
+  """Context-manager form of :func:`set_tenant_assistant_name`."""
+  token = _tenant_assistant_name.set(name)
+  try:
+    yield
+  finally:
+    _tenant_assistant_name.reset(token)
+
+
+def _names_from_raw(raw: str | None) -> list[str]:
+  """Parse a comma-separated assistant-name string (first = primary)."""
+  if not raw or not raw.strip():
+    return [DEFAULT_ASSISTANT_NAME]
+  names = [n.strip() for n in raw.split(",") if n.strip()]
+  return names if names else [DEFAULT_ASSISTANT_NAME]
+
 
 def _parse_assistant_names() -> list[str]:
-  """Parse ASSISTANT_NAME env var into list of names (first = primary)."""
+  """Resolve assistant names: the per-tenant override (if bound) takes
+  precedence; otherwise fall back to the cached ``ASSISTANT_NAME`` env value."""
+  override = _tenant_assistant_name.get()
+  if override is not None:
+    return _names_from_raw(override)
   global _last_env_value, _cached_names, _cached_pattern
-  raw = os.getenv("ASSISTANT_NAME")
+  raw = config.assistant_name_env()
   if raw == _last_env_value:
     return _cached_names
   _last_env_value = raw
   _cached_pattern = None  # invalidate pattern cache
-  if not raw or not raw.strip():
-    _cached_names = [DEFAULT_ASSISTANT_NAME]
-    return _cached_names
-  names = [n.strip() for n in raw.split(",") if n.strip()]
-  _cached_names = names if names else [DEFAULT_ASSISTANT_NAME]
+  _cached_names = _names_from_raw(raw)
   return _cached_names
 
 
@@ -43,11 +95,21 @@ def assistant_aliases() -> list[str]:
 def assistant_name_pattern() -> re.Pattern:
   """Return compiled regex matching any bot alias (case-insensitive, word boundary)."""
   global _cached_pattern
-  _parse_assistant_names()  # ensure cache is fresh
+  names = _parse_assistant_names()  # ensure cache is fresh / override resolved
+  if _tenant_assistant_name.get() is not None:
+    # Per-tenant override active — use a keyed cache so each tenant's identity
+    # compiles its own pattern (no cross-tenant leak via the global cache).
+    key = tuple(names)
+    pattern = _pattern_by_names.get(key)
+    if pattern is None:
+      escaped = [re.escape(a) for a in names]
+      pattern = re.compile(r"(?i)\b(?:" + "|".join(escaped) + r")\b")
+      _pattern_by_names[key] = pattern
+    return pattern
+  # Legacy env fast path (unchanged).
   if _cached_pattern is not None:
     return _cached_pattern
-  aliases = _cached_names
-  escaped = [re.escape(a) for a in aliases]
+  escaped = [re.escape(a) for a in names]
   pattern = r"(?i)\b(?:" + "|".join(escaped) + r")\b"
   _cached_pattern = re.compile(pattern)
   return _cached_pattern
@@ -79,7 +141,7 @@ class WhatsAppMessage:
 
 
 def _context_time_utc_offset_hours() -> float | None:
-  raw = os.getenv("CONTEXT_TIME_UTC_OFFSET_HOURS")
+  raw = config.context_time_utc_offset_raw()
   if raw is None:
     return None
   cleaned = "".join(str(raw).split())

@@ -335,11 +335,12 @@ class TestMuteDB:
     assert is_muted("chat1", "u2xyz") is False
 
   def test_mute_expiry(self):
-    from bridge.db import add_mute, is_muted, _mute_cache, _cache_lock
+    from bridge.db import add_mute, is_muted, _mute_cache, _cache_lock, _tenant_cache_key
     add_mute("chat1", "u1abc", 1)
-    # Manually set muted_at to a time far in the past so it's expired
+    # Manually set muted_at to a time far in the past so it's expired.
+    # The mute cache is tenant-scoped: outer key is (tenant, chat_id).
     with _cache_lock:
-      _mute_cache["chat1"]["u1abc"]["muted_at"] = "2020-01-01 00:00:00"
+      _mute_cache[_tenant_cache_key("chat1")]["u1abc"]["muted_at"] = "2020-01-01 00:00:00"
     assert is_muted("chat1", "u1abc") is False
 
   def test_clear_mutes(self):
@@ -362,71 +363,3 @@ class TestMuteDB:
     add_mute("chat1", "u1abc", 60)
     remaining = get_mute_remaining_minutes("chat1", "u1abc")
     assert 58 <= remaining <= 60
-
-
-# ---------------------------------------------------------------------------
-# /permission command strictness
-# ---------------------------------------------------------------------------
-
-class TestPermissionCommand:
-  def test_reject_level_1_without_bot_admin(self):
-    from bridge.commands import _handle_permission
-    result = _handle_permission(
-      "1", chat_id="chat1", chat_type="group",
-      sender_is_admin=True, bot_is_admin=False,
-    )
-    assert not result.success
-    assert "admin" in result.reply.lower()
-
-  def test_allow_level_1_with_bot_admin(self):
-    # Need a temp DB
-    import tempfile
-    tmpdir = tempfile.mkdtemp()
-    os.environ["BOT_DB_PATH"] = os.path.join(tmpdir, "test.db")
-    from bridge import db
-    db._DB_PATH = None
-    db._permission_cache.clear()
-    db._LOCAL = type(db._LOCAL)()
-    try:
-      from bridge.commands import _handle_permission
-      result = _handle_permission(
-        "1", chat_id="chat1", chat_type="group",
-        sender_is_admin=True, bot_is_admin=True,
-      )
-      assert result.success
-      assert "delete" in result.reply.lower()
-    finally:
-      import shutil
-      shutil.rmtree(tmpdir, ignore_errors=True)
-      os.environ.pop("BOT_DB_PATH", None)
-      db._DB_PATH = None
-
-  def test_allow_level_0_without_bot_admin(self):
-    import tempfile
-    tmpdir = tempfile.mkdtemp()
-    os.environ["BOT_DB_PATH"] = os.path.join(tmpdir, "test.db")
-    from bridge import db
-    db._DB_PATH = None
-    db._permission_cache.clear()
-    db._LOCAL = type(db._LOCAL)()
-    try:
-      from bridge.commands import _handle_permission
-      result = _handle_permission(
-        "0", chat_id="chat1", chat_type="group",
-        sender_is_admin=True, bot_is_admin=False,
-      )
-      assert result.success
-    finally:
-      import shutil
-      shutil.rmtree(tmpdir, ignore_errors=True)
-      os.environ.pop("BOT_DB_PATH", None)
-      db._DB_PATH = None
-
-  def test_reject_private_chat(self):
-    from bridge.commands import _handle_permission
-    result = _handle_permission(
-      "1", chat_id="priv1", chat_type="private",
-      sender_is_admin=True, bot_is_admin=True,
-    )
-    assert not result.success
-    assert "group" in result.reply.lower()

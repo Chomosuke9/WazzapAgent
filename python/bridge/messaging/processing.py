@@ -1,49 +1,30 @@
 from __future__ import annotations
 
 import re
-import time
 from collections import deque
-from itertools import count
 from typing import Deque
 
-try:
-  from ..history import (
-    WhatsAppMessage,
-    assistant_name,
-    assistant_sender_ref,
-    format_context_time,
-    hydrate_quoted_from_history,
-    _format_role,
-  )
-  from ..log import setup_logging
-  from ..config import (
-    HISTORY_LIMIT,
-    ASSISTANT_ECHO_MERGE_WINDOW_MS,
-  )
-except ImportError:
-  import sys
-  from pathlib import Path
-  sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
-  from bridge.history import (  # type: ignore
-    WhatsAppMessage,
-    assistant_name,
-    assistant_sender_ref,
-    format_context_time,
-    hydrate_quoted_from_history,
-    _format_role,
-  )
-  from bridge.log import setup_logging  # type: ignore
-  from bridge.config import (  # type: ignore
-    HISTORY_LIMIT,
-    ASSISTANT_ECHO_MERGE_WINDOW_MS,
-  )
+from wasocket.correlation import make_request_id
+
+from ..history import (
+  WhatsAppMessage,
+  assistant_name,
+  assistant_sender_ref,
+  format_context_time,
+  hydrate_quoted_from_history,
+  _format_role,
+)
+from ..log import setup_logging
+from ..config import (
+  HISTORY_LIMIT,
+  ASSISTANT_ECHO_MERGE_WINDOW_MS,
+)
 
 logger = setup_logging()
 
 CONTEXT_MSG_ID_RE = re.compile(r"^\s*(\d{6})\s*$")
 SENDER_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{1,31}$")
 EMPTY_TARGET_TOKENS = {"none", "null", "no", "nil", "-", ""}
-REQUEST_COUNTER = count(1)
 SYSTEM_CONTEXT_TOKEN = "system"
 MENTION_SUMMARY_MAX_ITEMS = 8
 
@@ -727,7 +708,15 @@ def _hydrate_provisional_context_id_from_ack(
 
 
 def _make_request_id(action: str) -> str:
-  return f"{action}-{int(time.time() * 1000)}-{next(REQUEST_COUNTER):06d}"
+  """Allocate a request id from the single shared SDK allocator (Step 12).
+
+  The bridge no longer keeps its own private request-id counter (which had a
+  format identical to the SDK's and so risked colliding). It now delegates to
+  :func:`wasocket.correlation.make_request_id` — the ONE process-wide
+  allocator (CONTRACT §3) — keeping the id FORMAT identical
+  (``"<tag>-<unix_ms>-<seq6>"``).
+  """
+  return make_request_id(action)
 
 
 def _is_context_only_payload(payload: dict) -> bool:

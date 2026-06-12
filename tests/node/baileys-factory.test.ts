@@ -8,11 +8,11 @@ import {
   createOrResumeAccount,
   ensureFolderLayout,
   __setSocketCreatorForTests,
-} from '../../migration/node/account/baileysFactory.ts';
+} from '../../src/account/baileysFactory.ts';
 import {
   get,
   remove,
-} from '../../migration/node/server/accountRegistry.ts';
+} from '../../src/server/accountRegistry.ts';
 
 // Step 17: the factory must run offline. We stub the Baileys socket creator so
 // no `fetchLatestBaileysVersion` network call and no real WhatsApp socket are

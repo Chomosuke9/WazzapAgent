@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type WebSocket from 'ws';
-import type { OutboundFrame } from '../../migration/node/protocol/types.ts';
+import type { OutboundFrame } from '../../src/protocol/types.ts';
 
 import {
   getOrCreate,
@@ -12,7 +12,7 @@ import {
   flushReliableQueue,
   remove,
   MAX_RELIABLE_QUEUE,
-} from '../../migration/node/server/accountRegistry.ts';
+} from '../../src/server/accountRegistry.ts';
 
 // The `ws` OPEN constant value is 1 (per the WebSocket spec / ws library).
 const OPEN = 1;
