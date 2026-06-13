@@ -235,7 +235,25 @@ async function handleIncomingMessage(
   const chatName = isGroup ? (group?.name || chatId) : chatId;
 
   const { contentType, message: innerMessage } = unwrapMessage(msg.message);
-  if (!contentType || !innerMessage) return;
+  if (!contentType || !innerMessage) {
+    // We can't normalize this into a forwardable payload (interactive /
+    // native-flow / echoed-with-stripped-content / newer message types that
+    // Baileys' getContentType doesn't resolve), but `/catch` and other
+    // reply-target lookups still need the raw proto. Remember it so a reply +
+    // `/catch` can retrieve it from the cache instead of failing.
+    rememberMessage(ctx, msg, {
+      chatId,
+      contextMsgId,
+      senderId,
+      senderRef,
+      senderIsAdmin: senderRole.isAdmin || senderRole.isSuperAdmin,
+      fromMe,
+      timestampMs: Number(msg.messageTimestamp) > 0
+        ? Number(msg.messageTimestamp) * 1000
+        : Date.now(),
+    });
+    return;
+  }
   const content = innerMessage[contentType];
   const location = extractLocationData(innerMessage);
   const locationText = location ? formatLocationText(location) : null;

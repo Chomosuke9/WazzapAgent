@@ -7,6 +7,7 @@ import path from 'node:path';
 import {
   createOrResumeAccount,
   ensureFolderLayout,
+  isStaleMessage,
   __setSocketCreatorForTests,
 } from '../../src/account/baileysFactory.ts';
 import {
@@ -130,4 +131,42 @@ test('same folderPath again returns the SAME entry (idempotent) once a socket is
     rmrf(folder);
     __setSocketCreatorForTests(null);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Stale-message gate: WhatsApp flushes the offline backlog through
+// messages.upsert on reconnect. isStaleMessage drops anything older than
+// config.staleMessageMaxAgeMs (default 5000ms) so the bot ignores that backlog.
+// messageTimestamp is in SECONDS (Baileys), so the helper multiplies by 1000.
+// ---------------------------------------------------------------------------
+
+// A 5s threshold (config default) anchored at a fixed "now" for deterministic
+// math: nowMs = 1_000_000ms == second 1000.
+const NOW_MS = 1_000_000;
+
+function msgAtSecond(second: number | null): { messageTimestamp?: number } {
+  return second === null ? {} : { messageTimestamp: second };
+}
+
+test('isStaleMessage: a just-arrived message is NOT stale', () => {
+  assert.equal(isStaleMessage(msgAtSecond(1000) as never, NOW_MS), false);
+});
+
+test('isStaleMessage: a message 10s old IS stale (dropped)', () => {
+  assert.equal(isStaleMessage(msgAtSecond(990) as never, NOW_MS), true);
+});
+
+test('isStaleMessage: exactly at the 5s threshold is NOT stale (strict >)', () => {
+  // diff == 5000ms, not > 5000ms.
+  assert.equal(isStaleMessage(msgAtSecond(995) as never, NOW_MS), false);
+});
+
+test('isStaleMessage: just past the 5s threshold IS stale', () => {
+  // diff == 6000ms.
+  assert.equal(isStaleMessage(msgAtSecond(994) as never, NOW_MS), true);
+});
+
+test('isStaleMessage: missing/zero timestamp fails OPEN (kept, not stale)', () => {
+  assert.equal(isStaleMessage(msgAtSecond(null) as never, NOW_MS), false);
+  assert.equal(isStaleMessage(msgAtSecond(0) as never, NOW_MS), false);
 });

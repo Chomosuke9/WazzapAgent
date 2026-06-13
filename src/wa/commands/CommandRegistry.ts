@@ -14,7 +14,7 @@
 // on an unknown command) that callers like `inbound.ts` rely on for the wire
 // payload's `slashCommand`/`commandHandled` fields.
 
-import { unwrapMessage } from "../domain/messageParser.js";
+import { unwrapMessage, extractContextInfo } from "../domain/messageParser.js";
 import config from "../../config.js";
 import { parseRawSlash } from "../command/parseCommand.js";
 import { isActivationRequired } from "../botConfig.js";
@@ -246,12 +246,17 @@ async function dispatchCommand(
     return true;
   }
 
-  // Extract quoted message id if any.
+  // Extract quoted message id if any. Prefer the common text-reply path
+  // (extendedTextMessage), then fall back to contextInfo on any content type so
+  // replies wrapped in other message kinds still resolve a quoted target (e.g.
+  // for `/catch` on interactive messages).
   const { message: innerMessage } = unwrapMessage(
     msg.message as proto.IMessage | null | undefined,
   );
   const quotedMessageId =
-    innerMessage?.extendedTextMessage?.contextInfo?.stanzaId || null;
+    innerMessage?.extendedTextMessage?.contextInfo?.stanzaId ||
+    extractContextInfo(innerMessage)?.stanzaId ||
+    null;
 
   const ctx: CommandContext = {
     chatId,

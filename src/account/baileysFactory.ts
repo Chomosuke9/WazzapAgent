@@ -461,6 +461,28 @@ async function handlePendingModelForm(
 }
 
 /**
+ * True when a WhatsApp message is older than `config.staleMessageMaxAgeMs`
+ * (default 5s) and should be ignored.
+ *
+ * When the Baileys socket reconnects after being offline, WhatsApp flushes the
+ * messages that queued up while it was disconnected through `messages.upsert`
+ * (`type: "notify"`) — exactly like real-time delivery. Without this gate the
+ * bot processes/responds to that entire backlog at once ("goes crazy"). Live
+ * messages arrive within ~1-2s, so anything older than the threshold is treated
+ * as backlog and dropped.
+ *
+ * Fails OPEN: a message with no usable `messageTimestamp` (0/missing/invalid) is
+ * kept. Set `STALE_MESSAGE_MAX_AGE_MS=0` to disable the gate entirely.
+ */
+export function isStaleMessage(msg: WAMessage, nowMs: number = Date.now()): boolean {
+  const maxAgeMs = config.staleMessageMaxAgeMs;
+  if (maxAgeMs <= 0) return false;
+  const tsMs = Number(msg?.messageTimestamp) * 1000;
+  if (!(tsMs > 0)) return false;
+  return nowMs - tsMs > maxAgeMs;
+}
+
+/**
  * Listener 1 — command handler (non-blocking, instant response): interactive
  * button replies, pending `/modelcfg` form replies, then slash-command dispatch.
  */
@@ -483,6 +505,9 @@ function attachCommandListener(
         const chatId = msg?.key?.remoteJid;
         if (!chatId || chatId === "status@broadcast") continue;
         if (!msg?.message) continue;
+        // Ignore the offline backlog WhatsApp flushes on reconnect (see
+        // isStaleMessage) so old slash commands don't re-execute in a burst.
+        if (isStaleMessage(msg)) continue;
         // Bot messages are forwarded as contextOnly=true in inbound.ts; the
         // Python bridge won't trigger LLM1 on them, preventing response loops.
 
@@ -572,13 +597,18 @@ function attachChatbotListener(
 ): void {
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     if (!Array.isArray(messages) || messages.length === 0) return;
+    // Drop the offline backlog WhatsApp flushes on reconnect (see
+    // isStaleMessage) so the bot doesn't respond to a flood of stale messages.
+    const nowMs = Date.now();
+    const liveMessages = messages.filter((msg) => !isStaleMessage(msg, nowMs));
+    if (liveMessages.length === 0) return;
     const batchStartMs = Date.now();
     const isNotify = type === "notify";
     const precomputedContextByMessage = new Map<string, string>();
 
     if (!isNotify) {
       await runWithConcurrency(
-        messages,
+        liveMessages,
         config.upsertConcurrency,
         async (msg) => {
           try {
@@ -593,7 +623,7 @@ function attachChatbotListener(
       );
     } else {
       const notifyGroups = new Map<string, WAMessage[]>();
-      for (const msg of messages) {
+      for (const msg of liveMessages) {
         const chatId = msg?.key?.remoteJid || "__unknown_chat__";
         const bucket = notifyGroups.get(chatId) || [];
         bucket.push(msg);
@@ -642,17 +672,17 @@ function attachChatbotListener(
     const batchTotalMs = Date.now() - batchStartMs;
     if (
       config.perfLogEnabled &&
-      messages.length > 1 &&
+      liveMessages.length > 1 &&
       batchTotalMs >= config.perfLogThresholdMs
     ) {
       logger.info(
         {
           type,
-          messageCount: messages.length,
+          messageCount: liveMessages.length,
           upsertConcurrency: config.upsertConcurrency,
           chatGroups: isNotify
             ? new Set(
-                messages.map(
+                liveMessages.map(
                   (msg) => msg?.key?.remoteJid || "__unknown_chat__",
                 ),
               ).size

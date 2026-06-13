@@ -78,6 +78,7 @@ export interface Config {
   downloadTimeoutMs: number;
   sendTimeoutMs: number;
   upsertConcurrency: number;
+  staleMessageMaxAgeMs: number;
   perfLogEnabled: boolean;
   perfLogThresholdMs: number;
   botOwnerJids: string[];
@@ -120,6 +121,10 @@ const config: Config = {
   downloadTimeoutMs: positiveInt(process.env.DOWNLOAD_TIMEOUT_MS, 60000),
   sendTimeoutMs: positiveInt(process.env.SEND_TIMEOUT_MS, 60000),
   upsertConcurrency: positiveInt(process.env.UPSERT_CONCURRENCY, 2),
+  // Drop inbound WhatsApp messages older than this (ms) so the bot does not
+  // process the backlog WhatsApp flushes after the socket reconnects from being
+  // offline. Default 5000 (5s). Set STALE_MESSAGE_MAX_AGE_MS=0 to disable.
+  staleMessageMaxAgeMs: nonNegativeInt(process.env.STALE_MESSAGE_MAX_AGE_MS, 5000),
   perfLogEnabled: process.env.PERF_LOG_ENABLED !== '0',
   perfLogThresholdMs: nonNegativeInt(process.env.PERF_LOG_THRESHOLD_MS, 400),
   botOwnerJids: parseJidList(process.env.BOT_OWNER_JIDS),
