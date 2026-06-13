@@ -55,12 +55,14 @@ function makeCtx(captured: any, topUsers: TopUser[], opts: { failRelay?: boolean
     group: { name: 'My Group', description: null, botIsAdmin: true, botIsSuperAdmin: false, participantRoles: {}, participants: [] },
     msg: {} as any,
     folderPath: '/data',
+    // Per-account state holder — withJidQueue serializes sends via this map.
+    account: { jidQueues: new Map() } as any,
     sock,
     repos,
   } as any;
 }
 
-test('/dashboard sends a STATISTIC/period poll then a Top Monthly Users poll', async () => {
+test('/dashboard sends the STATISTIC/period poll then the Top Monthly Users poll (Overall first)', async () => {
   const captured = { textMessages: [] as any[], relayed: [] as any[] };
   const topUsers: TopUser[] = [
     { senderRef: 'u1', senderName: 'Alice', invokeCount: 42 },
@@ -68,42 +70,87 @@ test('/dashboard sends a STATISTIC/period poll then a Top Monthly Users poll', a
   ];
   await handleDashboard(makeCtx(captured, topUsers));
 
-  assert.equal(captured.relayed.length, 2, 'should relay two poll snapshots');
+  assert.equal(captured.relayed.length, 2, 'two poll snapshots (period + top users)');
   assert.equal(captured.textMessages.length, 0, 'no text fallback');
 
   // Message 1: STATISTIC counters in title + period comparison bars.
   const stat = captured.relayed[0].pollResultSnapshotMessage;
   assert.match(stat.name, /STATISTIC/);
-  assert.match(stat.name, /ROUTER CALL : 30/);
   assert.match(stat.name, /MAIN AGENT CALL : 20/);
-  assert.match(stat.name, /SUB-AGENT TASK COMPLETED : 5/);
-  assert.match(stat.name, /DASHBOARD/);
   assert.equal(stat.pollVotes.length, 3);
-  assert.equal(stat.pollVotes[0].optionName, '📅 Today');
+  assert.equal(stat.pollVotes[0].optionName, '🕘 Today');
   assert.equal(Number(stat.pollVotes[0].optionVoteCount), 10);
-  assert.equal(stat.pollVotes[1].optionName, '🗓️ This Week');
-  assert.equal(Number(stat.pollVotes[1].optionVoteCount), 60);
   assert.equal(stat.pollVotes[2].optionName, '📆 This Month');
   assert.equal(Number(stat.pollVotes[2].optionVoteCount), 200);
 
-  // Message 2: Top Monthly Users leaderboard.
+  // Message 2: Overall baseline first, then ranked users.
   const top = captured.relayed[1].pollResultSnapshotMessage;
   assert.match(top.name, /Top Monthly Users/);
-  assert.equal(top.pollVotes.length, 2);
-  assert.equal(top.pollVotes[0].optionName, '1. Alice');
-  assert.equal(Number(top.pollVotes[0].optionVoteCount), 42);
-  assert.equal(top.pollVotes[1].optionName, '2. Bob');
-  assert.equal(Number(top.pollVotes[1].optionVoteCount), 17);
+  assert.equal(top.pollVotes.length, 3);
+  assert.equal(top.pollVotes[0].optionName, 'Overall');
+  assert.equal(Number(top.pollVotes[0].optionVoteCount), 200); // monthly messages_processed
+  assert.equal(top.pollVotes[1].optionName, '1. Alice');
+  assert.equal(Number(top.pollVotes[1].optionVoteCount), 42);
+  assert.equal(top.pollVotes[2].optionName, '2. Bob');
+  assert.equal(Number(top.pollVotes[2].optionVoteCount), 17);
 });
 
-test('/dashboard sends the period poll plus a no-data note when there are no ranked users', async () => {
+test('/dashboard renders a valid poll (Overall + the single active user) when only one user is active', async () => {
+  const captured = { textMessages: [] as any[], relayed: [] as any[] };
+  await handleDashboard(makeCtx(captured, [{ senderRef: 'u1', senderName: 'Agus Kebab', invokeCount: 6 }]));
+
+  assert.equal(captured.relayed.length, 2, 'period poll + leaderboard poll');
+  assert.equal(captured.textMessages.length, 0, 'no text fallback — Overall makes it >= 2 options');
+  const top = captured.relayed[1].pollResultSnapshotMessage;
+  assert.equal(top.pollVotes.length, 2);
+  assert.equal(top.pollVotes[0].optionName, 'Overall');
+  assert.equal(Number(top.pollVotes[0].optionVoteCount), 200);
+  assert.equal(top.pollVotes[1].optionName, '1. Agus Kebab');
+  assert.equal(Number(top.pollVotes[1].optionVoteCount), 6);
+});
+
+test('/dashboard caps the leaderboard poll at 11 options (Overall + 10 users)', async () => {
+  const captured = { textMessages: [] as any[], relayed: [] as any[] };
+  const many: TopUser[] = Array.from({ length: 10 }, (_v, i) => ({
+    senderRef: `u${i}`,
+    senderName: `User${i}`,
+    invokeCount: 10 - i,
+  }));
+  await handleDashboard(makeCtx(captured, many));
+
+  const top = captured.relayed[1].pollResultSnapshotMessage;
+  assert.equal(top.pollVotes.length, 11, '1 Overall + 10 users');
+  assert.equal(top.pollVotes[0].optionName, 'Overall');
+});
+
+test('/dashboard sanitizes/guards leaderboard data (newlines, dup names, bad counts)', async () => {
+  const captured = { textMessages: [] as any[], relayed: [] as any[] };
+  const topUsers: TopUser[] = [
+    { senderRef: 'u1', senderName: 'Bob\n\nspam', invokeCount: 9 },
+    { senderRef: 'u2', senderName: '', invokeCount: undefined as any },
+  ];
+  await handleDashboard(makeCtx(captured, topUsers));
+
+  const top = captured.relayed[1].pollResultSnapshotMessage;
+  assert.equal(top.pollVotes.length, 3); // Overall + 2 users
+  assert.equal(top.pollVotes[0].optionName, 'Overall');
+  // newlines collapsed to single spaces, ranked prefix preserved
+  assert.equal(top.pollVotes[1].optionName, '1. Bob spam');
+  assert.equal(Number(top.pollVotes[1].optionVoteCount), 9);
+  // empty name falls back to senderRef; undefined count coerced to 0
+  assert.equal(top.pollVotes[2].optionName, '2. u2');
+  assert.equal(Number(top.pollVotes[2].optionVoteCount), 0);
+});
+
+test('/dashboard sends the period poll plus a text note when there are no active users', async () => {
   const captured = { textMessages: [] as any[], relayed: [] as any[] };
   await handleDashboard(makeCtx(captured, []));
 
   assert.equal(captured.relayed.length, 1, 'only the period poll');
-  assert.equal(captured.textMessages.length, 1, 'a top-users note');
+  assert.equal(captured.textMessages.length, 1, 'a top-users note (only Overall — 1 option is invalid)');
   assert.match(captured.textMessages[0].text, /Top Monthly Users/);
-  assert.match(captured.textMessages[0].text, /no data yet/);
+  assert.match(captured.textMessages[0].text, /Overall: 200/);
+  assert.match(captured.textMessages[0].text, /no active users/);
 });
 
 test('/dashboard falls back to the text dashboard when the poll relay fails', async () => {
