@@ -131,6 +131,8 @@ async def _deliver_subagent_result(
   subagent_result_block: str | None = None
   if final_task is not None:
     if final_task.status == "completed":
+      # Dashboard: count successfully completed sub-agent tasks.
+      record_stat_fn(chat_id, "subagent_tasks_completed")
       raw_paths = final_task.result.get("output_files") or []
       files_content = final_task.result.get("output_files_content") or []
       if (isinstance(raw_paths, list) and raw_paths) or (isinstance(files_content, list) and files_content):
