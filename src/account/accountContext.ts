@@ -47,6 +47,22 @@ export interface AccountContext {
   folderPath: string;
 
   /**
+   * This tenant's media / sticker directories (CONTRACT.md §8). Set by the
+   * factory ({@link import('./baileysFactory.js').createOrResumeAccount}) so
+   * every inbound media download, attachment allowlist check, and sticker temp
+   * write lands under THIS tenant's folder instead of a process-global dir
+   * shared across accounts. For the default single-account tenant these resolve
+   * to `config.mediaDir`/`config.stickersDir`/`config.stickerUploadDir` (so the
+   * env overrides and single-account layout are unchanged); for additional
+   * tenants they are `<folderPath>/{media,stickers,stickers_user}`. `undefined`
+   * only when a context is constructed outside the factory (tests), in which
+   * case consumers fall back to the `config.*` globals.
+   */
+  mediaDir?: string;
+  stickersDir?: string;
+  stickerUploadDir?: string;
+
+  /**
    * Live Baileys socket for this account. Set by the factory once the socket
    * is created (Step 33 — replaces the removed global socket accessor) and
    * refreshed on reconnect. `undefined` until the socket exists. Threaded so
@@ -112,6 +128,9 @@ export interface AccountContext {
 export function createAccountContext(folderPath: string): AccountContext {
   return {
     folderPath,
+    mediaDir: undefined,
+    stickersDir: undefined,
+    stickerUploadDir: undefined,
     sock: undefined,
     forwarder: undefined,
     repos: undefined,

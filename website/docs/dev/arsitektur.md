@@ -29,13 +29,13 @@ Gateway bertanggung jawab untuk:
 
 Bridge bertanggung jawab untuk:
 
-- **WebSocket server** — Menerima pesan dari gateway dan mengirim command balik.
+- **WebSocket client** — Setiap `WaSocket` men-dial Node gateway (server) di `NODE_URL`, mengirim `hello` dengan `folderPath` tenant-nya, lalu menerima event dan mengirim action balik.
 - **Message batching** — Mengelompokkan pesan yang masuk dalam burst window dengan debounce logic.
 - **Pipeline LLM dua tahap:**
   - **LLM1 (Gating)** — Memutuskan apakah bot harus merespons pesan. Ringan dan cepat.
   - **LLM2 (Responder)** — Menghasilkan respons lengkap dengan konteks percakapan dan system prompt.
 - **Slash commands** — Menangani `/prompt`, `/reset`, `/permission` secara langsung.
-- **Penyimpanan** — Tiga database SQLite terpisah: `settings.db`, `stats.db`, `moderation.db`.
+- **Penyimpanan** — Lima database SQLite terpisah per-tenant di `<folder_path>/db`: `settings.db`, `stats.db`, `moderation.db`, `subagent.db`, `stickers.db`.
 - **History management** — Menyimpan riwayat percakapan per-chat di memori dengan limit yang dapat dikonfigurasi.
 
 ## Alur Data
@@ -45,8 +45,8 @@ Bridge bertanggung jawab untuk:
 ```
 1. User mengirim pesan di WhatsApp
 2. Baileys menerima event `messages.upsert`
-3. Gateway parsing pesan (messageParser.js)
-4. Gateway assign contextMsgId & senderRef (identifiers.js)
+3. Gateway parsing pesan (wa/domain/messageParser.ts)
+4. Gateway assign contextMsgId & senderRef (wa/domain/identifiers.ts)
 5. Gateway kirim `incoming_message` ke bridge via WebSocket
 6. Bridge batch pesan (debounce 5 detik, max burst 20 detik)
 7. Bridge jalankan LLM1 (gating decision)
@@ -75,17 +75,19 @@ ID pendek deterministik per-pengirim per-chat, di-generate dari SHA-1 hash `chat
 
 | Data | Lokasi | Tipe |
 |------|--------|------|
-| Session WhatsApp | `data/auth/` | File (Baileys auth state) |
-| Media yang diunduh | `data/media/` | File (gambar, video, dll.) |
-| Sticker katalog | `data/stickers/` | File (WebP) |
-| Pengaturan chat & model | `data/settings.db` | SQLite (WAL mode) |
-| Statistik dashboard | `data/stats.db` | SQLite (WAL mode) |
-| Mute state | `data/moderation.db` | SQLite (WAL mode) |
+| Session WhatsApp | `<folder_path>/auth/` | File (Baileys auth state) |
+| Media yang diunduh | `<folder_path>/media/` | File (gambar, video, dll.) |
+| Sticker katalog | `<folder_path>/stickers/` | File (WebP) |
+| Pengaturan chat & model | `<folder_path>/db/settings.db` | SQLite (WAL mode) |
+| Statistik dashboard | `<folder_path>/db/stats.db` | SQLite (WAL mode) |
+| Mute state | `<folder_path>/db/moderation.db` | SQLite (WAL mode) |
+| Sub-agent state | `<folder_path>/db/subagent.db` | SQLite (WAL mode) |
+| Sticker DB | `<folder_path>/db/stickers.db` | SQLite (WAL mode) |
 | Riwayat percakapan | Memori (RAM) | In-memory deque |
 | Message cache | Memori (RAM) | In-memory Map |
 | Metadata grup | Memori (RAM) | TTL cache (60 detik) |
 
-> **Catatan:** Database dipisahkan menjadi tiga file SQLite untuk menghindari locking contention. Setiap database menggunakan WAL mode untuk concurrent reads.
+> **Catatan:** Setiap tenant (`folder_path`) terisolasi penuh di bawah `<folder_path>/{auth,db,media,stickers}`. Database dipisahkan menjadi lima file SQLite untuk menghindari locking contention. Setiap database menggunakan WAL mode untuk concurrent reads.
 
 ## Diagram Modul
 
@@ -93,66 +95,62 @@ ID pendek deterministik per-pengirim per-chat, di-generate dari SHA-1 hash `chat
 
 ```
 src/
-├── index.js              ← Bootstrap, routing command dari WS ke aksi WhatsApp
-├── wsClient.js           ← WebSocket client ke bridge (auto-reconnect, reliable queue)
-├── config.js             ← Environment variable loading
-├── logger.js             ← Structured pino logging
-├── messageParser.js      ← Parsing pesan Baileys → payload terstruktur
-├── mediaHandler.js       ← Download & validasi media
-├── identifiers.js        ← contextMsgId counter, senderRef registry
-├── participants.js       ← Mapping role partisipan, cache nama
-├── groupContext.js       ← Cache metadata grup
-├── caches.js             ← In-memory caches (message, metadata, nama)
-├── db.js                 ← SQLite via better-sqlite3 (settings, models, stats)
-└── wa/
-    ├── connection.js     ← Koneksi WhatsApp, lifecycle, button handler
-    ├── inbound.js        ← Normalisasi pesan masuk → payload
-    ├── outbound.js        ← Kirim teks/media/mentions ke WhatsApp
-    ├── actions.js         ← React & delete message wrappers
-    ├── moderation.js      ← Kick members
-    ├── presence.js        ← Mark read & typing indicator
-    ├── commandHandler.js  ← Dispatcher slash command
-    ├── commands.js        ← Alias normalization
-    ├── events.js          ← Synthetic context events
-    ├── utils.js           ← Concurrency helpers
-    ├── command/           ← Per-command handler modules
-    │   ├── help.js, prompt.js, reset.js, permission.js
-    │   ├── mode.js, trigger.js, dashboard.js, model.js
-    │   ├── broadcast.js, info.js, debug.js, join.js
-    │   ├── sticker.js, modelcfg.js, setting.js
-    │   └── groupStatus.js, catch.js
-    └── interactive/      ← NativeFlow interactive messages
-        ├── sendInteractive.js  ← viewOnce + relayMessage + additionalNodes
-        ├── sendButtons.js      ← Quick reply, CTA URL, copy, call buttons
-        └── sendCarousel.js     ← Swipeable carousel cards
+├── index.ts              ← Composition root: config, WS server, akun per-tenant
+├── config.ts             ← Sumber config tunggal — semua pembacaan process.env
+├── logger.ts             ← Structured pino logging
+├── mediaHandler.ts       ← Download & validasi media, resolusi path
+├── server/
+│   ├── wsServer.ts        ← WS server: terima client di WS_LISTEN_PORT, heartbeat
+│   └── accountRegistry.ts ← Ikat tiap client ke AccountEntry folder_path-nya
+├── account/              ← Agregat per-tenant (satu AccountEntry per folder_path)
+│   ├── baileysFactory.ts   ← Buat/resume Baileys socket per-tenant; owns DB + repos
+│   ├── accountContext.ts   ← Cache/identifier/sendQueue/forwarder/repos per-akun
+│   ├── actionDispatcher.ts ← Dispatch action Python→Node (handler per-action)
+│   └── eventForwarder.ts   ← Forward event Node→Python (reliableQueue per-akun)
+├── db/                   ← SQLite per-tenant (tanpa handle global modul)
+│   ├── Database.ts         ← Owns koneksi satu tenant (open/recover/migrate/close)
+│   ├── schema/            ← Pembuatan tabel + migrasi
+│   └── repositories/      ← Settings, Stats, Model, Activation repositories
+├── protocol/
+│   ├── types.ts           ← Wire types: frame, WaStatus, AccountEntry, payload
+│   └── ports.ts           ← Interface pemutus siklus account/↔wa/
+└── wa/                   ← Modul WhatsApp
+    ├── domain/            ← caches, identifiers, participants, groupContext, messageParser
+    ├── connection.ts      ← Lifecycle Baileys v7, button handler
+    ├── inbound.ts         ← Pesan masuk → payload incoming_message ternormalisasi
+    ├── outbound.ts        ← Kirim teks/media/mentions
+    ├── actions.ts         ← React & delete message wrappers
+    ├── moderation.ts      ← Kick members
+    ├── presence.ts        ← Mark read & typing indicator
+    ├── events.ts          ← Synthetic context events
+    ├── sendQueue.ts       ← Antrian kirim per-JID (urutan pesan)
+    ├── commands/          ← Dispatch command bertipe (CommandRegistry)
+    ├── command/           ← Modul handler per-command
+    └── interactive/       ← Pesan interaktif NativeFlow
 ```
 
 ### Python Bridge
 
 ```
-python/bridge/
-├── main.py              ← WebSocket handler, batching, orkestrasi pipeline
-├── config.py            ← Parsing env variable, konstanta konfigurasi
-├── db.py                ← SQLite storage dengan in-memory cache
-├── history.py           ← WhatsAppMessage dataclass, formatting history
-├── media.py             ← Pemrosesan attachment visual untuk multimodal
-├── stickers.py          ← Sticker catalog scanning (data/stickers/)
-├── commands.py           ← Legacy slash command handler (Python side)
-├── dashboard.py          ← Stats buffer + periodic flush
-├── log.py               ← Structured logging dengan contextvars
-├── llm/
-│   ├── llm1.py          ← LLM1 gating/decision (should respond / express-only)
-│   ├── llm2.py          ← LLM2 response generation + tools
-│   ├── schemas.py       ← Tool schemas (JSON Schema / OpenAI function calling)
-│   ├── prompt.py         ← System prompt assembly, history, metadata injection
-│   ├── client.py         ← LLM client factory, fallback targets
-│   ├── metadata.py       ← Context metadata: bot mention, reply signals
-│   └── tool_utils.py     ← Cross-provider tool-call extraction
-├── messaging/
-│   ├── processing.py     ← Burst building, payload normalization
-│   ├── filtering.py      ← Trigger check, prefix/trigger mode
-│   ├── actions.py         ← Parse action lines dari LLM2 output
-│   ├── gateway.py         ← Send actions over WS to Node
-│   └── moderation.py      ← Permission checks, payload merge
-└── tools/
-    └── sticker.py        ← PIL-based sticker creation (text overlay, EXIF)
+python/
+├── wasocket/             ← SDK make_wa_socket (WS CLIENT)
+│   ├── socket.py          ← Class WaSocket + factory make_wa_socket
+│   ├── transport.py       ← WSClientTransport: dial NODE_URL, reconnect, heartbeat
+│   ├── protocol.py / events.py     ← Dataclass frame + model WhatsAppMessage
+│   └── correlation.py / errors.py  ← Korelasi requestId + hierarki error
+└── bridge/
+    ├── main.py            ← Boot: load akun, jalankan satu AgentSession per akun
+    ├── accounts.py         ← Loader konfigurasi multi-account
+    ├── config.py           ← Sumber config tunggal (env, konstanta)
+    ├── session.py          ← AgentSession: composition root (wiring collaborators agent/)
+    ├── history.py          ← WhatsAppMessage dataclass, formatting history
+    ├── dashboard.py        ← Stats buffer + periodic flush
+    ├── stickers.py / sticker_db.py ← Sticker catalog + sticker DB per-tenant
+    ├── agent/              ← Collaborator per-akun yang injectable
+    ├── db/                 ← Repository per-domain di atas core per-tenant
+    ├── media/              ← Resolusi media + sticker
+    ├── llm/                ← Pipeline LLM (llm1, llm2, schemas, prompt, client, ...)
+    ├── messaging/          ← Pipeline pemrosesan pesan
+    ├── tools/              ← Implementasi tool (pembuatan sticker PIL)
+    └── subagent/           ← Integrasi sub-agent
+```

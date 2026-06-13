@@ -33,8 +33,16 @@ cp .env.example .env
 Edit `.env` and fill in at minimum:
 
 ```bash
-# Required — WebSocket URL to the Python bridge
-LLM_WS_ENDPOINT=ws://localhost:8080/ws
+# Node.js gateway — WebSocket SERVER listen port (default 3000)
+WS_LISTEN_PORT=3000
+# Host the gateway binds to (default 127.0.0.1; use 0.0.0.0 for cross-host)
+WS_BIND_HOST=127.0.0.1
+
+# Python bridge — URL each WaSocket client dials (default ws://localhost:3000)
+NODE_URL=ws://localhost:3000
+
+# Optional — shared bearer token enforced by Node and sent by the Python client
+LLM_WS_TOKEN=
 
 # Optional — API keys for LLM providers
 LLM1_API_KEY=sk-...
@@ -63,27 +71,19 @@ pip install -r requirements.txt
 
 ## Running
 
-Both components must run simultaneously:
+Start the Node.js gateway **first** — it is the WebSocket server that the Python bridge clients dial.
 
-**Terminal 1 — Python Bridge:**
-```bash
-python -m python.bridge.main
-```
-
-**Terminal 2 — Node.js Gateway:**
+**Terminal 1 — Node.js Gateway (WS server):**
 ```bash
 pnpm dev
 ```
 
-On first run, the gateway will display a QR code in the terminal. Scan it with WhatsApp to pair.
-
-:::tip
-If you only want to test the gateway without a real LLM, use the echo server:
+**Terminal 2 — Python Bridge (WS client):**
 ```bash
-pip install websockets pydantic
-python examples/llm_ws_echo.py
+python -m python.bridge.main
 ```
-:::
+
+On first run, the gateway will display a QR code in the terminal. Scan it with WhatsApp to pair.
 
 ## Environment Variables
 
@@ -91,7 +91,8 @@ python examples/llm_ws_echo.py
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LLM_WS_ENDPOINT` | *(required)* | WebSocket URL to bridge |
+| `WS_LISTEN_PORT` | `3000` | WS server listen port (Node is the server) |
+| `WS_BIND_HOST` | `127.0.0.1` | Host the WS server binds to (`0.0.0.0` for cross-host) |
 | `INSTANCE_ID` | `default` | Gateway instance identifier |
 | `LLM_WS_TOKEN` | *(empty)* | Bearer token for WS authentication |
 | `DATA_DIR` | `./data` | Runtime data directory |
@@ -108,6 +109,7 @@ python examples/llm_ws_echo.py
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `NODE_URL` | `ws://localhost:3000` | URL each WaSocket client dials |
 | `HISTORY_LIMIT` | `20` | History messages per chat |
 | `INCOMING_DEBOUNCE_SECONDS` | `5` | Debounce window for batching |
 | `INCOMING_BURST_MAX_SECONDS` | `20` | Maximum burst window duration |
@@ -184,70 +186,76 @@ npm start        # Local dev server
 
 ```
 WazzapAgents/
-├── src/                        # Node.js Gateway
-│   ├── index.js                # Entry point
-│   ├── wsClient.js             # WebSocket client (auto-reconnect)
-│   ├── config.js               # Configuration
-│   ├── messageParser.js         # Message parser
-│   ├── mediaHandler.js         # Media handler
-│   ├── identifiers.js          # contextMsgId & senderRef
-│   ├── participants.js          # Participant data
-│   ├── groupContext.js          # Group context
-│   ├── caches.js               # In-memory caches
-│   ├── logger.js               # Logging
-│   ├── db.js                   # SQLite (settings, models, stats)
+├── src/                        # Node.js Gateway (WS SERVER, TypeScript)
+│   ├── index.ts                # Composition root: config, WS server, per-tenant accounts
+│   ├── config.ts               # Configuration (all process.env reads)
+│   ├── logger.ts               # Logging
+│   ├── mediaHandler.ts         # Media download & validation
+│   ├── server/                 # WebSocket server
+│   │   ├── wsServer.ts         # WS server: accept clients on WS_LISTEN_PORT
+│   │   └── accountRegistry.ts  # Bind each client to its folder_path account
+│   ├── account/                # Per-tenant aggregate (one AccountEntry per folder_path)
+│   │   ├── baileysFactory.ts   # Create/resume Baileys socket; owns Database + repos
+│   │   ├── accountContext.ts   # Per-account caches / sendQueue / forwarder
+│   │   ├── actionDispatcher.ts # Dispatch Python→Node actions
+│   │   └── eventForwarder.ts   # Forward Node→Python events
+│   ├── db/                     # Per-tenant SQLite
+│   │   ├── Database.ts         # Owns one tenant's connections
+│   │   ├── schema/             # Table creation + migrations
+│   │   └── repositories/       # Domain repositories
+│   ├── protocol/               # Wire types
+│   │   ├── types.ts            # Frames, WaStatus, payloads
+│   │   └── ports.ts            # Interfaces (WaSocketLike, AccountForwarder)
 │   └── wa/                     # WhatsApp modules
-│       ├── connection.js       # Socket lifecycle
-│       ├── inbound.js           # Incoming → payload
-│       ├── outbound.js          # Send messages/media
-│       ├── actions.js           # React & delete
-│       ├── moderation.js        # Kick members
-│       ├── presence.js          # Mark read & typing
-│       ├── commandHandler.js    # Command dispatcher
-│       ├── commands.js          # Alias normalization
-│       ├── events.js            # Synthetic events
-│       ├── utils.js              # Concurrency helpers
-│       ├── command/             # Per-command handlers
+│       ├── domain/             # caches, identifiers, participants, groupContext, messageParser
+│       ├── connection.ts       # Socket lifecycle
+│       ├── inbound.ts          # Incoming → payload
+│       ├── outbound.ts         # Send messages/media
+│       ├── actions.ts          # React & delete
+│       ├── moderation.ts       # Kick members
+│       ├── presence.ts         # Mark read & typing
+│       ├── runCommand.ts       # run_command handler
+│       ├── sendQueue.ts        # Per-JID send queue
+│       ├── events.ts           # Synthetic events
+│       ├── utils.ts            # Concurrency helpers
+│       ├── commands/           # CommandRegistry + CommandContext
+│       ├── command/            # Per-command handlers
 │       └── interactive/        # NativeFlow messages
 ├── python/
+│   ├── wasocket/                # make_wa_socket SDK (WS CLIENT)
+│   │   ├── socket.py           # WaSocket class + factory
+│   │   ├── transport.py        # WSClientTransport: dial NODE_URL, reconnect
+│   │   ├── protocol.py         # Frame dataclasses
+│   │   └── events.py           # WhatsAppMessage model
 │   ├── bridge/                  # Python LLM Bridge
-│   │   ├── main.py              # Entry point + WS server
+│   │   ├── main.py             # Boot: load accounts, one AgentSession per account
+│   │   ├── accounts.py         # Multi-account config loader
 │   │   ├── config.py           # Configuration
-│   │   ├── db.py                # Database (3 SQLite files)
-│   │   ├── history.py           # History management
-│   │   ├── media.py            # Media processing
-│   │   ├── stickers.py          # Sticker catalog
-│   │   ├── commands.py           # Slash commands
-│   │   ├── dashboard.py          # Stats buffer + flush
-│   │   ├── log.py                # Logging
-│   │   ├── llm/                  # LLM pipeline
-│   │   │   ├── llm1.py          # Gating decision
-│   │   │   ├── llm2.py          # Response generation
-│   │   │   ├── schemas.py        # Tool schemas
-│   │   │   ├── prompt.py         # Prompt assembly
-│   │   │   ├── client.py         # Client factory
-│   │   │   ├── metadata.py       # Context metadata
-│   │   │   └── tool_utils.py     # Tool extraction
-│   │   ├── messaging/            # Message pipeline
-│   │   │   ├── processing.py    # Burst building
-│   │   │   ├── filtering.py     # Trigger logic
-│   │   │   ├── actions.py        # Action parsing
-│   │   │   ├── gateway.py       # WS actions
-│   │   │   └── moderation.py    # Permission checks
-│   │   └── tools/
-│   │       └── sticker.py        # PIL sticker creation
-│   └── systemprompt.txt          # LLM2 system prompt template
-├── examples/
-│   └── llm_ws_echo.py          # Example echo server
+│   │   ├── session.py          # AgentSession composition root
+│   │   ├── history.py          # History management
+│   │   ├── stickers.py         # Sticker catalog
+│   │   ├── dashboard.py        # Stats buffer + flush
+│   │   ├── log.py              # Logging
+│   │   ├── agent/              # Injectable per-account collaborators
+│   │   ├── db/                 # Per-tenant repositories
+│   │   ├── media/              # Media + sticker resolution
+│   │   ├── llm/                # LLM pipeline (llm1, llm2, schemas, prompt, …)
+│   │   ├── messaging/          # Message pipeline (processing, filtering, actions, gateway, …)
+│   │   ├── tools/             # PIL sticker creation
+│   │   └── subagent/          # Sub-agent integration
+│   └── systemprompt.txt        # LLM2 system prompt template
 ├── docs/llm-architecture/       # Architecture docs
 ├── website/                     # Docusaurus docs (Indonesian + English)
-├── data/                        # Runtime data (auto-created, git-ignored)
+├── data/                        # Default tenant folder (auto-created, git-ignored)
 │   ├── auth/                    # WhatsApp session
 │   ├── media/                   # Media files
 │   ├── stickers/                # Sticker catalog
-│   ├── settings.db              # Chat settings & model configs
-│   ├── stats.db                 # Dashboard statistics
-│   └── moderation.db            # Mute state
+│   └── db/                      # Per-tenant SQLite DBs
+│       ├── settings.db          # Chat settings & model configs
+│       ├── stats.db             # Dashboard statistics
+│       ├── moderation.db        # Mute state
+│       ├── subagent.db          # Sub-agent state
+│       └── stickers.db          # Sticker catalog DB
 ├── .env.example            # Env template
 ├── package.json            # Node.js deps
 └── requirements.txt        # Python deps

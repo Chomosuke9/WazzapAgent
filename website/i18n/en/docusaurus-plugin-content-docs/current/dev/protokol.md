@@ -8,21 +8,33 @@ The gateway and bridge communicate via JSON messages over WebSocket. This page d
 
 ## Connection
 
-1. Gateway connects to bridge at the configured URL (`LLM_WS_ENDPOINT`).
-2. If `LLM_WS_TOKEN` is set, gateway sends an `Authorization: Bearer <token>` header.
-3. After connecting, gateway sends a `hello` message:
+1. The Python `WaSocket` (client) dials the Node gateway (server) at `NODE_URL` (default `ws://localhost:3000`). Node binds its WS server to `WS_BIND_HOST:WS_LISTEN_PORT` (default `127.0.0.1:3000`).
+2. If `LLM_WS_TOKEN` is set, the client sends an `Authorization: Bearer <token>` header (verified by Node).
+3. After connecting, the client sends a `hello` message carrying its tenant `folderPath`; Node replies with `hello_ack`:
 
 ```json
 {
   "type": "hello",
   "payload": {
-    "instanceId": "dev-gateway-1",
-    "role": "whatsapp-gateway"
+    "folderPath": "/tenants/acct-a",
+    "protocolVersion": "2.0"
   }
 }
 ```
 
-4. If the connection drops, gateway auto-reconnects after `WS_RECONNECT_MS` (default 5 seconds).
+```json
+{
+  "type": "hello_ack",
+  "payload": {
+    "folderPath": "/tenants/acct-a",
+    "waStatus": "open"
+  }
+}
+```
+
+4. If the connection drops, the client auto-reconnects with exponential backoff (`WS_RECONNECT_MS`, default 5 seconds).
+
+After the handshake, **actions** flow Python→Node, while **events, control events, and acks** flow Node→Python. Every Node→Python frame carries `folderPath` for tenant routing.
 
 ## Gateway → Bridge
 
@@ -306,9 +318,9 @@ Real JIDs are never sent to the LLM. All user references use `senderRef`, which 
 
 To implement a custom bridge, you need to:
 
-1. **WebSocket server** listening at the configured endpoint.
+1. **WebSocket client** that dials the Node gateway (server) at `NODE_URL` and sends `hello { folderPath }`, then awaits `hello_ack`.
 2. **Handle `incoming_message`** — receive and process messages.
-3. **Send commands** — use the formats above to send actions.
+3. **Send actions** — use the formats above to send actions (Python→Node).
 4. **Handle `action_ack`/`error`** — track action status.
 
-A minimal example is available in `examples/llm_ws_echo.py`.
+The easiest path is to use the `make_wa_socket` SDK (`python/wasocket`).

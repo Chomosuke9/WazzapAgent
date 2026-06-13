@@ -50,6 +50,7 @@ async function downloadMediaContent(
   content: any,
   contentType: string | null | undefined,
   messageId: string | null | undefined,
+  mediaDir: string = config.mediaDir,
 ): Promise<{ filepath: string; mediaKind: string } | null> {
   const mediaKind = mapMediaKind(contentType);
   if (!mediaKind || !["image", "video"].includes(mediaKind)) return null;
@@ -58,7 +59,7 @@ async function downloadMediaContent(
     const extMap: Record<string, string> = { image: "jpg", video: "mp4" };
     const ext = extMap[mediaKind] || "bin";
     const filename = `${messageId}_groupStatus.${ext}`;
-    const filepath = path.join(config.mediaDir, filename);
+    const filepath = path.join(mediaDir, filename);
     await downloadMediaToFile(content, mediaKind as 'image' | 'video', filepath, withTimeout);
     return { filepath, mediaKind };
   } catch (err) {
@@ -85,7 +86,7 @@ async function downloadMediaContent(
  *      Media messages must NOT have contextInfo per the reference payload.
  *   3. Wrap in groupStatusMessageV2 and relay.
  *      No manual messageSecret, no additionalAttributes overrides.
- *      Baileys' getMediaType is patched (patches/baileys+7.0.0-rc11.patch)
+ *      Baileys' getMediaType is patched (patches/baileys+7.0.0-rc12.patch)
  *      to detect inner media inside groupStatusMessageV2, so mediatype is
  *      set automatically on the stanza.
  */
@@ -115,7 +116,7 @@ async function sendGroupStatus(
 
   // Step 3 — wrap in groupStatusMessageV2 and relay.
   // No manual messageSecret.
-  // Baileys' getMediaType is patched (patches/baileys+7.0.0-rc11.patch) to detect
+  // Baileys' getMediaType is patched (patches/baileys+7.0.0-rc12.patch) to detect
   // inner media inside groupStatusMessageV2, so the stanza mediatype attribute is
   // set automatically — no additionalAttributes override needed.
   const wrappedMessage = {
@@ -127,7 +128,7 @@ async function sendGroupStatus(
   const messageId = generateMessageIDV2(sock.user?.id);
 
   // gifted-baileys getMediaType now handles groupStatusMessageV2 inner media detection
-  // via the patch in patches/baileys+7.0.0-rc11.patch — no need to override additionalAttributes.
+  // via the patch in patches/baileys+7.0.0-rc12.patch — no need to override additionalAttributes.
   await sock.relayMessage(jid, wrappedMessage, { messageId });
 
   return {
@@ -150,7 +151,11 @@ async function handleGroupStatus({
   msg,
   fromMe,
   sock,
+  account,
 }: CommandContext): Promise<void> {
+
+  // Per-tenant media dir (CONTRACT.md §8) for the staged group-status media.
+  const mediaDir = account?.mediaDir ?? config.mediaDir;
 
   // Only works in groups
   if (chatType !== "group") {
@@ -196,6 +201,7 @@ async function handleGroupStatus({
       directMediaContent,
       directMediaType,
       msg!.key.id,
+      mediaDir,
     );
   }
 
@@ -219,6 +225,7 @@ async function handleGroupStatus({
           qMsg![qType],
           qType,
           ctx.stanzaId,
+          mediaDir,
         );
       }
     }

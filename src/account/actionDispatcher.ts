@@ -390,6 +390,7 @@ const handleSendQuiz: ActionHandler = async (entry, payload, requestId) => {
 
 const handleSendButtons: ActionHandler = async (entry, payload, requestId, deps) => {
   const sock = entry.sock;
+  if (!sock) throw new Error('WhatsApp socket not ready');
   const nativeButtons = (payload.buttons || []).map((btn: any) => ({
     name: btn.name,
     buttonParamsJson: typeof btn.buttonParams === 'object'
@@ -402,6 +403,7 @@ const handleSendButtons: ActionHandler = async (entry, payload, requestId, deps)
 
 const handleSendCarousel: ActionHandler = async (entry, payload, requestId, deps) => {
   const sock = entry.sock;
+  if (!sock) throw new Error('WhatsApp socket not ready');
   const cards = (payload.cards || []).map((card: any) => ({
     ...(card.image ? { image: card.image } : {}),
     ...(card.video ? { video: card.video } : {}),

@@ -22,7 +22,6 @@ const OWNER_JID = '15551234567@s.whatsapp.net';
 process.env.DATA_DIR = TMP_DATA_DIR;
 process.env.BOT_OWNER_JIDS = OWNER_JID;
 process.env.REQUIRE_ACTIVATION = 'false';
-process.env.LLM_WS_ENDPOINT = 'ws://127.0.0.1:1/ws';
 process.env.LOG_LEVEL = 'silent';
 
 import test from 'node:test';

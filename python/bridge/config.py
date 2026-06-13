@@ -152,6 +152,50 @@ def node_url_env() -> str | None:
   return os.getenv("NODE_URL")
 
 
+def ws_reconnect_base_ms() -> float:
+  return _parse_positive_float(os.getenv("WS_RECONNECT_MS"), 5000.0)
+
+
+def ws_reconnect_max_ms() -> float:
+  return _parse_positive_float(os.getenv("WS_RECONNECT_MAX_MS"), 60000.0)
+
+
+def ws_reconnect_jitter_ratio() -> float:
+  # Symmetric jitter fraction (0..1); 0 disables jitter, so allow non-negative.
+  return _parse_non_negative_float(os.getenv("WS_RECONNECT_JITTER_RATIO"), 0.2)
+
+
+def ws_heartbeat_interval_ms() -> float:
+  return _parse_positive_float(os.getenv("WS_HEARTBEAT_INTERVAL_MS"), 20000.0)
+
+
+def ws_auth_headers() -> dict:
+  """``Authorization: Bearer <LLM_WS_TOKEN>`` header for the WS upgrade, or an
+  empty dict when no token is configured. The Node gateway
+  (``src/server/wsServer.ts``) enforces this header when ``LLM_WS_TOKEN`` is
+  set, rejecting clients that omit it with HTTP 401; this is the matching
+  client side so a token-protected gateway is reachable end-to-end. Read at
+  call-time so the same env var drives both sides."""
+  token = (os.getenv("LLM_WS_TOKEN") or "").strip()
+  return {"Authorization": f"Bearer {token}"} if token else {}
+
+
+def ws_transport_options() -> dict:
+  """Reconnect/heartbeat tuning knobs (CONTRACT §1.6) plus the optional auth
+  header, read from the documented ``WS_RECONNECT_MS`` / ``WS_RECONNECT_MAX_MS``
+  / ``WS_RECONNECT_JITTER_RATIO`` / ``WS_HEARTBEAT_INTERVAL_MS`` / ``LLM_WS_TOKEN``
+  env vars and forwarded to ``make_wa_socket`` -> ``WSClientTransport``. Defaults
+  mirror the Node ``config.ts`` WS_* defaults so behaviour is unchanged when
+  these are unset."""
+  return {
+    "base_ms": ws_reconnect_base_ms(),
+    "max_ms": ws_reconnect_max_ms(),
+    "jitter_ratio": ws_reconnect_jitter_ratio(),
+    "heartbeat_interval_ms": ws_heartbeat_interval_ms(),
+    "headers": ws_auth_headers(),
+  }
+
+
 def accounts_json_env() -> str | None:
   return os.getenv("ACCOUNTS_JSON") or os.getenv("ACCOUNTS_CONFIG")
 

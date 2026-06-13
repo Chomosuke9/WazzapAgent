@@ -4,42 +4,41 @@ sidebar_position: 3
 
 # Node.js Gateway
 
-Internal documentation for the Node.js Gateway (`src/`). The gateway connects WhatsApp to the Python bridge via WebSocket.
+Internal documentation for the Node.js Gateway (`src/`, TypeScript). The gateway is the **WebSocket server**: it binds `WS_BIND_HOST:WS_LISTEN_PORT` (default `127.0.0.1:3000`), and each Python `WaSocket` is a **client** that dials in at `NODE_URL` (default `ws://localhost:3000`) to bridge WhatsApp to the LLM pipeline.
 
 ## Tech Stack
 
 - **Runtime:** Node.js 18+ with ESM (`"type": "module"`)
-- **WhatsApp Library:** Baileys v7 (`baileys@7.0.0-rc.9`)
+- **WhatsApp Library:** Baileys v7 (`baileys@7.0.0-rc12`)
 - **WebSocket:** `ws` library
 - **Logging:** Pino (structured JSON logging)
 - **File System:** `fs-extra`
 
-## Entry Point (`index.js`)
+## Entry Point (`index.ts`)
 
-`index.js` is the main bootstrap:
+`index.ts` is the main composition root:
 
-1. Validates `LLM_WS_ENDPOINT` exists in environment.
-2. Runs `startWhatsApp()` for WhatsApp connection.
-3. Listens for `message` events from the WebSocket client.
-4. Routes commands from the bridge to the appropriate WhatsApp functions.
+1. Reads configuration and binds the WebSocket **server** on `WS_BIND_HOST:WS_LISTEN_PORT` (default `127.0.0.1:3000`).
+2. For each tenant `folder_path`, creates/resumes a per-account Baileys socket.
+3. Accepts connections from Python `WaSocket` clients that dial in at `NODE_URL`, binding each to its account via the registry after the `hello`/`hello_ack` handshake.
+4. Routes **actions** from the bridge (Python→Node) to the appropriate WhatsApp functions, per account via `src/account/actionDispatcher.ts`.
 
 ```js
-// Command routing flow
-wsClient.on('message', async (msg) => {
-  switch (msg.type) {
-    case 'send_message':    → sendOutgoing(payload)
-    case 'react_message':   → reactToMessage(payload)
-    case 'delete_message':  → deleteMessageByContextId(payload)
-    case 'kick_member':     → kickMembers(payload)
-    case 'mark_read':       → markChatRead(payload)
-    case 'send_presence':   → sendPresence(payload)
-  }
-});
+// Action dispatch (Python → Node), per account via src/account/actionDispatcher.ts
+'send_message'          → sendOutgoing(payload)
+'react_message'         → reactToMessage(payload)
+'delete_message'        → deleteMessageByContextId(payload)
+'kick_member'           → kickMembers(payload)
+'mark_read'             → markChatRead(payload)
+'send_presence'         → sendPresence(payload)
+'run_command'           → runCommand(payload)
+'send_quiz' / 'send_copy_code' / 'relay_lottie_sticker'
+'send_buttons' / 'send_carousel'
 ```
 
-Each action returns an `action_ack` to the bridge. For `send_message`, a legacy `send_ack` is also emitted.
+Each action returns an `action_ack` to the bridge (Node→Python). For `send_message`, a legacy `send_ack` is also emitted. Every Node→Python frame carries `folderPath` for tenant routing.
 
-## WhatsApp Client (`connection.js`)
+## WhatsApp Client (`src/wa/connection.ts`)
 
 ### Connection
 
@@ -74,7 +73,7 @@ Output text: "Hey @628123456789, stop spamming" (with mention tag)
 
 The `@everyone (everyone)` token resolves to mentioning all group members.
 
-## Message Parser (`messageParser.js`)
+## Message Parser (`src/wa/domain/messageParser.ts`)
 
 The parser extracts structured information from raw Baileys messages:
 
@@ -100,7 +99,7 @@ The parser tries text sources in priority order:
 6. Contacts → `<contact: Name, Phone>`
 7. Media placeholders → `<media:image>`, `<media:video>`, etc.
 
-## Identifiers (`identifiers.js`)
+## Identifiers (`src/wa/domain/identifiers.ts`)
 
 ### contextMsgId
 
@@ -118,7 +117,7 @@ The parser tries text sources in priority order:
 - Per-chat registry: `senderToRef`, `refToSender`, `senderToParticipant`.
 - **Purpose:** Ensures real JIDs are never exposed to the LLM.
 
-## Media Handler (`mediaHandler.js`)
+## Media Handler (`src/mediaHandler.ts`)
 
 ### Download Flow
 
@@ -132,7 +131,7 @@ The parser tries text sources in priority order:
 - Media paths are sandboxed to `MEDIA_DIR` — no directory traversal possible.
 - File sizes are limited to prevent OOM.
 
-## Caches (`caches.js`)
+## Caches (`src/wa/domain/caches.ts`)
 
 | Cache | Type | Max Size | TTL |
 |-------|------|----------|-----|
@@ -141,20 +140,26 @@ The parser tries text sources in priority order:
 | `messageIdToContextId` | `Map<chatId::messageId, contextMsgId>` | 20000 | - |
 | `contextCounterByChat` | `Map<chatId, counter>` | - | - |
 | `senderRefRegistryByChat` | `Map<chatId, registry>` | - | - |
-| Group metadata | Via `groupContext.js` | - | 60 seconds |
+| Group metadata | Via `groupContext.ts` | - | 60 seconds |
 
-## Group Context (`groupContext.js`)
+## Group Context (`src/wa/domain/groupContext.ts`)
 
 ### Metadata Caching
 
 Group metadata (name, description, participants) is cached with a 60-second TTL. After expiry, it's re-fetched from WhatsApp.
 
-## WebSocket Client (`wsClient.js`)
+## WebSocket Server (`src/server/wsServer.ts`)
 
-- Extends `EventEmitter`.
-- Auto-reconnects on disconnection (interval configurable via `WS_RECONNECT_MS`).
-- Sends a `hello` message on connect with `instanceId` and `role`.
-- Supports `Authorization: Bearer <token>` header.
+Post-migration the topology is **reversed**: **Node is the WebSocket server**, not a client. Each Python `WaSocket` is a client that dials Node at `NODE_URL` (default `ws://localhost:3000`).
+
+- Binds the `ws` server on `WS_BIND_HOST:WS_LISTEN_PORT` (default `127.0.0.1:3000`).
+- Accepts client connections and runs a per-connection heartbeat (`WS_HEARTBEAT_INTERVAL_MS`).
+- Supports an optional bearer token via `LLM_WS_TOKEN` (enforced by Node, sent by the Python client).
+- `src/server/accountRegistry.ts` binds each client to its `folder_path` after the `hello` handshake (Python→Node, `{folderPath, protocolVersion: "2.0"}`) / `hello_ack` (Node→Python, `{folderPath, waStatus}`).
+
+After the handshake: **actions** flow Python→Node; **events**, control events, and acks flow Node→Python. Every Node→Python frame carries `folderPath` for tenant routing.
+
+> Start order: start the **Node gateway first** (the server), then the Python bridge (clients dial in).
 
 ## Code Conventions
 

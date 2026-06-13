@@ -49,6 +49,7 @@ async function downloadMediaContent(
   content: any,
   contentType: string | null | undefined,
   messageId: string | null | undefined,
+  mediaDir: string = config.mediaDir,
 ): Promise<string | null> {
   const mediaKind = mapMediaKind(contentType);
   if (!mediaKind || !['image', 'video'].includes(mediaKind)) return null;
@@ -57,7 +58,7 @@ async function downloadMediaContent(
     const extMap: Record<string, string> = { image: 'jpg', video: 'mp4' };
     const ext = extMap[mediaKind] || 'bin';
     const filename = `${messageId}_${mediaKind}.${ext}`;
-    const filepath = path.join(config.mediaDir, filename);
+    const filepath = path.join(mediaDir, filename);
     await downloadMediaToFile(content, mediaKind as 'image' | 'video', filepath, withTimeout);
     return filepath;
   } catch (err) {
@@ -99,16 +100,16 @@ async function addStickerExif(webpPath: string, { packName, emoji }: { packName:
 // Static image sticker (sharp)
 // ---------------------------------------------------------------------------
 
-async function createStickerFile(mediaPath: string, _upperText: string | null = null, _lowerText: string | null = null): Promise<string> {
+async function createStickerFile(mediaPath: string, _upperText: string | null = null, _lowerText: string | null = null, mediaDir: string = config.mediaDir): Promise<string> {
   const ext = path.extname(mediaPath).toLowerCase();
 
   if (!SUPPORTED_IMAGE_EXT.has(ext)) {
     throw new Error(`Unsupported format: ${ext}`);
   }
 
-  await fs.ensureDir(config.mediaDir);
+  await fs.ensureDir(mediaDir);
   const shortId = randomUUID().slice(0, 8);
-  const outPath = path.join(config.mediaDir, `sticker_${shortId}.webp`);
+  const outPath = path.join(mediaDir, `sticker_${shortId}.webp`);
 
   const img = sharp(mediaPath).resize(STICKER_SIZE, STICKER_SIZE, {
     fit: 'contain',
@@ -171,6 +172,7 @@ async function createAnimatedStickerFile(
     quality?: number;
     packName?: string;
     emoji?: string;
+    mediaDir?: string;
   } = {},
 ): Promise<string> {
   const {
@@ -180,6 +182,7 @@ async function createAnimatedStickerFile(
     quality = DEFAULT_QUALITY,
     packName = STICKER_PACK_NAME,
     emoji = STICKER_EMOJI,
+    mediaDir = config.mediaDir,
   } = options;
 
   const ext = path.extname(inputPath).toLowerCase();
@@ -187,9 +190,9 @@ async function createAnimatedStickerFile(
     throw new Error(`Unsupported video format: ${ext}`);
   }
 
-  await fs.ensureDir(config.mediaDir);
+  await fs.ensureDir(mediaDir);
   const shortId = randomUUID().slice(0, 8);
-  const outPath = path.join(config.mediaDir, `sticker_${shortId}.webp`);
+  const outPath = path.join(mediaDir, `sticker_${shortId}.webp`);
 
   // Level 1: Best quality (512px, configurable fps/quality, up to maxDuration seconds)
   await convertVideoToWebp(inputPath, outPath, {
@@ -202,7 +205,7 @@ async function createAnimatedStickerFile(
 
   // Level 2 fallback: reduced fps, quality, shorter duration
   if (currentSize > maxBytes) {
-    const fallbackPath = path.join(config.mediaDir, `sticker_${shortId}_f1.webp`);
+    const fallbackPath = path.join(mediaDir, `sticker_${shortId}_f1.webp`);
     try {
       await convertVideoToWebp(inputPath, fallbackPath, {
         maxDuration: Math.min(maxDuration, 3),
@@ -226,7 +229,7 @@ async function createAnimatedStickerFile(
 
   // Level 3 fallback: small (320px), low fps, short duration, heavy compression
   if (currentSize > maxBytes) {
-    const smallPath = path.join(config.mediaDir, `sticker_${shortId}_f2.webp`);
+    const smallPath = path.join(mediaDir, `sticker_${shortId}_f2.webp`);
     try {
       await convertVideoToWebp(inputPath, smallPath, {
         maxDuration: 2,
@@ -260,15 +263,19 @@ async function createAnimatedStickerFile(
 
 async function handleSticker({ chatId, chatType: _chatType, senderIsAdmin: _senderIsAdmin, senderIsOwner: _senderIsOwner, args, msg, account, sock }: CommandContext): Promise<void> {
   const [upperText, lowerText] = parseStickerArgs(args);
+  // Per-tenant media dir (CONTRACT.md §8): the produced sticker file must live
+  // under THIS account's media dir so the outbound attachment allowlist (now
+  // tenant-scoped) accepts it.
+  const mediaDir = account?.mediaDir ?? config.mediaDir;
 
   const { contentType, message: innerMessage } = unwrapMessage(msg!.message) || {};
   let mediaPath: string | null = null;
   let isAnimated = false;
 
   if (contentType === 'imageMessage') {
-    mediaPath = await downloadMediaContent(innerMessage![contentType], contentType, msg!.key.id);
+    mediaPath = await downloadMediaContent(innerMessage![contentType], contentType, msg!.key.id, mediaDir);
   } else if (contentType === 'videoMessage') {
-    mediaPath = await downloadMediaContent(innerMessage![contentType], contentType, msg!.key.id);
+    mediaPath = await downloadMediaContent(innerMessage![contentType], contentType, msg!.key.id, mediaDir);
     isAnimated = true;
   }
 
@@ -278,9 +285,9 @@ async function handleSticker({ chatId, chatType: _chatType, senderIsAdmin: _send
       const { contentType: qType, message: qMsg } = unwrapMessage(ctx.quotedMessage) || {};
       const qContent = qType ? qMsg?.[qType] : null;
       if (qType === 'imageMessage') {
-        mediaPath = await downloadMediaContent(qContent, qType, ctx.stanzaId);
+        mediaPath = await downloadMediaContent(qContent, qType, ctx.stanzaId, mediaDir);
       } else if (qType === 'videoMessage') {
-        mediaPath = await downloadMediaContent(qContent, qType, ctx.stanzaId);
+        mediaPath = await downloadMediaContent(qContent, qType, ctx.stanzaId, mediaDir);
         isAnimated = true;
       }
     }
@@ -298,9 +305,9 @@ async function handleSticker({ chatId, chatType: _chatType, senderIsAdmin: _send
   let stickerPath: string | null = null;
   try {
     if (isAnimated) {
-      stickerPath = await createAnimatedStickerFile(mediaPath);
+      stickerPath = await createAnimatedStickerFile(mediaPath, { mediaDir });
     } else {
-      stickerPath = await createStickerFile(mediaPath, upperText, lowerText);
+      stickerPath = await createStickerFile(mediaPath, upperText, lowerText, mediaDir);
     }
 
     await sendOutgoing(account!, {

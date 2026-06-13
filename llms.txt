@@ -4,28 +4,28 @@
 
 ## What this is
 
-WazzapAgents connects a WhatsApp account to LLM services (OpenAI-compatible APIs) via a two-process architecture: a Node.js gateway handles the WhatsApp socket (Baileys v7) and a Python bridge handles LLM routing, response generation, and moderation decisions. Communication between the two processes runs over WebSocket.
+WazzapAgents connects WhatsApp accounts to LLM services (OpenAI-compatible APIs) via a two-process architecture: a Node.js gateway handles the WhatsApp socket (Baileys v7) and a Python bridge handles LLM routing, response generation, and moderation decisions. Communication between the two processes runs over WebSocket: the Node gateway is the WS **server** (binds `WS_BIND_HOST:WS_LISTEN_PORT`, default `127.0.0.1:3000`) and each Python `WaSocket` is a **client** that dials it at `NODE_URL` (default `ws://localhost:3000`), announcing its tenant `folder_path`. The gateway supports multiple WhatsApp accounts (tenants), one per `folder_path`, each fully isolated.
 
 ## Stack
 
-- **Node.js 18+** (ESM) — WhatsApp gateway via Baileys v7
-- **Python 3.10+** — LLM bridge with LangChain / ChatOpenAI
-- **SQLite** (3 separate DBs) — settings, stats, moderation
-- **WebSocket** — Node ↔ Python JSON protocol
+- **Node.js 18+** (ESM) — WhatsApp gateway via Baileys v7; WebSocket **server**
+- **Python 3.10+** — LLM bridge with LangChain / ChatOpenAI; WaSocket **client(s)**
+- **SQLite** (5 per-tenant DBs) — settings.db, stats.db, moderation.db, subagent.db, stickers.db (under `<folder_path>/db`)
+- **WebSocket** — Node ↔ Python JSON protocol (Python clients dial `NODE_URL`)
 
 ## Architecture
 
 ```
-WhatsApp ←→ Node.js Gateway (Baileys v7)
-                  ↕  WebSocket
-            Python Bridge (LLM1 router → LLM2 responder)
+WhatsApp ←→ Node.js Gateway (Baileys v7, WS SERVER on WS_LISTEN_PORT)
+                  ↕  WebSocket  (Python clients dial NODE_URL)
+            Python Bridge (LLM1 router → LLM2 responder, WaSocket client)
 ```
 
-- **Node Gateway** (`src/`): WhatsApp socket lifecycle, inbound message normalization, outbound send/react/delete/kick, slash commands, interactive messages
-- **Python Bridge** (`python/bridge/`): Message debounce/batching, LLM1 decision routing, LLM2 response generation, tool call extraction, action dispatch back to Node
+- **Node Gateway** (`src/`): WS server, WhatsApp socket lifecycle, inbound message normalization, outbound send/react/delete/kick, slash commands, interactive messages
+- **Python Bridge** (`python/bridge/`): WaSocket client that dials `NODE_URL`; message debounce/batching, LLM1 decision routing, LLM2 response generation, tool call extraction, action dispatch back to Node
 - **LLM1**: Cheap, fast model decides whether to respond (skip/express-only/respond)
 - **LLM2**: Full model generates replies and invokes tools (reply, delete, mute, kick)
-- **Protocol**: Node sends `incoming_message`; Python sends `send_message`, `react_message`, `delete_message`, `kick_member`, etc.; Node returns `action_ack`
+- **Protocol**: After the `hello`/`hello_ack` handshake, actions flow Python→Node (`send_message`, `react_message`, `delete_message`, `kick_member`, etc.) and events/control events/acks flow Node→Python (`incoming_message`, `whatsapp_status`, `action_ack`, etc.); every Node→Python frame carries `folderPath`
 
 ## Docs
 

@@ -4,42 +4,41 @@ sidebar_position: 3
 
 # Node.js Gateway
 
-Dokumentasi internal untuk Node.js Gateway (`src/`). Gateway menghubungkan WhatsApp ke Python bridge melalui WebSocket.
+Dokumentasi internal untuk Node.js Gateway (`src/`, TypeScript). Gateway adalah **WebSocket server**: ia mem-bind `WS_BIND_HOST:WS_LISTEN_PORT` (default `127.0.0.1:3000`), dan tiap Python `WaSocket` adalah **client** yang men-dial masuk di `NODE_URL` (default `ws://localhost:3000`) untuk menjembatani WhatsApp ke pipeline LLM.
 
 ## Tech Stack
 
 - **Runtime:** Node.js 18+ dengan ESM (`"type": "module"`)
-- **WhatsApp Library:** Baileys v7 (`baileys@7.0.0-rc.9`)
+- **WhatsApp Library:** Baileys v7 (`baileys@7.0.0-rc12`)
 - **WebSocket:** `ws` library
 - **Logging:** Pino (structured JSON logging)
 - **File System:** `fs-extra`
 
-## Entry Point (`index.js`)
+## Entry Point (`index.ts`)
 
-File `index.js` adalah bootstrap utama:
+File `index.ts` adalah composition root utama:
 
-1. Validasi `LLM_WS_ENDPOINT` ada di environment.
-2. Jalankan `startWhatsApp()` untuk koneksi WhatsApp.
-3. Listen event `message` dari WebSocket client.
-4. Routing command dari bridge ke fungsi WhatsApp yang sesuai.
+1. Membaca konfigurasi dan mem-bind WebSocket **server** di `WS_BIND_HOST:WS_LISTEN_PORT` (default `127.0.0.1:3000`).
+2. Untuk tiap tenant `folder_path`, membuat/melanjutkan socket Baileys per akun.
+3. Menerima koneksi dari Python `WaSocket` client yang men-dial masuk di `NODE_URL`, lalu mengikatnya ke akun via registry setelah handshake `hello`/`hello_ack`.
+4. Routing **action** dari bridge (Python→Node) ke fungsi WhatsApp yang sesuai, per akun via `src/account/actionDispatcher.ts`.
 
 ```js
-// Alur routing command
-wsClient.on('message', async (msg) => {
-  switch (msg.type) {
-    case 'send_message':    → sendOutgoing(payload)
-    case 'react_message':   → reactToMessage(payload)
-    case 'delete_message':  → deleteMessageByContextId(payload)
-    case 'kick_member':     → kickMembers(payload)
-    case 'mark_read':       → markChatRead(payload)
-    case 'send_presence':   → sendPresence(payload)
-  }
-});
+// Action dispatch (Python → Node), per akun via src/account/actionDispatcher.ts
+'send_message'          → sendOutgoing(payload)
+'react_message'         → reactToMessage(payload)
+'delete_message'        → deleteMessageByContextId(payload)
+'kick_member'           → kickMembers(payload)
+'mark_read'             → markChatRead(payload)
+'send_presence'         → sendPresence(payload)
+'run_command'           → runCommand(payload)
+'send_quiz' / 'send_copy_code' / 'relay_lottie_sticker'
+'send_buttons' / 'send_carousel'
 ```
 
-Setiap aksi mengembalikan `action_ack` ke bridge. Untuk `send_message`, juga mengirim `send_ack` legacy.
+Setiap aksi mengembalikan `action_ack` ke bridge (Node→Python). Untuk `send_message`, juga mengirim `send_ack` legacy. Setiap frame Node→Python membawa `folderPath` untuk routing tenant.
 
-## WhatsApp Client (`connection.js`)
+## WhatsApp Client (`src/wa/connection.ts`)
 
 ### Koneksi
 
@@ -74,7 +73,7 @@ Teks output: "Hai @628123456789, jangan spam ya" (dengan mention tag)
 
 Token `@everyone (everyone)` di-resolve menjadi mention semua anggota grup.
 
-## Message Parser (`messageParser.js`)
+## Message Parser (`src/wa/domain/messageParser.ts`)
 
 Parser mengekstrak informasi terstruktur dari raw Baileys message:
 
@@ -100,7 +99,7 @@ Parser mencoba sumber teks dalam urutan prioritas:
 6. Contact → `<contact: Name, Phone>`
 7. Media placeholder → `<media:image>`, `<media:video>`, dll.
 
-## Identifiers (`identifiers.js`)
+## Identifiers (`src/wa/domain/identifiers.ts`)
 
 ### contextMsgId
 
@@ -118,7 +117,7 @@ Parser mencoba sumber teks dalam urutan prioritas:
 - Registry per chat: `senderToRef`, `refToSender`, `senderToParticipant`.
 - **Tujuan:** Memastikan JID asli tidak pernah terekspos ke LLM.
 
-## Media Handler (`mediaHandler.js`)
+## Media Handler (`src/mediaHandler.ts`)
 
 ### Alur Download
 
@@ -132,7 +131,7 @@ Parser mencoba sumber teks dalam urutan prioritas:
 - Path media di-sandbox ke `MEDIA_DIR` — tidak bisa directory traversal.
 - Ukuran file dibatasi untuk menghindari OOM.
 
-## Caches (`caches.js`)
+## Caches (`src/wa/domain/caches.ts`)
 
 | Cache | Tipe | Maks Size | TTL |
 |-------|------|-----------|-----|
@@ -141,20 +140,26 @@ Parser mencoba sumber teks dalam urutan prioritas:
 | `messageIdToContextId` | `Map<chatId::messageId, contextMsgId>` | 20000 | - |
 | `contextCounterByChat` | `Map<chatId, counter>` | - | - |
 | `senderRefRegistryByChat` | `Map<chatId, registry>` | - | - |
-| Group metadata | Via `groupContext.js` | - | 60 detik |
+| Group metadata | Via `groupContext.ts` | - | 60 detik |
 
-## Group Context (`groupContext.js`)
+## Group Context (`src/wa/domain/groupContext.ts`)
 
 ### Metadata Caching
 
 Metadata grup (nama, deskripsi, partisipan) di-cache dengan TTL 60 detik. Setelah expire, di-fetch ulang dari WhatsApp.
 
-## WebSocket Client (`wsClient.js`)
+## WebSocket Server (`src/server/wsServer.ts`)
 
-- Extends `EventEmitter`.
-- Auto-reconnect saat koneksi putus (interval konfigurasi via `WS_RECONNECT_MS`).
-- Mengirim `hello` message saat connect dengan `instanceId` dan `role`.
-- Support `Authorization: Bearer <token>` header.
+Setelah migrasi, topologi **dibalik**: **Node adalah WebSocket server**, bukan client. Tiap Python `WaSocket` adalah client yang men-dial Node di `NODE_URL` (default `ws://localhost:3000`).
+
+- Mem-bind server `ws` di `WS_BIND_HOST:WS_LISTEN_PORT` (default `127.0.0.1:3000`).
+- Menerima koneksi client dan menjalankan heartbeat per-koneksi (`WS_HEARTBEAT_INTERVAL_MS`).
+- Mendukung bearer token opsional via `LLM_WS_TOKEN` (diperiksa Node, dikirim oleh client Python).
+- `src/server/accountRegistry.ts` mengikat tiap client ke `folder_path`-nya setelah handshake `hello` (Python→Node, `{folderPath, protocolVersion: "2.0"}`) / `hello_ack` (Node→Python, `{folderPath, waStatus}`).
+
+Setelah handshake: **action** mengalir Python→Node; **event**, control event, dan ack mengalir Node→Python. Setiap frame Node→Python membawa `folderPath` untuk routing tenant.
+
+> Urutan start: jalankan **gateway Node lebih dulu** (server), lalu bridge Python (client men-dial masuk).
 
 ## Konvensi Kode
 

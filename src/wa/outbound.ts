@@ -285,7 +285,11 @@ async function sendOutgoing(ctx: AccountContext, {
   for (const att of normalizedAttachments) {
     const kindToken = typeof att?.kind === 'string' ? att.kind : (typeof att?.type === 'string' ? att.type : 'document');
     const kind = kindToken.trim().toLowerCase() || 'document';
-    const filePath = await resolveAllowedAttachmentPath(att?.path, actionError as ActionErrorFactory);
+    const filePath = await resolveAllowedAttachmentPath(att?.path, actionError as ActionErrorFactory, {
+      mediaDir: ctx.mediaDir,
+      stickersDir: ctx.stickersDir,
+      stickerUploadDir: ctx.stickerUploadDir,
+    });
     const resolvedMime = await resolveAttachmentMimetype(att, filePath, kind);
     // Determine a display filename for ALL media types. WhatsApp uses
     // ``fileName`` primarily for documents, but including it for images,

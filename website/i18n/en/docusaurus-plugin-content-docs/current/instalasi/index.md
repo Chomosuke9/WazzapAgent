@@ -50,8 +50,17 @@ nano .env
 Fill in at least:
 
 ```bash
-# Required — WebSocket URL to the Python bridge
-LLM_WS_ENDPOINT=ws://localhost:8080/ws
+# The Node gateway is the WebSocket SERVER. Port it listens on:
+WS_LISTEN_PORT=3000
+
+# URL the Python bridge (client) dials to reach the gateway.
+# Must match WS_LISTEN_PORT above.
+NODE_URL=ws://localhost:3000
+
+# Optional — bearer token for WS authentication (enforced by Node, sent by the Python client)
+LLM_WS_TOKEN=
+# Optional — WS server bind host (default 127.0.0.1; set 0.0.0.0 for cross-host)
+WS_BIND_HOST=127.0.0.1
 
 # Assistant display name and aliases
 ASSISTANT_NAME=LLM
@@ -98,22 +107,22 @@ pip install -r requirements.txt
 
 ### 4. Run WazzapAgents
 
-Two components must run at the same time:
+Two components must run at the same time. The Node gateway is the WebSocket **server**, so start the **gateway first**, then the Python bridge (the client) that dials into it.
 
 :::tip
 Use a terminal multiplexer such as Tmux, Zellij, or Byobu so each service can keep running in the background.
 :::
 
-**Terminal 1 — Python bridge:**
-
-```bash
-python -m python.bridge.main
-```
-
-**Terminal 2 — Node.js gateway:**
+**Terminal 1 — Node.js gateway (WS server):**
 
 ```bash
 pnpm dev
+```
+
+**Terminal 2 — Python bridge (WS client):**
+
+```bash
+python -m python.bridge.main
 ```
 
 On first run, the gateway prints a QR code in the terminal. Scan it with WhatsApp to pair the account.
@@ -298,9 +307,11 @@ Sub-Agent runs code inside a Docker sandbox. Although isolated, only run it on a
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LLM_WS_ENDPOINT` | *(required)* | WebSocket URL to bridge |
-| `INSTANCE_ID` | `default` | Gateway instance identifier |
+| `WS_LISTEN_PORT` | `3000` | Port the WS server (Node gateway) listens on |
+| `NODE_URL` | `ws://localhost:3000` | URL the Python bridge dials to reach the gateway |
+| `WS_BIND_HOST` | `127.0.0.1` | WS server bind host (set `0.0.0.0` for cross-host) |
 | `LLM_WS_TOKEN` | *(empty)* | Bearer token for WS authentication |
+| `INSTANCE_ID` | `default` | Gateway instance identifier |
 | `DATA_DIR` | `./data` | Runtime data directory |
 | `MEDIA_DIR` | `./data/media` | Media storage directory |
 | `LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |

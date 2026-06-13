@@ -70,10 +70,19 @@ export function bindClient(folderPath: string, client: WebSocket): void {
   flushReliableQueue(folderPath);
 }
 
-/** Detach the bound client (e.g. on disconnect). Queued frames are retained. */
-export function unbindClient(folderPath: string): void {
+/**
+ * Detach the bound client (e.g. on disconnect). Queued frames are retained.
+ *
+ * When `client` is provided, the entry is only cleared if that exact socket is
+ * still the bound one. This prevents a late `close` event from an old socket
+ * from clobbering a newer client that already reconnected and rebound during
+ * the race window (which would silently divert all reliable frames to the
+ * queue until the next reconnect).
+ */
+export function unbindClient(folderPath: string, client?: WebSocket): void {
   const entry = registry.get(folderPath);
   if (!entry) return;
+  if (client && entry.client !== client) return;
   entry.client = undefined;
 }
 

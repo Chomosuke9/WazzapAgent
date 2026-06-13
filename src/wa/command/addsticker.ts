@@ -125,11 +125,11 @@ function serializeLottiePayload(msgObj: any, stickerContent: any): string {
  * Download the sticker from a WhatsApp message to a temp file.
  * Returns the temp file path, or null on failure.
  */
-async function downloadStickerToTemp(stickerContent: any, messageId: string): Promise<string | null> {
+async function downloadStickerToTemp(stickerContent: any, messageId: string, mediaDir: string = config.mediaDir): Promise<string | null> {
   if (!stickerContent) return null;
   try {
-    await fs.ensureDir(config.mediaDir);
-    const tempPath = path.join(config.mediaDir, `addsticker_tmp_${messageId}.webp`);
+    await fs.ensureDir(mediaDir);
+    const tempPath = path.join(mediaDir, `addsticker_tmp_${messageId}.webp`);
 
     try {
       await downloadMediaToFile(stickerContent, 'sticker', tempPath, withTimeout);
@@ -157,12 +157,12 @@ async function downloadStickerToTemp(stickerContent: any, messageId: string): Pr
  * Persist the sticker file to the upload directory.
  * Returns the persistent path.
  */
-async function persistStickerFile(tempPath: string, chatId: string, name: string): Promise<string> {
-  await fs.ensureDir(STICKER_UPLOAD_DIR);
+async function persistStickerFile(tempPath: string, chatId: string, name: string, uploadDir: string = STICKER_UPLOAD_DIR): Promise<string> {
+  await fs.ensureDir(uploadDir);
   const { createHash } = await import('crypto');
   const chatHash = createHash('md5').update(chatId).digest('hex').slice(0, 8);
   const destFilename = `${chatHash}_${name}.webp`;
-  const destPath = path.join(STICKER_UPLOAD_DIR, destFilename);
+  const destPath = path.join(uploadDir, destFilename);
   await fs.copy(tempPath, destPath, { overwrite: true });
   return destPath;
 }
@@ -228,7 +228,15 @@ async function handleAddSticker({
   args,
   msg,
   sock,
+  account,
 }: CommandContext): Promise<void> {
+
+  // Per-tenant media / sticker-upload dirs (CONTRACT.md §8): the staged temp
+  // file and the persisted catalog sticker must live under THIS account's
+  // folder so the outbound allowlist (now tenant-scoped) accepts the path the
+  // LLM later references via send_sticker.
+  const mediaDir = account?.mediaDir ?? config.mediaDir;
+  const uploadDir = account?.stickerUploadDir ?? config.stickerUploadDir;
 
   async function reply(text: string): Promise<void> {
     try {
@@ -382,13 +390,13 @@ async function handleAddSticker({
   // --- Regular / animated WebP path: download file ---
   let tempPath: string | null = null;
   try {
-    tempPath = await downloadStickerToTemp(stickerContent, messageIdForFile);
+    tempPath = await downloadStickerToTemp(stickerContent, messageIdForFile, mediaDir);
     if (!tempPath) {
       await reply('Gagal mengunduh sticker. Coba lagi nanti. ❌');
       return;
     }
 
-    const destPath = await persistStickerFile(tempPath, targetChatId, rawName);
+    const destPath = await persistStickerFile(tempPath, targetChatId, rawName, uploadDir);
     const action = upsertWebpSticker(targetChatId, rawName, destPath, senderId || '');
 
     logger.info(

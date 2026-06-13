@@ -6,7 +6,6 @@
 // `src/wa/command/monitor.js` were deleted; this targets the migration
 // equivalents instead.
 process.env.LOG_LEVEL = 'warn';
-process.env.LLM_WS_ENDPOINT = 'ws://127.0.0.1:1/ws';
 process.env.DATA_DIR = '/tmp/wazzap-test-activation';
 
 import { describe, it, before, after, beforeEach } from 'node:test';

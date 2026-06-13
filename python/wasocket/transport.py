@@ -1,8 +1,8 @@
 # wasocket/transport.py
 #
 # WSClientTransport — the resilient WebSocket *client* layer of the WaSocket
-# SDK. This is a 1:1 Python port of ``src/wsClient.ts`` (the Node
-# gateway's ``LLMWebSocket``): exponential backoff with symmetric jitter, the
+# SDK. This is a 1:1 Python port of the original ``src/wsClient.ts`` (the Node
+# gateway's ``LLMWebSocket``, removed when the topology was reversed): exponential backoff with symmetric jitter, the
 # canonical ``isAlive`` heartbeat (check-then-ping / terminate-on-missed-pong),
 # the accept-then-kick grace timer, a bounded reliable queue, the
 # ``hello``/``hello_ack`` handshake, and graceful close.

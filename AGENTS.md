@@ -340,13 +340,16 @@ hard for LLMs to reference and easy to hallucinate. The contextMsgId system
 creates a short, predictable, per-chat monotonically increasing counter that
 LLMs can reliably use in tool calls like `reply_message(context_msg_id="000125")`.
 
-### ADR-6: Why separate SQLite databases (settings/stats/moderation)
+### ADR-6: Why separate SQLite databases (per-tenant settings/stats/moderation/subagent/stickers)
 
-Three separate SQLite databases avoid locking contention:
+Per-tenant SQLite is split into five databases (one set per tenant under
+`<folder_path>/db`, CONTRACT.md §8) to avoid locking contention:
 
 - `settings.db` — read-heavy, written by both Node and Python
 - `stats.db` — written frequently by Python, read by Node for dashboard
 - `moderation.db` — read-heavy, occasional mutes from Python
+- `subagent.db` — sub-agent toggle/state (legacy; `subagent_enabled` is mirrored into `settings.db`)
+- `stickers.db` — user-managed sticker catalog (scanned by the LLM2 sticker tool)
 
 Each uses `WAL` mode for concurrent reads.
 
@@ -485,7 +488,10 @@ single-account fallback.
 
 **Node Gateway:**
 `INSTANCE_ID`, `BOT_OWNER_JIDS`, `ASSISTANT_NAME`, `REQUIRE_ACTIVATION`,
-`CONTEXT_TIME_UTC_OFFSET_HOURS`, `LLM_WS_TOKEN`, `DATA_DIR`, `MEDIA_DIR`,
+`CONTEXT_TIME_UTC_OFFSET_HOURS`, `LLM_WS_TOKEN`,
+`WS_BIND_HOST` (host the WS server binds to, default `127.0.0.1` (loopback); set `0.0.0.0` for cross-host + set `LLM_WS_TOKEN`),
+`WS_MAX_PAYLOAD_BYTES` (max inbound WS frame size, default 8 MiB),
+`DATA_DIR`, `MEDIA_DIR`,
 `STICKERS_DIR`, `LOG_LEVEL`, `WS_RECONNECT_MS`,
 `WS_RECONNECT_MAX_MS` (cap for exponential backoff, default 60000),
 `WS_RECONNECT_JITTER_RATIO` (+/- jitter fraction 0..1, default 0.2),
@@ -533,7 +539,7 @@ true = interactive card via sendRichMessage, mobile only),
 `SUBAGENT_URL`, `SUBAGENT_WEBHOOK_PORT` (BASE port, default 8081; multi-account:
 account N binds `SUBAGENT_WEBHOOK_PORT + N`, index 0 keeps the base so
 single-account is unchanged),
-`SUBAGENT_WEBHOOK_URL`, `SUBAGENT_WAIT_TIMEOUT_S` (default 300),
+`SUBAGENT_WEBHOOK_URL`, `SUBAGENT_WEBHOOK_HOST` (webhook bind host, default `127.0.0.1` (loopback); set `0.0.0.0` only for a remote sub-agent), `SUBAGENT_WAIT_TIMEOUT_S` (default 300),
 `SUBAGENT_MAX_WAIT_S` (default 1800), `SUBAGENT_ENABLED_DEFAULT` (default false),
 `SUBAGENT_INPUT_STAGING_DIR`, `SUBAGENT_MAX_INLINE_FILE_BYTES`, `SUBAGENT_WEBHOOK_MAX_BODY_BYTES`
 
@@ -598,8 +604,12 @@ these for exact cost calculation.
   is both pinger and reaper, so the interval itself is the detection granularity
   and there is no second timer to race. Reliable Node→Python control events are
   queued per account on the registry (`sendReliableToClient`) and flushed when
-  that account's client reconnects. This mirrors the Python transport's
-  symmetrical `ping_interval=20, ping_timeout=20`.
+  that account's client reconnects. The Python `WaSocket` transport
+  (`python/wasocket/transport.py`) mirrors this with its own canonical `isAlive`
+  heartbeat at `WS_HEARTBEAT_INTERVAL_MS` (it connects with the `websockets`
+  library's built-in `ping_interval=None`, so the SDK's own check-then-ping /
+  terminate-on-missed-pong loop is the single source of liveness detection,
+  matching the Node server's pattern).
 - If Node restarts, every Python client must reconnect. There's no persistent
   queue on the Python side for outbound actions — in-flight batches are lost.
 

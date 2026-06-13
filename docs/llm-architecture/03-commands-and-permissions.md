@@ -13,7 +13,7 @@
 
 ## Canonical command list
 
-The following commands are registered in `src/wa/command/parseCommand.js` via the `COMMAND_ALIASES` map and dispatched by `src/wa/commandHandler.js`:
+The following commands are registered as per-command handler modules under `src/wa/command/*.ts` (parsed by `src/wa/command/parseCommand.ts` via the `COMMAND_ALIASES` map) and dispatched by the `CommandRegistry` in `src/wa/commands/CommandRegistry.ts`:
 
 | Command | Alias(es) | Description |
 |---------|-----------|-------------|
@@ -75,7 +75,7 @@ When `REQUIRE_ACTIVATION=true` (env var), only two commands are exempt:
 
 All other commands are blocked for unactivated chats. The gate is enforced at
 two levels:
-1. **Node.js** (`commandHandler.js`): checks `ACTIVATION_EXEMPT_COMMANDS` set before dispatch.
+1. **Node.js** (`src/wa/commands/CommandRegistry.ts`, `dispatchCommand`): checks `ACTIVATION_EXEMPT_COMMANDS` set before dispatch.
 2. **Python bridge** (`main.py`): drops `incoming_message` payloads from unactivated
    chats before they enter the debounce/batch pipeline.
 
@@ -94,8 +94,8 @@ The following commands are restricted to JIDs listed in `BOT_OWNER_JIDS`:
 | `/modelcfg` | Manages the global model registry |
 | `/debug` | Sends test interactive payloads; exposes internal state |
 
-The owner check is performed in each handler's guard clause inside
-`commandHandler.js` before the handler runs. Non-owner senders receive an
+The owner check is performed in each handler's guard clause (dispatched via
+`src/wa/commands/CommandRegistry.ts`) before the handler runs. Non-owner senders receive an
 Indonesian-language rejection message.
 
 ### Admin-only commands in groups
@@ -160,29 +160,29 @@ from Baileys group participant role metadata.
 Commands can reach the system through three paths:
 
 1. **Human-typed in WhatsApp** — the primary path. Baileys fires `messages.upsert`,
-   `connection.js` runs two listeners sequentially:
-   - **Listener 1** (`commandHandler.js`): handles the command immediately, sends
+   `src/wa/connection.ts` runs two listeners sequentially:
+   - **Listener 1** (`src/wa/commands/CommandRegistry.ts`): handles the command immediately, sends
      the reply on WhatsApp, and returns `true`.
-   - **Listener 2** (`inbound.js` → WS `incoming_message`): always sets
+   - **Listener 2** (`src/wa/inbound.ts` → WS `incoming_message`): always sets
      `commandHandled: true` for any slash command, then forwards the payload to
      Python strictly for history/context tracking.
 
 2. **LLM2-triggered via `run_command` action** — the LLM2 can bundle a `command`
    parameter in the `reply_message` tool call. Python emits a `run_command` action
-   over WS, and Node's `src/wa/runCommand.js` synthesises a fake `msg` object
+   over WS, and Node's `src/wa/runCommand.ts` synthesises a fake `msg` object
    (including quoted message support via `contextMsgId`) and dispatches it through
-   the same `handleCommandListener`. The command runs silently — no text is posted
+   the same command path. The command runs silently — no text is posted
    to the WhatsApp chat.
 
 3. **Interactive menu button taps** — quick-reply buttons and list selections from
    interactive messages (settings menu, quiz) arrive as plain text replies.
    Node's inbound handler distinguishes quiz replies (tracked via `quizMessageIds`
-   set in `caches.js`) from settings menu replies. Quiz replies are forwarded to
+   set in `src/wa/domain/caches.ts`) from settings menu replies. Quiz replies are forwarded to
    Python for LLM processing; settings menu commands are resolved in Node directly.
 
 ### Where each command is handled
 
-| Command | Node (`commandHandler.js`) | Python (`main.py`) | Notes |
+| Command | Node (`commands/CommandRegistry.ts`) | Python (`main.py`) | Notes |
 |---------|:--------------------------:|:------------------:|-------|
 | `help` | ✅ | — | Sends help text directly |
 | `activate` | ✅ | — | Updates activation DB record |
@@ -215,7 +215,7 @@ Commands can reach the system through three paths:
 
 > ¹ Python's `commands.py` contains handlers for `prompt`/`reset`/`permission`/
 > `mode`/`trigger`/`dashboard`/`help`, but `handle_command()` is never invoked from
-> `main.py` because Node always sets `commandHandled=true` (see `inbound.js:297`).
+> `main.py` because Node always sets `commandHandled=true` (see `src/wa/inbound.ts`).
 > These are effectively dead code. Python does handle `/reset` (memory clear) and
 > `/dump` (context export) inline in `main.py` (lines 1116, 1145) before the
 > `commandHandled` check.
@@ -236,7 +236,7 @@ LLM2 reply_message tool call:
 
 Python detects the non-null `command` field, emits a `run_command` WS action, and
 waits for the `action_ack` before appending the command result to the LLM history.
-The command runs through `runCommand.js` which builds a fake `msg` object with
+The command runs through `src/wa/runCommand.ts` which builds a fake `msg` object with
 `fromMe: true` and `senderIsOwner: true` (the bot is always privileged for
 self-triggered commands).
 
@@ -248,13 +248,13 @@ Only the bot owner can use the `global` variant.
 
 | Command | Global usage | Source file |
 |---------|-------------|-------------|
-| `/mode` | `/mode global auto\|prefix\|hybrid` | `mode.js:65-98` |
-| `/prompt` | `/prompt global <text>` / `/prompt global clear` | `prompt.js:50-52` |
-| `/permission` | `/permission global <0-3>` | `permission.js:61-62` |
-| `/idle` | `/idle global <min-max>` / `/idle global off` | `idle.js:62-63` |
-| `/subagent` | `/subagent global on\|off` | `subagent.js:50-51` |
-| `/model` | `/model global <modelId>` | `model.js:36-37` |
-| `/announcement` | `/announcement global on\|off` | `announcement.js:56-58` |
+| `/mode` | `/mode global auto\|prefix\|hybrid` | `src/wa/command/mode.ts` |
+| `/prompt` | `/prompt global <text>` / `/prompt global clear` | `src/wa/command/prompt.ts` |
+| `/permission` | `/permission global <0-3>` | `src/wa/command/permission.ts` |
+| `/idle` | `/idle global <min-max>` / `/idle global off` | `src/wa/command/idle.ts` |
+| `/subagent` | `/subagent global on\|off` | `src/wa/command/subagent.ts` |
+| `/model` | `/model global <modelId>` | `src/wa/command/model.ts` |
+| `/announcement` | `/announcement global on\|off` | `src/wa/command/announcement.ts` |
 
 ## Command summary table
 

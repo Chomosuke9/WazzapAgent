@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from wasocket import make_wa_socket
 
 from .accounts import load_accounts
+from .config import ws_transport_options
 from .db import (
     checkpoint_all_dbs as db_checkpoint_all_dbs,
 )
@@ -70,7 +71,7 @@ def build_session(
     from config, port from the per-account offset), falling back to localhost
     only when unset — so cross-machine sub-agent deploys work in multi-account.
     """
-    sock = make_wa_socket(account.folder_path)
+    sock = make_wa_socket(account.folder_path, **ws_transport_options())
     webhook_port = base_webhook_port + index
     webhook_url = _resolve_webhook_url(webhook_port)
     session = AgentSession(sock, webhook_port=webhook_port, webhook_url=webhook_url)

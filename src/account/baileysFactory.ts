@@ -137,6 +137,35 @@ export function ensureFolderLayout(folderPath: string): TenantLayout {
 }
 
 /**
+ * Resolve this tenant's media / sticker / sticker-upload directories
+ * (CONTRACT.md §8). The DEFAULT single-account tenant (keyed by
+ * `config.dataDir`) keeps the `config.*` globals so the existing env overrides
+ * (`MEDIA_DIR`, `STICKERS_DIR`, `STICKER_UPLOAD_DIR`) and single-account layout
+ * are byte-for-byte unchanged; every additional tenant gets its own
+ * `<folderPath>/{media,stickers,stickers_user}` so two accounts never share a
+ * media directory (and the attachment allowlist can't span tenants).
+ */
+export function resolveTenantMediaDirs(
+  folderPath: string,
+  layout: TenantLayout,
+): { mediaDir: string; stickersDir: string; stickerUploadDir: string } {
+  const isDefaultTenant =
+    path.resolve(folderPath) === path.resolve(config.dataDir);
+  if (isDefaultTenant) {
+    return {
+      mediaDir: config.mediaDir,
+      stickersDir: config.stickersDir,
+      stickerUploadDir: config.stickerUploadDir,
+    };
+  }
+  return {
+    mediaDir: layout.mediaDir,
+    stickersDir: layout.stickersDir,
+    stickerUploadDir: path.join(folderPath, "stickers_user"),
+  };
+}
+
+/**
  * Normalize a Baileys `connection.update` connection value to the CONTRACT.md
  * {@link WaStatus}: `"open"→"open"`, `"close"/"closed"→"close"`,
  * `"connecting"/undefined→"connecting"`.
@@ -204,6 +233,13 @@ export async function createOrResumeAccount(
   // Thread this tenant's repositories onto the context so every ctx-first
   // `wa/*` helper reaches THIS account's DBs via `ctx.repos` (mirrors `sock`).
   entry.ctx.repos = entry.repos;
+  // Thread this tenant's media/sticker dirs (CONTRACT.md §8) so inbound media,
+  // the attachment allowlist, and sticker temp writes stay inside THIS tenant's
+  // folder instead of a process-global dir shared across accounts.
+  const mediaDirs = resolveTenantMediaDirs(folderPath, layout);
+  entry.ctx.mediaDir = mediaDirs.mediaDir;
+  entry.ctx.stickersDir = mediaDirs.stickersDir;
+  entry.ctx.stickerUploadDir = mediaDirs.stickerUploadDir;
 
   await buildSocket(entry, layout.authDir, opts);
   return entry;

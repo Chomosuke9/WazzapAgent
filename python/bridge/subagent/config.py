@@ -70,6 +70,17 @@ def subagent_webhook_url_env() -> str | None:
   return os.getenv("SUBAGENT_WEBHOOK_URL")
 
 
+def subagent_webhook_host_env() -> str:
+  """Bind host for the local sub-agent callback webhook server.
+
+  Defaults to loopback (127.0.0.1) so the unauthenticated callback endpoint
+  is not exposed on all interfaces. Set SUBAGENT_WEBHOOK_HOST=0.0.0.0 only
+  when the sub-agent service runs on a different host (and prefer a firewall
+  / reverse proxy in front of it).
+  """
+  return os.getenv("SUBAGENT_WEBHOOK_HOST", "127.0.0.1")
+
+
 def media_dir_env() -> str | None:
   return os.getenv("MEDIA_DIR")
 

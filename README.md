@@ -721,7 +721,7 @@ can assert tenant ownership.
 - `kick_member` resolves targets via backend senderRef registry and validates each `senderRef` + `anchorContextMsgId` pair before removal.
 - If a tenant's WhatsApp session logs out, delete that tenant's `<folder_path>/auth` and re-run to re-pair **that account only**.
 - Multi-account: run one process with several tenants (`FOLDER_PATHS` / `ACCOUNTS_JSON`), one Baileys socket + one `WaSocket` per `folder_path`. Each tenant is fully isolated under `<folder_path>/{auth,db,media,stickers}` (CONTRACT.md §8).
-- Baileys version pinned to `7.0.0-rc.9` (package name `baileys`); ensure Node 18+ with ESM support.
+- Baileys version pinned to `7.0.0-rc12` (package name `baileys`); ensure Node 18+ with ESM support. rc12 is the patched release for the message-spoofing advisory GHSA-qvv5-jq5g-4cgg (CVE-2026-48063) — do not downgrade below it.
 - **Interactive messages** (`viewOnceMessage` + `additionalNodes`) only render on mobile clients, not WhatsApp Web.
 - **LLM1 is skipped in private chats** — all DMs get a full LLM2 response (confidence 100).
 

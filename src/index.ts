@@ -60,14 +60,30 @@ async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, 'shutting down');
   try {
     if (wss) {
-      await new Promise<void>((resolve) => {
-        wss!.close(() => resolve());
-      });
+      // `WebSocketServer.close()` only invokes its callback once every client
+      // connection has ended. The Python bridge normally stays connected, so
+      // we must terminate live clients first, and additionally race a timeout
+      // so a stuck socket can never block shutdown (which would leave the DB
+      // WAL uncheckpointed). DB close happens unconditionally below.
+      for (const client of wss.clients) {
+        try {
+          client.terminate();
+        } catch (err) {
+          logger.warn({ err }, 'failed terminating ws client during shutdown');
+        }
+      }
+      await Promise.race([
+        new Promise<void>((resolve) => {
+          wss!.close(() => resolve());
+        }),
+        new Promise<void>((resolve) => setTimeout(resolve, 3000)),
+      ]);
     }
   } catch (err) {
     logger.error({ err }, 'ws server close failed during shutdown');
+  } finally {
+    closeAllAccountDbs();
   }
-  closeAllAccountDbs();
   process.exit(0);
 }
 

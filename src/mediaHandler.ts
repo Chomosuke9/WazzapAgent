@@ -52,7 +52,22 @@ function isPathWithin(basePath: string, candidatePath: string): boolean {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
-async function resolveAllowedAttachmentPath(rawPath: unknown, actionError: ActionErrorFactory): Promise<string> {
+/**
+ * Per-tenant directories an attachment path is allowed to live under
+ * (CONTRACT.md §8). When omitted, falls back to the process-global `config.*`
+ * dirs so the single-account default and existing callers are unchanged.
+ */
+export interface AllowedAttachmentDirs {
+  mediaDir?: string;
+  stickersDir?: string;
+  stickerUploadDir?: string;
+}
+
+async function resolveAllowedAttachmentPath(
+  rawPath: unknown,
+  actionError: ActionErrorFactory,
+  dirs?: AllowedAttachmentDirs,
+): Promise<string> {
   if (typeof rawPath !== 'string' || !rawPath.trim()) {
     throw actionError('invalid_target', 'attachment path is required');
   }
@@ -61,15 +76,17 @@ async function resolveAllowedAttachmentPath(rawPath: unknown, actionError: Actio
     throw actionError('not_found', `attachment not found: ${rawPath}`);
   }
 
+  const mediaDir = dirs?.mediaDir ?? config.mediaDir;
+  const stickersDir = dirs?.stickersDir ?? config.stickersDir;
   // User-uploaded stickers live in a separate directory that is not
-  // config.stickersDir (which holds admin-managed static stickers).
-  const stickerUploadDir = config.stickerUploadDir;
+  // stickersDir (which holds admin-managed static stickers).
+  const stickerUploadDir = dirs?.stickerUploadDir ?? config.stickerUploadDir;
   // Ensure the directory exists before calling realpath on it
   await fs.ensureDir(stickerUploadDir);
 
   const [mediaDirRealPath, stickersDirRealPath, stickerUploadDirRealPath, candidateRealPath] = await Promise.all([
-    fs.realpath(config.mediaDir),
-    fs.realpath(config.stickersDir),
+    fs.realpath(mediaDir),
+    fs.realpath(stickersDir),
     fs.realpath(stickerUploadDir),
     fs.realpath(candidate),
   ]);
@@ -77,7 +94,7 @@ async function resolveAllowedAttachmentPath(rawPath: unknown, actionError: Actio
   const isInStickersDir = isPathWithin(stickersDirRealPath, candidateRealPath);
   const isInStickerUploadDir = isPathWithin(stickerUploadDirRealPath, candidateRealPath);
   if (!isInMediaDir && !isInStickersDir && !isInStickerUploadDir) {
-    throw actionError('invalid_target', `attachment path must be inside media or stickers dir: ${config.mediaDir}, ${config.stickersDir}, or ${stickerUploadDir}`);
+    throw actionError('invalid_target', `attachment path must be inside media or stickers dir: ${mediaDir}, ${stickersDir}, or ${stickerUploadDir}`);
   }
   const stat = await fs.stat(candidateRealPath);
   if (!stat.isFile()) {
@@ -238,6 +255,7 @@ async function saveMedia(
   content: any,
   messageId: string,
   withTimeout: WithTimeout,
+  mediaDir: string = config.mediaDir,
 ): Promise<SavedAttachment | null> {
   const kind = mapMediaKind(contentType);
   if (kind === 'unknown') return null;
@@ -245,7 +263,7 @@ async function saveMedia(
   let mime = declaredMime || (kind === 'sticker' ? 'image/webp' : 'application/octet-stream');
   let ext = inferExtension(mime);
   let filename = `${messageId}_${kind}.${ext}`;
-  let filepath = path.join(config.mediaDir, filename);
+  let filepath = path.join(mediaDir, filename);
   let usedImageFallback = false;
 
   // Preserve the original filename from WhatsApp (e.g. documentMessage.fileName).
@@ -283,7 +301,7 @@ async function saveMedia(
     mime = detectedMime;
     ext = inferExtension(mime);
     const detectedFilename = `${messageId}_${kind}.${ext}`;
-    const detectedFilepath = path.join(config.mediaDir, detectedFilename);
+    const detectedFilepath = path.join(mediaDir, detectedFilename);
     if (detectedFilepath !== filepath) {
       await fs.move(filepath, detectedFilepath, { overwrite: true });
       filename = detectedFilename;

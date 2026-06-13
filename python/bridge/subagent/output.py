@@ -339,6 +339,14 @@ def stage_output_files(
     used_names: set[str] = set()
     for item in files_content:
       name = (item.get("name") or "unnamed").strip()
+      # Security (path traversal): ``name`` arrives from an external sub-agent
+      # callback. Strip any directory components so a crafted value such as
+      # "../../etc/cron.d/x" cannot escape the per-session staging dir and
+      # write to an arbitrary path. The path-copy branch below already
+      # basenames its source; this base64 branch did not.
+      safe_name = os.path.basename(name) or "unnamed"
+      if safe_name in (".", ".."):
+        safe_name = "unnamed"
       b64 = item.get("content_base64") or ""
       if not b64:
         skipped.append(SkippedFile(source_path="", name=name, reason="empty base64 content"))
@@ -363,15 +371,22 @@ def stage_output_files(
         skipped.append(SkippedFile(source_path="", name=name, reason=f"file too large ({_format_size(size)} > 200 MB)"))
         continue
 
-      final_name = name
+      final_name = safe_name
       counter = 1
       while final_name in used_names or (target_root / final_name).exists():
-        stem, ext = os.path.splitext(name)
+        stem, ext = os.path.splitext(safe_name)
         final_name = f"{stem}_{counter}{ext}"
         counter += 1
       used_names.add(final_name)
 
       dest = target_root / final_name
+      # Defense in depth: confirm the resolved destination is still inside the
+      # per-session staging root before writing.
+      try:
+        dest.resolve().relative_to(target_root.resolve())
+      except ValueError:
+        skipped.append(SkippedFile(source_path="", name=name, reason="unsafe file name (path traversal rejected)"))
+        continue
       try:
         dest.write_bytes(data)
       except OSError as err:

@@ -1,124 +1,145 @@
 # 02 — Modules Map
 
-## Node side (`src/`)
+> Current layout (post-migration). Node is TypeScript under `src/`; Python under
+> `python/`. See `AGENTS.md` → "Directory Structure" for the authoritative tree.
 
-### Core bootstrap & infrastructure
-- `src/index.js` — Bootstrap: SQLite init, WhatsApp socket lifecycle, WS client connect, action dispatcher from Python commands.
-- `src/wsClient.js` — WebSocket client to Python bridge. Best-effort `send()` for transient messages; queued `sendReliable()` for state-sync events. Exponential backoff with symmetric jitter, heartbeat `isAlive` pattern.
-- `src/config.js` — Env parsing + runtime path resolution (data/auth, data/media, data/stickers).
-- `src/db.js` — Accesses SQLite database files shared with the Python bridge (separate module from `python/bridge/db.py`).
-- `src/logger.js` — Structured pino logger.
-- `src/identifiers.js` — `contextMsgId` (6-digit per-chat monotonic sequence), `senderRef` registry, message index for quoted-message resolution.
-- `src/caches.js` — In-memory LRU caches for messages, groups, and participants.
-- `src/mediaHandler.js` — Media download from Baileys, size/type validation, filesystem path resolution.
-- `src/messageParser.js` — Baileys message unwrapping: viewOnce, interactive, buttons, ephemeral, protocol messages.
-- `src/participants.js` — Group participant role/name caching, bot-owner detection, role-flag helpers.
-- `src/groupContext.js` — Group metadata fetching + caching + invalidation.
+## Node side (`src/`, TypeScript — WS SERVER)
 
-### Utility modules (`src/utils/`)
-- `src/utils/index.js` — Stream conversion: `streamToBuffer`, `streamToFile` (handles both async iterables and Node streams).
-- `src/utils/cachedAuthState.js` — In-memory cached wrapper around Baileys `useMultiFileAuthState` to avoid repeated disk reads on key lookups; writes persist both cache and disk.
+### Bootstrap & infrastructure
+- `src/index.ts` — Composition root: load config, open the default tenant's DB,
+  start the WS server, handle shutdown (terminate clients → bounded server close
+  → checkpoint+close every tenant DB).
+- `src/config.ts` — Single config source (all `process.env` reads): transport
+  (`WS_LISTEN_PORT`, `WS_BIND_HOST`, `WS_MAX_PAYLOAD_BYTES`, `LLM_WS_TOKEN`,
+  heartbeat/reconnect), dirs, DB paths, sticker + LLM-reply settings.
+- `src/logger.ts` — Structured pino logger.
+- `src/mediaHandler.ts` — Media download from Baileys, validation, and the
+  per-tenant attachment allowlist (`resolveAllowedAttachmentPath` takes the
+  account's media/sticker dirs); `saveMedia(..., mediaDir)` writes inbound media
+  into the tenant's dir.
+
+### Server (`src/server/`)
+- `wsServer.ts` — Inbound WS server: accept clients, Bearer-token upgrade auth
+  (constant-time), `maxPayload`, `isAlive` heartbeat, `hello`/`hello_ack`
+  handshake, route action frames to the per-account dispatcher.
+- `accountRegistry.ts` — `folder_path → AccountEntry` map; `bindClient` /
+  `unbindClient(folderPath, ws?)` (guarded against reconnect races),
+  `sendToClient` (best-effort), `sendReliableToClient` + `flushReliableQueue`
+  (bounded per-account reliable queue).
+
+### Per-tenant account aggregate (`src/account/`)
+- `baileysFactory.ts` — `createOrResumeAccount` / `buildSocket`: ensure folder
+  layout (CONTRACT.md §8), open the tenant DB, build the `AccountContext`
+  (incl. per-tenant media dirs via `resolveTenantMediaDirs`), create the Baileys
+  socket, attach listeners. Owns reconnect.
+- `accountContext.ts` — Per-account state holder: socket, forwarder, repos,
+  per-tenant media/sticker dirs, caches, `contextMsgId` counter, senderRef
+  registry, quiz-id set, send queues, pending forms. One per `folder_path`.
+- `actionDispatcher.ts` — Dispatch Python→Node actions (one handler per action;
+  emits `action_ack`/`error`).
+- `eventForwarder.ts` — Forward Node→Python events (per-account, via the
+  registry).
+
+### Database (`src/db/`)
+- `Database.ts` — Owns one tenant's four logical SQLite DBs (settings/stats/
+  moderation/subagent). WAL + `busy_timeout` (the single wait-for-lock
+  mechanism — no event-loop-blocking retry sleeps), corruption recovery,
+  legacy/subagent migrations. No module-global handles.
+- `schema/index.ts` — Table creation + migrations.
+- `repositories/` — `BaseRepository`, `SettingsRepository`, `StatsRepository`,
+  `ModelRepository`, `ActivationRepository`, and `createRepositories(db)` bundle.
+
+### Protocol (`src/protocol/`)
+- `types.ts` — Wire types (CONTRACT.md §5): frames, `WaStatus`, `AccountEntry`,
+  payloads.
+- `ports.ts` — `WaSocketLike` / `AccountForwarder` interfaces (break the
+  `account/ ↔ wa/` cycle).
 
 ### WhatsApp integration (`src/wa/`)
-- `src/wa/index.js` — Barrel re-export of all public WhatsApp API functions.
-- `src/wa/connection.js` — Baileys v7 socket init and lifecycle (QR pairing, reconnect, creds update), button/list response handler, incoming message routing to command handler or Python WS.
-- `src/wa/inbound.js` — Normalize raw Baileys message events into `incoming_message` payloads for the Python bridge.
-- `src/wa/outbound.js` — Send text, media, mentions, and Lottie stickers to WhatsApp. Resolves `@senderRef` mentions to JIDs.
-- `src/wa/actions.js` — Wrappers for message reactions (`reactToMessage`) and deletion (`deleteMessageByContextId`).
-- `src/wa/moderation.js` — Kick members from groups.
-- `src/wa/presence.js` — Mark chat as read, send typing/recording presence.
-- `src/wa/commandHandler.js` — Central slash command dispatcher: routes parsed command to the correct handler module. (Alias normalization lives in `src/wa/command/parseCommand.js:7`.)
-- `src/wa/runCommand.js` — Gateway-side handler for Python's `run_command` action. Synthesises a fake `msg` object (with optional quoted reply) so LLM-triggered commands execute identically to human-typed ones.
-- `src/wa/sendQueue.js` — Per-JID serialization queue for outbound sends. Prevents Baileys ack races when two concurrent calls target the same JID.
-- `src/wa/events.js` — Synthetic context events: action log entries, group join/leave summaries, bot role change notifications.
-- `src/wa/utils.js` — Concurrency helpers: `semaphore`, `withRetry` (exponential backoff), `escapeRegex`.
+- `index.ts` — Barrel + concurrency helpers (`withTimeout`, …).
+- `domain/` — `caches.ts` (bounded in-memory caches), `identifiers.ts`
+  (`contextMsgId`/`senderRef`/quoted resolution), `participants.ts`,
+  `groupContext.ts`, `messageParser.ts`.
+- `connection.ts` — Button/list response handler, QR print, `/modelcfg` form
+  parsing helpers (shared by the factory listeners).
+- `inbound.ts` — Normalize inbound → `incoming_message`.
+- `outbound.ts` — Send text/media/mentions (per-tenant attachment allowlist).
+- `actions.ts` — React / delete wrappers.
+- `moderation.ts` — Kick validation chain.
+- `runCommand.ts` — Gateway handler for the `run_command` action.
+- `sendQueue.ts` — Per-JID send serialization (`withJidQueue`).
+- `presence.ts` — Mark read / typing.
+- `events.ts` — Synthetic context events (action log, group join, role change).
+- `utils.ts` — `semaphore`, `withRetry`, `escapeRegex`.
+- `commands/` — `CommandRegistry.ts` (Map<name, handler>, aliases on each
+  handler), `CommandContext.ts` (strict typed context incl. `account`,
+  `folderPath`, `sock`, `repos`).
+- `command/` — One module per slash command (`activate`, `addsticker`,
+  `announcement`, `broadcast`, `catch`, `dashboard`, `debug`, `generate`,
+  `groupStatus`, `help`, `idle`, `info`, `join`, `mode`, `model`, `modelcfg`,
+  `monitor`, `ownerContact`, `permission`, `prompt`, `removesticker`, `reset`,
+  `revoke`, `setting`, `sticker`, `subagent`, `trigger`) + `index.ts` /
+  `parseCommand.ts`. Sticker/group-status handlers write temp/output files into
+  the tenant's media/sticker dir (threaded from `ctx.account`).
+- `interactive/` — `sendInteractive.ts` (NativeFlow via `relayMessage` +
+  `additionalNodes`), `sendButtons.ts`, `sendCarousel.ts`.
 
-### Per-command handlers (`src/wa/command/`)
-- `src/wa/command/index.js` — Barrel re-export of all command handler functions.
-- `src/wa/command/parseCommand.js` — Parse `/command arg1 arg2` strings into `{command, args}`.
-- `src/wa/command/activate.js` — Activate a chat using an activation code.
-- `src/wa/command/addsticker.js` — Add a sticker image to the user-managed catalog.
-- `src/wa/command/announcement.js` — Send a group announcement message.
-- `src/wa/command/broadcast.js` — Owner-only: broadcast a message to all active chats.
-- `src/wa/command/catch.js` — Dump raw JSON cache of a quoted message for debugging (retrieves cached message payload).
-- `src/wa/command/dashboard.js` — Display per-chat or global stats dashboard.
-- `src/wa/command/debug.js` — Diagnostic command: environment info, connection state, cache stats.
-- `src/wa/command/generate.js` — Generate image or content via the LLM pipeline.
-- `src/wa/command/groupStatus.js` — Group status report: participants, roles, settings.
-- `src/wa/command/groupStatusHelpers.js` — Pure helper functions for group status formatting (no I/O, no handler export).
-- `src/wa/command/help.js` — Display available commands and usage.
-- `src/wa/command/idle.js` — Configure idle trigger parameters (min/max message count, probability curve).
-- `src/wa/command/info.js` — Display chat metadata, model config, and version info.
-- `src/wa/command/join.js` — Join a group via invite link.
-- `src/wa/command/model.js` — Per-chat model selection and configuration.
-- `src/wa/command/modelcfg.js` — Global default model configuration.
-- `src/wa/command/mode.js` — Chat mode: `auto`, `prefix`, `hybrid`.
-- `src/wa/command/monitor.js` — Show activation code dashboard and activated chat list (owner only).
-- `src/wa/command/ownerContact.js` — Display the bot owner's contact info.
-- `src/wa/command/permission.js` — Permission level management per chat.
-- `src/wa/command/prompt.js` — Set or clear per-chat system prompt override.
-- `src/wa/command/removesticker.js` — Remove a sticker from the user-managed catalog.
-- `src/wa/command/reset.js` — Reset chat state (clear history, reset counters).
-- `src/wa/command/revoke.js` — Revoke the group's invite link.
-- `src/wa/command/setting.js` — Interactive settings menu (buttons/lists).
-- `src/wa/command/sticker.js` — Create a sticker from an image or video.
-- `src/wa/command/subagent.js` — Enable or disable the sub-agent per chat.
-- `src/wa/command/trigger.js` — Manage trigger words for prefix/hybrid modes.
-
-### Interactive message builders (`src/wa/interactive/`)
-- `src/wa/interactive/index.js` — Barrel re-export of all interactive send functions.
-- `src/wa/interactive/sendInteractive.js` — Low-level helper: viewOnce message wrapper, device metadata injection, `relayMessage` with binary XML `additionalNodes` (required for NativeFlow rendering).
-- `src/wa/interactive/sendButtons.js` — Quick reply buttons, CTA URL, copy-code, call-button, and combined button layouts. Also: legacy template buttons.
-- `src/wa/interactive/sendCarousel.js` — Swipeable carousel cards with image, title, description, and footer buttons.
-- `src/wa/interactive/README.md` — Implementation notes for interactive message builders (506 lines).
+### Other
+- `src/utils/` — `cachedAuthState` (per-tenant Baileys auth), stream helpers.
+- `src/types/` — ambient TS declarations (`node-webpmux`).
 
 ---
 
-## Python side (`python/bridge/`)
+## Python side (`python/`)
 
-### Core
-- `__init__.py` — Package marker.
-- `main.py` — WebSocket server on `:8080`, message batching with debounce, main processing loop. Also handles: mute enforcement (instant delete before debounce), `/dump` command (serialises full LLM context and sends as `.txt` attachment), bot role change notifications, hybrid mode prefix interrupt (cancels in-flight LLM1 when a prefix match arrives), idle trigger probabilistic firing, and re-invoke dedup skip.
-- `db.py` — SQLite access layer: settings, per-chat models, mute rules, idle trigger config, stats counters. Reads/writes shared with Node via `settings.db`, `stats.db`, `moderation.db`.
-- `dashboard.py` — Stats buffer: accumulates per-chat metrics, periodic 60s flush, dashboard text formatting for LLM consumption.
-- `commands.py` — Legacy slash command parser and handler (Python-side subset of commands processed before debounce, e.g. `/dump`).
-- `history.py` — `WhatsAppMessage` dataclass, history window assembly. Also handles: provisional history entries (`local-send-{id}` for speculative/LLM-originated sends), echo merge (deduplicates messages echoed back from WhatsApp).
-- `config.py` — Env variable parsing + bridge-level constants (debounce timings, history limits, burst windows).
-- `log.py` — Structured logging setup with JSON formatting.
-- `media.py` — Visual attachment processing: base64 encoding for LLM vision, size limits, MIME type validation.
-- `stickers.py` — Sticker catalog scanning: reads `data/stickers/` directory, indexes available stickers for LLM2 tool.
-- `sticker_db.py` — Sticker database: user-managed sticker catalog in a dedicated `stickers.db` SQLite file, separate from bot settings.
+### WaSocket SDK (`python/wasocket/` — WS CLIENT, CONTRACT.md §4)
+- `__init__.py` — re-exports `make_wa_socket`, `WaSocket`, `WhatsAppMessage`.
+- `socket.py` — `WaSocket` + `make_wa_socket(folder_path, **transport_options)`;
+  typed action methods + `on(event)` decorator; `requestId` correlation seam.
+- `transport.py` — `WSClientTransport`: dial `NODE_URL` (sends the
+  `Authorization` header when `LLM_WS_TOKEN` is set), reconnect with backoff +
+  jitter, `isAlive` heartbeat (`ping_interval=None`), bounded reliable queue.
+- `protocol.py` / `events.py` — frame dataclasses (§6) + `WhatsAppMessage` (§7).
+- `correlation.py` / `errors.py` — requestId correlation + error hierarchy.
+
+### Bridge core (`python/bridge/`)
+- `main.py` — Boot: `load_accounts()` → one `WaSocket` + `AgentSession` per
+  account, gathered concurrently; per-account sub-agent webhook; graceful
+  shutdown.
+- `accounts.py` — Multi-account loader (`ACCOUNTS_JSON` / `FOLDER_PATHS` /
+  single-account fallback).
+- `session.py` — `AgentSession`: per-account composition root that binds the
+  tenant DB/identity ContextVars and wires the `agent/` collaborators.
+- `config.py` — Single env-config source (incl. `ws_transport_options()` /
+  `ws_auth_headers()`).
+- `log.py`, `history.py`, `dashboard.py`, `stickers.py`, `sticker_db.py`
+  (per-tenant sticker DB; WAL + `busy_timeout`, no busy-retry sleeps).
+
+### Injectable collaborators (`python/bridge/agent/`)
+`llm1_router.py`, `llm2_responder.py`, `batch_processor.py`,
+`subagent_coordinator.py`, `mute_gate.py`, `idle_trigger.py`, `reply_dedup.py`,
+`ack_hydrator.py`, `event_router.py` — one responsibility each, wired by
+`AgentSession`.
+
+### Per-tenant DB (`python/bridge/db/`)
+- `core.py` — ContextVar-scoped per-tenant connection routing + tenant-keyed
+  caches (`_tenant_cache_key`/`_tenant_key`); WAL + `busy_timeout` (corruption
+  recovery only, no busy-retry sleeps).
+- `settings_repository.py`, `models_repository.py` (tenant-scoped model caches),
+  `moderation_repository.py`, `stats_repository.py`, `activation_repository.py`,
+  `__init__.py` (bundle).
 
 ### Messaging pipeline (`python/bridge/messaging/`)
-- `__init__.py` — Package marker.
-- `processing.py` — Burst building and processing: payload normalization, media dedup within a burst, dedup logic via `_is_duplicate_reply` (prevents near-identical LLM2 replies within a configurable time+character window).
-- `filtering.py` — Ingress filtering: trigger word matching (prefix/hybrid mode), echo detection, idle trigger probability calculation. Decides whether a message enters the pipeline.
-- `actions.py` — Parse control lines and LLM2 tool calls into action dicts (`reply_message`, `react_message`, `delete_message`, `mute_member`, `kick_members`, `send_sticker`, etc.).
-- `gateway.py` — Serialise action dicts into WS JSON messages and send to Node. Handles per-action `requestId` tracking for `action_ack` matching.
-- `moderation.py` — Permission checks against per-chat levels, moderation payload merge into LLM context.
-- `format.py` — WhatsApp text formatting sanitisation: converts LLM-style Markdown (double-asterisk bold, etc.) to WhatsApp-native formatting (single-asterisk).
+`processing.py`, `filtering.py`, `actions.py`, `gateway.py` (sends actions over
+the SAME WS via the SDK), `ack_handler.py`, `moderation.py`, `format.py`.
 
 ### LLM pipeline (`python/bridge/llm/`)
-- `__init__.py` — Package marker.
-- `llm1.py` — Routing/decision model: given a message burst, should the bot respond, express-only (emoji/sticker), or skip? Runs only in group chats; skipped in DMs.
-- `llm2.py` — Response generation model: produces text reply + tool calls. Handles permission gating, mute rules injection, and express-only mode.
-- `schemas.py` — Tool schema definitions as JSON Schema / OpenAI function-calling format. Defines `REPLY_MESSAGE_TOOL`, `REACT_MESSAGE_TOOL`, `DELETE_MESSAGES_TOOL`, `MUTE_MEMBER_TOOL`, `KICK_MEMBERS_TOOL`, `SEND_STICKER_TOOL`, and others. Functions for building the tool list gated by permission level.
-- `prompt.py` — System prompt assembly: injects history window, context metadata, sticker catalog, prompt overrides, and mute rules into the LLM2 prompt.
-- `client.py` — LLM client factory: creates `ChatOpenAI` instances from LangChain. Supports primary + fallback endpoint/model/key pairs for both LLM1 and LLM2.
-- `metadata.py` — Context metadata extraction: bot mention detection, reply signal analysis, history window stats (message count, age range).
-- `tool_utils.py` — Cross-provider tool-call extraction: normalises OpenAI, Anthropic, and other provider tool-call formats into a unified action list.
-- `error_utils.py` — Shared error-inspection utilities: timeout detection across LLM providers.
+`llm1.py`, `llm2.py`, `schemas.py`, `prompt.py`, `client.py`, `metadata.py`,
+`tool_utils.py`.
 
-### Sub-agent system (`python/bridge/subagent/`)
-- `__init__.py` — Package marker.
-- `tracker.py` — Sub-agent execution state tracker: session lifecycle, pending/running/completed state management, timeout enforcement.
-- `client.py` — HTTP client for communicating with the sub-agent service (docker container or external process).
-- `webhook_server.py` — Webhook server that receives sub-agent completion callbacks, routes results back to the main processing loop.
-- `config.py` — Sub-agent environment configuration: endpoint URL, timeouts, work directory paths.
-- `output.py` — Sub-agent input/output staging: writes task inputs to the work directory, reads and parses output files on completion, dispatches result messages.
-- `models.py` — Sub-agent data models: dataclasses for session state, task definitions, and completion results.
-
-### Tool implementations (`python/bridge/tools/`)
-- `__init__.py` — Package marker.
-- `sticker.py` — PIL-based sticker creation: square-pad images, overlay text with outlined font, embed WhatsApp EXIF metadata (`sticker-pack-id`, `sticker-pack-name`).
-- `thumbnail.py` — Document thumbnail generation: creates JPEG thumbnails from PDFs and images for WhatsApp document previews.
+### Media + sub-agent
+- `media/` — `resolver.py`, `visual.py`.
+- `subagent/` — `tracker.py`, `client.py`, `webhook_server.py` (binds
+  `SUBAGENT_WEBHOOK_HOST`, default loopback), `output.py` (input/output staging,
+  basename-sanitized), `config.py`.
+- `tools/` — `sticker.py` (PIL), `thumbnail.py`.

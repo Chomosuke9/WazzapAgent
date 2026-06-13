@@ -39,7 +39,6 @@ import os
 import shutil
 import sqlite3
 import threading
-import time
 from pathlib import Path
 from typing import Optional
 
@@ -246,8 +245,15 @@ def _recover() -> None:
 
 
 def _run(fn):
-  """Run *fn* with busy-retry and single corruption-recovery."""
-  attempt = 0
+  """Run *fn* with single on-disk-corruption recovery.
+
+  SQLITE_BUSY / "database is locked" is handled by the connection's
+  ``busy_timeout`` (set via both ``connect(timeout=...)`` and
+  ``PRAGMA busy_timeout`` in ``_new_conn``): SQLite waits on the lock internally
+  and only raises once it elapses. A synchronous ``time.sleep()`` retry on top
+  would re-wait the full timeout AND block the shared asyncio event loop, so we
+  rely on busy_timeout for contention and only intervene for genuine corruption.
+  """
   corruption_retried = False
   while True:
     try:
@@ -258,10 +264,6 @@ def _run(fn):
         logger.warning("sticker_db: corruption detected, recovering: %s", exc)
         _drop_conn()
         _recover()
-        continue
-      if _is_busy_error(exc) and attempt < DB_OPERATION_RETRY_MAX:
-        time.sleep(DB_OPERATION_RETRY_BASE * (2 ** attempt))
-        attempt += 1
         continue
       raise
 

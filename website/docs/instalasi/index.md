@@ -47,13 +47,18 @@ nano .env
 
 Edit `.env` dan isi minimal:
 ```bash
-# Wajib — URL WebSocket ke Python bridge
-LLM_WS_ENDPOINT=ws://localhost:8080/ws
-                                /\
-                                ||
-                                ||
-                                ——
+# Node gateway adalah WebSocket SERVER. Port yang di-listen:
+WS_LISTEN_PORT=3000
 # Port(angka) ini bisa di ganti jadi apa saja, yang penting tidak terpakai port-nya.
+
+# URL yang di-dial oleh Python bridge (client) menuju gateway.
+# Harus sesuai dengan WS_LISTEN_PORT di atas.
+NODE_URL=ws://localhost:3000
+
+# Opsional — bearer token untuk autentikasi WS (di-enforce Node, dikirim client Python)
+LLM_WS_TOKEN=
+# Opsional — host bind WS server (default 127.0.0.1; set 0.0.0.0 untuk lintas-host)
+WS_BIND_HOST=127.0.0.1
 
 # Contoh: vivy,ivy,vivi,ivi,vy  (display name: vivy, aliases: ivy, vivi, etc.)
 ASSISTANT_NAME=LLM
@@ -95,18 +100,18 @@ pip install -r requirements.txt
 
 ### 4. Menjalankan
 
-Dua komponen harus berjalan bersamaan:
+Dua komponen harus berjalan bersamaan. Node gateway adalah WebSocket **server**, jadi jalankan **gateway lebih dulu**, baru kemudian Python bridge (client) yang men-dial-nya.
 :::tip
 Gunakan **Terminal multiplexer** agar bisa menjalankan _service_-nya di background. Kamu bisa memakai _Tmux_, _Zellij_, _Byobu_, atau apapun yang kamu suka. 
 :::
-**Terminal 1 — Python Bridge:**
-```bash
-python -m python.bridge.main
-```
-
-**Terminal 2 — Node.js Gateway:**
+**Terminal 1 — Node.js Gateway (WS server):**
 ```bash
 pnpm dev
+```
+
+**Terminal 2 — Python Bridge (WS client):**
+```bash
+python -m python.bridge.main
 ```
 
 Saat pertama kali jalan, gateway akan menampilkan QR code di terminal. Scan dengan WhatsApp untuk pairing.
@@ -290,9 +295,11 @@ Sub-Agent menjalankan kode di dalam sandbox Docker. Meskipun terisolasi, jalanka
 
 | Variabel | Default | Deskripsi |
 |----------|---------|-----------|
-| `LLM_WS_ENDPOINT` | *(wajib)* | URL WebSocket ke bridge |
-| `INSTANCE_ID` | `default` | Identifier instance gateway |
+| `WS_LISTEN_PORT` | `3000` | Port yang di-listen WS server (Node gateway) |
+| `NODE_URL` | `ws://localhost:3000` | URL yang di-dial Python bridge menuju gateway |
+| `WS_BIND_HOST` | `127.0.0.1` | Host bind WS server (set `0.0.0.0` untuk lintas-host) |
 | `LLM_WS_TOKEN` | *(kosong)* | Bearer token untuk autentikasi WS |
+| `INSTANCE_ID` | `default` | Identifier instance gateway |
 | `DATA_DIR` | `./data` | Direktori data runtime |
 | `MEDIA_DIR` | `./data/media` | Direktori penyimpanan media |
 | `LOG_LEVEL` | `info` | Level log (debug, info, warn, error) |

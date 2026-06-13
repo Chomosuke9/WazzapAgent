@@ -154,7 +154,7 @@ await sendCombinedButtons(sock, jid, 'Pilih aksi:', [
 ]);
 ```
 
-Supported types: `url`, `reply`, `copy`, `call`. Lihat `src/wa/interactive/sendInteractive.js:209-235`.
+Supported types: `url`, `reply`, `copy`, `call`. Lihat `src/wa/interactive/sendInteractive.ts`.
 
 ## sendRichMessage — Fungsi Universal
 
@@ -269,7 +269,7 @@ qz:Ya                     → quiz answer "Ya"
 
 ## Handling Button Responses
 
-The actual handler in `src/wa/connection.js:398-662` covers all button response types:
+The actual handler in `src/wa/connection.ts` covers all button response types:
 
 ```javascript
 async function handleButtonResponse(msg, chatId, senderId) {
@@ -302,7 +302,7 @@ async function handleButtonResponse(msg, chatId, senderId) {
 
   // Slash command buttons (/command)
   if (selectedId.startsWith("/")) {
-    const { handleCommandListener } = await import("./commandHandler.js");
+    const { handleCommandListener } = await import("./commands/CommandRegistry.ts");
     const slashCommand = parseSlashCommand(selectedId);
     if (slashCommand) {
       const fakeMsg = {
@@ -329,8 +329,10 @@ async function handleButtonResponse(msg, chatId, senderId) {
     const modelId = selectedId.replace("model_select:", "");
     // permission check: owner or group admin (unless activation gate)
     setLlm2Model(chatId, modelId);
-    wsClient.sendReliable({ type: "set_llm2_model", chatId, modelId });
-    wsClient.sendReliable({ type: "invalidate_llm2_model", chatId });
+    // Node is the WS SERVER: emit reliable control events to this account's
+    // Python client via the account registry (src/server/accountRegistry.ts).
+    account.sendReliableToClient({ type: "set_llm2_model", chatId, modelId });
+    account.sendReliableToClient({ type: "invalidate_llm2_model", chatId });
     await sock.sendMessage(chatId, {
       text: `Model diubah ke: ${displayName}${visionNote}`,
     });
@@ -357,14 +359,14 @@ async function handleButtonResponse(msg, chatId, senderId) {
 }
 ```
 
-See `src/wa/connection.js:398-662` for the complete implementation with permission checks, activation gate, owner validation, and WS state sync.
+See `src/wa/connection.ts` for the complete implementation with permission checks, activation gate, owner validation, and WS state sync.
 
 ## Quiz System
 
 WhatsApp quiz dikirim menggunakan `send_quiz` action dari Python bridge. Quiz menggunakan tombol NativeFlow `quick_reply` dengan ID berformat `qz:<label>`.
 
 ```javascript
-// Di src/index.js — mapping pilihan quiz ke tombol
+// Di src/index.ts — mapping pilihan quiz ke tombol
 const quizButtons = choices.map(ch => ({
   name: 'quick_reply',
   buttonParamsJson: JSON.stringify({
@@ -374,9 +376,9 @@ const quizButtons = choices.map(ch => ({
 }));
 ```
 
-Saat pengguna mengetuk tombol quiz, response tiba sebagai NativeFlow `quick_reply` — nilai `id` (berprefiks `qz:`) diekstrak dari `interactiveResponseMessage.nativeFlowResponseMessage.paramsJson` di `src/wa/connection.js:403-416`. Karena prefix `qz:`, handler mengembalikan `false` dan message diteruskan ke Python sebagai teks biasa — bukan sebagai command.
+Saat pengguna mengetuk tombol quiz, response tiba sebagai NativeFlow `quick_reply` — nilai `id` (berprefiks `qz:`) diekstrak dari `interactiveResponseMessage.nativeFlowResponseMessage.paramsJson` di `src/wa/connection.ts`. Karena prefix `qz:`, handler mengembalikan `false` dan message diteruskan ke Python sebagai teks biasa — bukan sebagai command.
 
-Lihat juga: `src/wa/inbound.js:255` dan `src/wa/caches.js` (quizMessageIds untuk tracking).
+Lihat juga: `src/wa/inbound.ts` dan `src/wa/domain/caches.ts` (quizMessageIds untuk tracking).
 
 ## Common Mistakes
 
@@ -470,18 +472,18 @@ await sendCarousel(sock, chatId, [
 ], { title: 'Produk Unggulan' });
 ```
 
-Implementasi: `src/wa/interactive/sendCarousel.js`. Error 479 berarti struktur binary stanza tidak valid di server WhatsApp.
+Implementasi: `src/wa/interactive/sendCarousel.ts`. Error 479 berarti struktur binary stanza tidak valid di server WhatsApp.
 
 ## LLM Reply Integration
 
 Semua teks reply LLM dikirim melalui `sendRichMessage` dengan footer AI (`'Pesan ini dibuat oleh AI'`). Jika `sendRichMessage` gagal, fallback otomatis ke `sock.sendMessage`.
 
-Dapat dikonfigurasi di `src/wa/outbound.js`:
+Dapat dikonfigurasi di `src/wa/outbound.ts`:
 - **`LLM_REPLY_INTERACTIVE=true`** (env var) — menggunakan `sendRichMessage` (NativeFlow, tampilan kartu dengan footer)
 - **`LLM_REPLY_INTERACTIVE=false`** — menggunakan `sock.sendMessage` biasa (teks polos, kompatibel dengan WA Web)
 
 ```javascript
-// Di src/wa/outbound.js:356-378
+// Di src/wa/outbound.ts
 if (config.llmReplyInteractive) {
   try {
     sentMsg = await sendRichMessage(sock, chatId, {

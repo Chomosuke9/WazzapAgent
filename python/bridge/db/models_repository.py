@@ -18,6 +18,8 @@ from .core import (
     _cache_lock,
     _MISSING,
     _llm2_model_cache,
+    _tenant_cache_key,
+    _tenant_key,
     _ensure_split_ready,
     _get_settings_conn,
     _get_setting_row,
@@ -29,34 +31,38 @@ from .core import (
 @_db_resilient('settings')
 def get_default_llm2_model() -> Optional[dict]:
   """Return the default model (lowest sort_order, is_active=1)."""
-  if core._default_llm2_model_cache is not None:
-    return core._default_llm2_model_cache
+  tkey = _tenant_key()
+  cached = core._default_llm2_model_cache.get(tkey)
+  if cached is not None:
+    return cached
   _ensure_split_ready()
   conn = _get_settings_conn()
   row = conn.execute(
     'SELECT model_id, display_name, description, vision_support FROM llm_models WHERE is_active = 1 ORDER BY sort_order ASC LIMIT 1'
   ).fetchone()
   if row:
-    core._default_llm2_model_cache = {
+    core._default_llm2_model_cache[tkey] = {
       'model_id': row['model_id'],
       'display_name': row['display_name'],
       'description': row['description'],
       'vision_support': bool(row['vision_support']),
     }
-  return core._default_llm2_model_cache
+    return core._default_llm2_model_cache[tkey]
+  return None
 
 @_db_resilient('settings')
 def get_llm2_model(chat_id: str) -> Optional[str]:
   """Return the model_id for chat_id, or None if not set."""
+  key = _tenant_cache_key(chat_id)
   with _cache_lock:
-    cached = _llm2_model_cache.get(chat_id, _MISSING)
+    cached = _llm2_model_cache.get(key, _MISSING)
   if cached is not _MISSING:
     return cached if cached is not None else None
 
   row = _get_setting_row(chat_id)
   value = row['llm2_model'] if row is not None else None
   with _cache_lock:
-    _llm2_model_cache[chat_id] = value
+    _llm2_model_cache[key] = value
   return value
 
 @_db_resilient('settings')
@@ -104,7 +110,7 @@ def set_llm2_model(chat_id: str, model_id: Optional[str]) -> None:
   conn.commit()
   _pop_all_chat_caches(chat_id)
   with _cache_lock:
-    _llm2_model_cache[chat_id] = model_id
+    _llm2_model_cache[_tenant_cache_key(chat_id)] = model_id
   logger.info('DB set_llm2_model chat_id=%s model_id=%s', chat_id, model_id)
 
 @_db_resilient('settings')
@@ -149,7 +155,7 @@ def get_all_models() -> list[dict]:
 @_db_resilient('settings')
 def add_model(model_id: str, display_name: str, description: str = '', sort_order: Optional[int] = None, vision_support: bool = False) -> bool:
   """Add a new model. Returns False if model_id already exists."""
-  core._default_llm2_model_cache = None
+  core._default_llm2_model_cache.pop(core._tenant_key(), None)
   _ensure_split_ready()
   conn = _get_settings_conn()
   if sort_order is None:
@@ -172,7 +178,7 @@ def add_model(model_id: str, display_name: str, description: str = '', sort_orde
 @_db_resilient('settings')
 def update_model(model_id: str, display_name: Optional[str] = None, description: Optional[str] = None, is_active: Optional[bool] = None, sort_order: Optional[int] = None, vision_support: Optional[bool] = None) -> bool:
   """Update a model. Returns False if model_id not found."""
-  core._default_llm2_model_cache = None
+  core._default_llm2_model_cache.pop(core._tenant_key(), None)
   _ensure_split_ready()
   conn = _get_settings_conn()
   existing = conn.execute('SELECT * FROM llm_models WHERE model_id = ?', (model_id,)).fetchone()
@@ -206,7 +212,7 @@ def update_model(model_id: str, display_name: Optional[str] = None, description:
 @_db_resilient('settings')
 def delete_model(model_id: str) -> bool:
   """Delete a model. Returns False if model_id not found."""
-  core._default_llm2_model_cache = None
+  core._default_llm2_model_cache.pop(core._tenant_key(), None)
   _ensure_split_ready()
   conn = _get_settings_conn()
   existing = conn.execute('SELECT model_id FROM llm_models WHERE model_id = ?', (model_id,)).fetchone()
@@ -215,7 +221,7 @@ def delete_model(model_id: str) -> bool:
   affected_rows = conn.execute('SELECT chat_id FROM chat_settings WHERE llm2_model = ?', (model_id,)).fetchall()
   with _cache_lock:
     for row in affected_rows:
-      _llm2_model_cache.pop(row['chat_id'], None)
+      _llm2_model_cache.pop(_tenant_cache_key(row['chat_id']), None)
   conn.execute('DELETE FROM llm_models WHERE model_id = ?', (model_id,))
   conn.execute('UPDATE chat_settings SET llm2_model = NULL WHERE llm2_model = ?', (model_id,))
   conn.commit()

@@ -293,7 +293,7 @@ async function handleIncomingMessage(
   if (mediaKinds.includes(contentType)) {
     const mediaStartMs = Date.now();
     try {
-      const mediaInfo = await saveMedia(contentType, content, msg.key.id, withTimeout);
+      const mediaInfo = await saveMedia(contentType, content, msg.key.id, withTimeout, ctx.mediaDir);
       if (mediaInfo) attachments.push(mediaInfo);
     } catch (err) {
       logger.error({ err }, 'failed saving media');

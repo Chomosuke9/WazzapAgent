@@ -40,6 +40,7 @@
  */
 import WebSocket, { WebSocketServer } from 'ws';
 import type { IncomingMessage } from 'http';
+import { timingSafeEqual } from 'crypto';
 import logger from '../logger.js';
 import config from '../config.js';
 import * as registry from './accountRegistry.js';
@@ -67,7 +68,14 @@ function authorizeUpgrade(req: IncomingMessage): boolean {
   // No token configured -> auth is disabled, accept every client.
   if (!token) return true;
   const header = req.headers['authorization'];
-  return typeof header === 'string' && header === `Bearer ${token}`;
+  if (typeof header !== 'string') return false;
+  // Constant-time comparison so a network attacker cannot use response-timing
+  // differences to recover the token byte-by-byte. Length is compared first
+  // (timingSafeEqual throws on length mismatch); the length itself is not
+  // secret, so an early length-based return is acceptable.
+  const expected = Buffer.from(`Bearer ${token}`);
+  const actual = Buffer.from(header);
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
 /**
@@ -80,6 +88,11 @@ function authorizeUpgrade(req: IncomingMessage): boolean {
 export function startWsServer(port: number = config.wsListenPort): WebSocketServer {
   const wss = new WebSocketServer({
     port,
+    // Bind to the configured host (loopback by default) so the gateway control
+    // plane is not exposed on all interfaces unless explicitly opted in.
+    host: config.wsBindHost,
+    // Reject oversized frames at the protocol layer (DoS hardening).
+    maxPayload: config.wsMaxPayloadBytes,
     // Bearer-token auth at the HTTP upgrade so an unauthorized client is
     // rejected with 401 and never reaches the `connection` handler.
     verifyClient: (
@@ -98,7 +111,16 @@ export function startWsServer(port: number = config.wsListenPort): WebSocketServ
   wss.on('listening', () => {
     const addr = wss.address();
     const boundPort = typeof addr === 'object' && addr ? addr.port : port;
-    logger.info({ port: boundPort }, 'ws server listening');
+    logger.info({ port: boundPort, host: config.wsBindHost }, 'ws server listening');
+    // Loud warning if the control plane is reachable off-box without a token.
+    const isLoopback = config.wsBindHost === '127.0.0.1' || config.wsBindHost === '::1' || config.wsBindHost === 'localhost';
+    if (!isLoopback && !config.wsToken) {
+      logger.warn(
+        { host: config.wsBindHost },
+        'SECURITY: ws server bound to a non-loopback host without LLM_WS_TOKEN — ' +
+          'the WhatsApp control plane is exposed unauthenticated. Set LLM_WS_TOKEN.',
+      );
+    }
   });
 
   wss.on('connection', (rawWs: WebSocket) => {
@@ -137,8 +159,10 @@ export function startWsServer(port: number = config.wsListenPort): WebSocketServ
     ws.on('close', () => {
       // Keep the Baileys socket ALIVE: only detach the Python client. Reliable
       // control events queue on the registry until the client reconnects.
+      // Pass `ws` so a late close from a stale socket cannot unbind a client
+      // that already reconnected and rebound during the race window.
       if (ws.folderPath) {
-        registry.unbindClient(ws.folderPath);
+        registry.unbindClient(ws.folderPath, ws);
         logger.info({ folderPath: ws.folderPath }, 'ws client disconnected; account kept connected');
       }
     });

@@ -59,6 +59,8 @@ function parseJidList(raw: string | undefined): string[] {
 export interface Config {
   instanceId: string;
   wsListenPort: number;
+  wsBindHost: string;
+  wsMaxPayloadBytes: number;
   wsToken: string | null;
   dataDir: string;
   settingsDbPath: string;
@@ -93,6 +95,13 @@ export interface Config {
 const config: Config = {
   instanceId: process.env.INSTANCE_ID || 'default',
   wsListenPort: positiveInt(process.env.WS_LISTEN_PORT, 3000),
+  // Secure default: bind the gateway WS server to loopback only. Cross-host
+  // deployments (Python bridge on a different machine) must explicitly opt in
+  // with WS_BIND_HOST=0.0.0.0 AND should set LLM_WS_TOKEN.
+  wsBindHost: process.env.WS_BIND_HOST || '127.0.0.1',
+  // Cap inbound WS frame size so a single oversized frame can't be buffered
+  // and JSON.parse'd into a memory-exhaustion DoS (ws default is 100 MiB).
+  wsMaxPayloadBytes: positiveInt(process.env.WS_MAX_PAYLOAD_BYTES, 8 * 1024 * 1024),
   wsToken: process.env.LLM_WS_TOKEN || null,
   dataDir: DATA_DIR,
   settingsDbPath: SETTINGS_DB_PATH,

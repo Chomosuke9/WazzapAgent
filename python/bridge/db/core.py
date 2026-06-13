@@ -100,13 +100,21 @@ _mute_cache: dict[str, dict[str, dict]] = {}
 _cache_lock = threading.Lock()
 
 
+def _tenant_key() -> str:
+  """The active tenant id (the ``_tenant_db_dir`` ContextVar), or ``''`` in the
+  legacy single-account / global mode. Used to scope process-global caches that
+  are per-tenant but NOT per-chat (e.g. the default LLM2 model), so two tenants
+  don't read each other's value. Falls back to ``''`` when no tenant is bound."""
+  return _tenant_db_dir.get() or ''
+
+
 def _tenant_cache_key(chat_id: str) -> tuple[str, str]:
   """Compose the active tenant (the ``_tenant_db_dir`` ContextVar) with
   *chat_id* so the module-global in-memory caches above are isolated per
   tenant. Two tenants that share the same WhatsApp group (same ``chat_id``
   JID) must not read each other's cached settings. Falls back to ``''`` when
   no tenant is bound (legacy single-account / global mode)."""
-  return (_tenant_db_dir.get() or '', chat_id)
+  return (_tenant_key(), chat_id)
 
 VALID_MODES = {'auto', 'prefix', 'hybrid'}
 DEFAULT_MODE = 'prefix'
@@ -510,46 +518,45 @@ def _clear_caches_for(db_kind: str) -> None:
       _triggers_cache.clear()
       _subagent_enabled_cache.clear()
       _llm2_model_cache.clear()
-      _default_llm2_model_cache = None
+      _default_llm2_model_cache.clear()
     elif db_kind == 'moderation':
       _mute_cache.clear()
 
 
 def _db_resilient(db_kind: str) -> Callable[[_F], _F]:
-  """Decorator: retry busy writes and recover once after corruption."""
+  """Decorator: recover once after on-disk corruption.
+
+  SQLITE_BUSY / "database is locked" is handled by the connection's
+  ``busy_timeout`` (``PRAGMA busy_timeout = DB_BUSY_TIMEOUT_MS``): SQLite parks
+  on the contended lock and retries internally, only raising once that elapses.
+  A synchronous ``time.sleep()`` retry layered on top would re-wait the full
+  busy_timeout AND block the shared asyncio event loop (freezing every tenant /
+  the WS pump), so we rely on busy_timeout alone for contention and only
+  intervene here for genuine on-disk corruption.
+  """
   def decorator(fn: _F) -> _F:
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):  # type: ignore[no-untyped-def]
-      attempt = 0
       corruption_retries = 0
       while True:
         try:
           return fn(*args, **kwargs)
         except sqlite3.DatabaseError as exc:
-          if _is_db_corruption_error(exc):
-            if corruption_retries >= 1:
-              raise
-            corruption_retries += 1
-            logger.warning(
-              'DB %s: corruption detected in %s (%s); dropping connection and recovering',
-              db_kind, fn.__name__, exc,
-            )
-            _drop_cached_connection(db_kind)
-            try:
-              _recover_corrupt_db(_resolve_path_for(db_kind))
-            except Exception as recover_err:
-              logger.error('DB %s: recovery failed: %s', db_kind, recover_err)
-              raise exc from recover_err
-            _clear_caches_for(db_kind)
-            # Reset the busy-retry counter after a fresh recovery so the
-            # post-recovery call gets a full backoff budget.
-            attempt = 0
-            continue
-          if not _is_db_busy_error(exc) or attempt >= DB_OPERATION_RETRY_MAX:
+          if not _is_db_corruption_error(exc) or corruption_retries >= 1:
             raise
-          _rollback_cached_connection(db_kind)
-          time.sleep(DB_OPERATION_RETRY_BASE_SECONDS * 2 ** attempt)
-          attempt += 1
+          corruption_retries += 1
+          logger.warning(
+            'DB %s: corruption detected in %s (%s); dropping connection and recovering',
+            db_kind, fn.__name__, exc,
+          )
+          _drop_cached_connection(db_kind)
+          try:
+            _recover_corrupt_db(_resolve_path_for(db_kind))
+          except Exception as recover_err:
+            logger.error('DB %s: recovery failed: %s', db_kind, recover_err)
+            raise exc from recover_err
+          _clear_caches_for(db_kind)
+          continue
     return wrapper  # type: ignore[return-value]
   return decorator
 
@@ -747,7 +754,7 @@ def _pop_all_chat_caches(chat_id: str) -> None:
     _permission_cache.pop(_tenant_cache_key(chat_id), None)
     _mode_cache.pop(_tenant_cache_key(chat_id), None)
     _triggers_cache.pop(_tenant_cache_key(chat_id), None)
-    _llm2_model_cache.pop(chat_id, None)
+    _llm2_model_cache.pop(_tenant_cache_key(chat_id), None)
     _subagent_enabled_cache.pop(_tenant_cache_key(chat_id), None)
 
 
@@ -802,16 +809,22 @@ def _get_global_setting_row() -> Optional[sqlite3.Row]:
 # LLM2 Model Management
 # ---------------------------------------------------------------------------
 
-_llm2_model_cache: dict[str, Optional[str]] = {}
-_default_llm2_model_cache: Optional[dict] = None
+# Per-chat LLM2 model cache, keyed by (tenant, chat_id) so two bot accounts
+# present in the same WhatsApp group don't share/overwrite each other's model
+# selection. The default-model cache is keyed by tenant id alone (it is not
+# per-chat). Both fall back to the '' tenant slot in single-account / legacy
+# mode, so single-account behaviour is unchanged.
+_llm2_model_cache: dict[tuple[str, str], Optional[str]] = {}
+_default_llm2_model_cache: dict[str, Optional[dict]] = {}
 
 
 def clear_llm2_model_cache(chat_id: Optional[str] = None) -> None:
   """Clear the LLM2 model cache. If chat_id is provided, only that chat is invalidated. Otherwise, all chats are cleared."""
   with _cache_lock:
     if chat_id is not None:
-      if chat_id in _llm2_model_cache:
-        del _llm2_model_cache[chat_id]
+      key = _tenant_cache_key(chat_id)
+      if key in _llm2_model_cache:
+        del _llm2_model_cache[key]
         logger.debug('Cleared LLM2 model cache for chat_id=%s', chat_id)
     else:
       _llm2_model_cache.clear()
@@ -819,9 +832,8 @@ def clear_llm2_model_cache(chat_id: Optional[str] = None) -> None:
 
 
 def clear_default_llm2_model_cache() -> None:
-  """Clear the default LLM2 model cache."""
-  global _default_llm2_model_cache
-  _default_llm2_model_cache = None
+  """Clear the default LLM2 model cache for the active tenant."""
+  _default_llm2_model_cache.pop(_tenant_key(), None)
   logger.debug('Cleared default LLM2 model cache')
 
 
@@ -865,7 +877,7 @@ def reset_settings_connection() -> None:
   # chat_settings table since the storage-unification fix, so its cache
   # is included here too.
   global _default_llm2_model_cache
-  _default_llm2_model_cache = None
+  _default_llm2_model_cache.clear()
   with _cache_lock:
     _prompt_cache.clear()
     _permission_cache.clear()
@@ -896,7 +908,7 @@ def invalidate_chat_caches(chat_id: str) -> None:
     _permission_cache.pop(_tenant_cache_key(chat_id), None)
     _mode_cache.pop(_tenant_cache_key(chat_id), None)
     _triggers_cache.pop(_tenant_cache_key(chat_id), None)
-    _llm2_model_cache.pop(chat_id, None)
+    _llm2_model_cache.pop(_tenant_cache_key(chat_id), None)
     _subagent_enabled_cache.pop(_tenant_cache_key(chat_id), None)
   reset_settings_connection()
   logger.debug('Per-chat settings caches invalidated chat_id=%s', chat_id)

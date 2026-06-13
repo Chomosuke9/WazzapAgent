@@ -29,13 +29,13 @@ The gateway is responsible for:
 
 The bridge is responsible for:
 
-- **WebSocket server** — Receives messages from the gateway and sends commands back.
+- **WebSocket client** — Each `WaSocket` dials the Node gateway (server) at `NODE_URL`, sends a `hello` with its tenant `folderPath`, then receives events and sends actions back.
 - **Message batching** — Groups incoming messages in burst windows with debounce logic.
 - **Two-stage LLM pipeline:**
   - **LLM1 (Gating)** — Decides whether the bot should respond. Lightweight and fast.
   - **LLM2 (Responder)** — Generates complete responses with conversation context and system prompt.
 - **Slash commands** — Handles `/prompt`, `/reset`, `/permission` directly.
-- **Storage** — Three separate SQLite databases: `settings.db`, `stats.db`, `moderation.db`.
+- **Storage** — Five separate per-tenant SQLite databases under `<folder_path>/db`: `settings.db`, `stats.db`, `moderation.db`, `subagent.db`, `stickers.db`.
 - **History management** — Stores conversation history per chat in memory with configurable limits.
 
 ## Data Flow
@@ -45,8 +45,8 @@ The bridge is responsible for:
 ```
 1. User sends message on WhatsApp
 2. Baileys receives `messages.upsert` event
-3. Gateway parses message (messageParser.js)
-4. Gateway assigns contextMsgId & senderRef (identifiers.js)
+3. Gateway parses message (wa/domain/messageParser.ts)
+4. Gateway assigns contextMsgId & senderRef (wa/domain/identifiers.ts)
 5. Gateway sends `incoming_message` to bridge via WebSocket
 6. Bridge batches messages (5s debounce, 20s max burst)
 7. Bridge runs LLM1 (gating decision)
@@ -75,17 +75,19 @@ A short deterministic ID per sender per chat, generated from SHA-1 hash of `chat
 
 | Data | Location | Type |
 |------|----------|------|
-| WhatsApp session | `data/auth/` | Files (Baileys auth state) |
-| Downloaded media | `data/media/` | Files (images, videos, etc.) |
-| Sticker catalog | `data/stickers/` | Files (WebP) |
-| Chat settings & model configs | `data/settings.db` | SQLite (WAL mode) |
-| Dashboard statistics | `data/stats.db` | SQLite (WAL mode) |
-| Mute state | `data/moderation.db` | SQLite (WAL mode) |
+| WhatsApp session | `<folder_path>/auth/` | Files (Baileys auth state) |
+| Downloaded media | `<folder_path>/media/` | Files (images, videos, etc.) |
+| Sticker catalog | `<folder_path>/stickers/` | Files (WebP) |
+| Chat settings & model configs | `<folder_path>/db/settings.db` | SQLite (WAL mode) |
+| Dashboard statistics | `<folder_path>/db/stats.db` | SQLite (WAL mode) |
+| Mute state | `<folder_path>/db/moderation.db` | SQLite (WAL mode) |
+| Sub-agent state | `<folder_path>/db/subagent.db` | SQLite (WAL mode) |
+| Sticker DB | `<folder_path>/db/stickers.db` | SQLite (WAL mode) |
 | Conversation history | Memory (RAM) | In-memory deque |
 | Message cache | Memory (RAM) | In-memory Map |
 | Group metadata | Memory (RAM) | TTL cache (60 seconds) |
 
-> **Note:** Databases are split into three separate SQLite files to avoid locking contention. Each uses WAL mode for concurrent reads.
+> **Note:** Each tenant (`folder_path`) is fully isolated under `<folder_path>/{auth,db,media,stickers}`. Databases are split into five separate SQLite files to avoid locking contention. Each uses WAL mode for concurrent reads.
 
 ## Module Diagram
 
@@ -93,67 +95,62 @@ A short deterministic ID per sender per chat, generated from SHA-1 hash of `chat
 
 ```
 src/
-├── index.js              ← Bootstrap, routes WS commands to WhatsApp actions
-├── wsClient.js           ← WebSocket client to bridge (auto-reconnect, reliable queue)
-├── config.js             ← Environment variable loading
-├── logger.js             ← Pino structured logging
-├── messageParser.js      ← Baileys message parsing → structured payload
-├── mediaHandler.js       ← Media download & validation
-├── identifiers.js        ← contextMsgId counter, senderRef registry
-├── participants.js       ← Participant role mapping, name cache
-├── groupContext.js       ← Group metadata cache
-├── caches.js             ← In-memory caches (message, metadata, names)
-├── db.js                 ← SQLite via better-sqlite3 (settings, models, stats)
-└── wa/
-    ├── connection.js     ← WhatsApp socket lifecycle, button handler
-    ├── inbound.js        ← Incoming messages → payload
-    ├── outbound.js       ← Send text/media/mentions
-    ├── actions.js        ← React & delete message wrappers
-    ├── moderation.js     ← Kick members
-    ├── presence.js       ← Mark read & typing indicator
-    ├── commandHandler.js ← Slash command dispatcher
-    ├── commands.js       ← Command alias normalization
-    ├── events.js         ← Synthetic context events
-    ├── utils.js          ← Concurrency helpers
-    ├── command/          ← Per-command handler modules
-    │   ├── help.js, prompt.js, reset.js, permission.js
-    │   ├── mode.js, trigger.js, dashboard.js, model.js
-    │   ├── broadcast.js, info.js, debug.js, join.js
-    │   ├── sticker.js, modelcfg.js, setting.js
-    │   └── groupStatus.js, catch.js
-    └── interactive/      ← NativeFlow interactive messages
-        ├── sendInteractive.js  ← viewOnce + relayMessage + additionalNodes
-        ├── sendButtons.js      ← Quick reply, CTA URL, copy, call buttons
-        └── sendCarousel.js     ← Swipeable carousel cards
+├── index.ts              ← Composition root: config, WS server, per-tenant accounts
+├── config.ts             ← Single config source — all process.env reads
+├── logger.ts             ← Pino structured logging
+├── mediaHandler.ts       ← Media download & validation, path resolution
+├── server/
+│   ├── wsServer.ts        ← WS server: accept clients on WS_LISTEN_PORT, heartbeat
+│   └── accountRegistry.ts ← Bind each client to its folder_path AccountEntry
+├── account/              ← Per-tenant aggregate (one AccountEntry per folder_path)
+│   ├── baileysFactory.ts   ← Create/resume per-tenant Baileys socket; owns DB + repos
+│   ├── accountContext.ts   ← Per-account caches/identifiers/sendQueue/forwarder/repos
+│   ├── actionDispatcher.ts ← Dispatch Python→Node actions (per-action handlers)
+│   └── eventForwarder.ts   ← Forward Node→Python events (per-account reliableQueue)
+├── db/                   ← Per-tenant SQLite (no module-global handles)
+│   ├── Database.ts         ← Owns one tenant's connections (open/recover/migrate/close)
+│   ├── schema/            ← Table creation + migrations
+│   └── repositories/      ← Settings, Stats, Model, Activation repositories
+├── protocol/
+│   ├── types.ts           ← Wire types: frames, WaStatus, AccountEntry, payloads
+│   └── ports.ts           ← Interfaces breaking the account/↔wa/ cycle
+└── wa/                   ← WhatsApp modules
+    ├── domain/            ← caches, identifiers, participants, groupContext, messageParser
+    ├── connection.ts      ← Baileys v7 socket lifecycle, button handler
+    ├── inbound.ts         ← Incoming messages → normalized incoming_message payload
+    ├── outbound.ts        ← Send text/media/mentions
+    ├── actions.ts         ← React & delete message wrappers
+    ├── moderation.ts      ← Kick members
+    ├── presence.ts        ← Mark read & typing indicator
+    ├── events.ts          ← Synthetic context events
+    ├── sendQueue.ts       ← Per-JID send queue (message ordering)
+    ├── commands/          ← Typed command dispatch (CommandRegistry)
+    ├── command/           ← Per-command handler modules
+    └── interactive/       ← NativeFlow interactive messages
 ```
 
 ### Python Bridge
 
 ```
-python/bridge/
-├── main.py              ← WebSocket handler, batching, pipeline orchestration
-├── config.py           ← Environment variable parsing, config constants
-├── db.py                ← SQLite storage with in-memory caches
-├── history.py           ← WhatsAppMessage dataclass, history formatting
-├── media.py             ← Visual attachment processing for multimodal
-├── stickers.py          ← Sticker catalog scanning (data/stickers/)
-├── commands.py           ← Legacy slash command handler (Python side)
-├── dashboard.py          ← Stats buffer + periodic flush
-├── log.py                ← Structured logging with contextvars
-├── llm/
-│   ├── llm1.py          ← LLM1 gating/decision (should respond / express-only)
-│   ├── llm2.py          ← LLM2 response generation + tools
-│   ├── schemas.py        ← Tool schemas (JSON Schema / OpenAI function calling)
-│   ├── prompt.py          ← System prompt assembly, history, metadata injection
-│   ├── client.py          ← LLM client factory, fallback targets
-│   ├── metadata.py       ← Context metadata: bot mention, reply signals
-│   └── tool_utils.py      ← Cross-provider tool-call extraction
-├── messaging/
-│   ├── processing.py    ← Burst building, payload normalization
-│   ├── filtering.py     ← Trigger check, prefix/trigger mode
-│   ├── actions.py        ← Parse action lines from LLM2 output
-│   ├── gateway.py       ← Send actions over WS to Node
-│   └── moderation.py     ← Permission checks, payload merge
-└── tools/
-    └── sticker.py        ← PIL-based sticker creation (text overlay, EXIF)
+python/
+├── wasocket/             ← make_wa_socket SDK (WS CLIENT)
+│   ├── socket.py          ← WaSocket class + make_wa_socket factory
+│   ├── transport.py       ← WSClientTransport: dial NODE_URL, reconnect, heartbeat
+│   ├── protocol.py / events.py     ← Frame dataclasses + WhatsAppMessage model
+│   └── correlation.py / errors.py  ← requestId correlation + error hierarchy
+└── bridge/
+    ├── main.py            ← Boot: load accounts, run one AgentSession per account
+    ├── accounts.py         ← Multi-account config loader
+    ├── config.py           ← Single config source (env reads, constants)
+    ├── session.py          ← AgentSession: composition root (wires agent/ collaborators)
+    ├── history.py          ← WhatsAppMessage dataclass, history formatting
+    ├── dashboard.py        ← Stats buffer + periodic flush
+    ├── stickers.py / sticker_db.py ← Sticker catalog + per-tenant sticker DB
+    ├── agent/              ← Injectable per-account collaborators
+    ├── db/                 ← Per-domain repositories over the per-tenant core
+    ├── media/              ← Media + sticker resolution
+    ├── llm/                ← LLM pipeline (llm1, llm2, schemas, prompt, client, ...)
+    ├── messaging/          ← Message processing pipeline
+    ├── tools/              ← Tool implementations (PIL sticker creation)
+    └── subagent/           ← Sub-agent integration
 ```

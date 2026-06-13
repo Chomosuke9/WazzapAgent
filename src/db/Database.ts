@@ -47,14 +47,6 @@ type RetryFn = <T>(fn: () => T) => T;
 // ---------------------------------------------------------------------------
 
 const SQLITE_BUSY_TIMEOUT_MS = parsePositiveIntEnv("DB_BUSY_TIMEOUT_MS", 30000);
-const SQLITE_OPERATION_RETRY_MAX = parsePositiveIntEnv(
-  "DB_OPERATION_RETRY_MAX",
-  8,
-);
-const SQLITE_OPERATION_RETRY_BASE_MS = parsePositiveIntEnv(
-  "DB_OPERATION_RETRY_BASE_MS",
-  50,
-);
 const SQLITE_RECOVERY_LOCK_STALE_MS = parsePositiveIntEnv(
   "DB_RECOVERY_LOCK_STALE_MS",
   120000,
@@ -74,14 +66,6 @@ const DB_CORRUPTION_TOKENS = [
   "file is not a database",
   "file is encrypted",
   "database corruption",
-];
-
-const DB_BUSY_TOKENS = [
-  "database is locked",
-  "database table is locked",
-  "database is busy",
-  "SQLITE_BUSY",
-  "SQLITE_LOCKED",
 ];
 
 function noop(..._args: unknown[]): void {}
@@ -236,24 +220,29 @@ function isDbCorruptionError(err: any): boolean {
   return DB_CORRUPTION_TOKENS.some((token) => msg.includes(token));
 }
 
-function isDbBusyError(err: any): boolean {
-  const msg = String(err?.message || err?.code || err || "").toLowerCase();
-  return DB_BUSY_TOKENS.some((token) => msg.includes(token.toLowerCase()));
-}
-
+/**
+ * Run a synchronous better-sqlite3 operation.
+ *
+ * better-sqlite3 is synchronous, so every call blocks the event loop for its
+ * duration. SQLite's own `busy_timeout` (set to {@link SQLITE_BUSY_TIMEOUT_MS}
+ * on every connection via both the constructor `timeout` and
+ * `PRAGMA busy_timeout`) is the canonical wait-for-lock mechanism: it parks on a
+ * contended lock and retries internally, only throwing `SQLITE_BUSY` once the
+ * timeout elapses.
+ *
+ * The previous implementation layered a manual exponential-backoff retry ON TOP
+ * of that — each attempt re-ran the operation (re-waiting the full
+ * busy_timeout) and slept between tries with `Atomics.wait`, which blocks the
+ * ENTIRE event loop (freezing every tenant and the WS heartbeats) for up to
+ * ~retries × busy_timeout. We now rely on busy_timeout alone: the worst-case
+ * block is a single timeout window, with no event-loop-blocking sleeps on the
+ * hot path. Operators who need a shorter freeze can lower `DB_BUSY_TIMEOUT_MS`.
+ *
+ * Kept as a single-call wrapper (rather than inlined) so the `RetryFn` seam and
+ * call sites stay unchanged.
+ */
 function retrySqliteOperation<T>(fn: () => T): T {
-  let attempt = 0;
-  while (true) {
-    try {
-      return fn();
-    } catch (err) {
-      if (!isDbBusyError(err) || attempt >= SQLITE_OPERATION_RETRY_MAX) {
-        throw err;
-      }
-      sleepSync(SQLITE_OPERATION_RETRY_BASE_MS * 2 ** attempt);
-      attempt += 1;
-    }
-  }
+  return fn();
 }
 
 function backupCorruptFile(dbPath: string): string | null {

@@ -8,21 +8,33 @@ Gateway dan bridge berkomunikasi melalui pesan JSON via WebSocket. Halaman ini m
 
 ## Koneksi
 
-1. Gateway connect ke bridge di URL yang dikonfigurasi (`LLM_WS_ENDPOINT`).
-2. Jika `LLM_WS_TOKEN` diset, gateway mengirim header `Authorization: Bearer <token>`.
-3. Setelah connect, gateway mengirim pesan `hello`:
+1. Python `WaSocket` (client) men-dial Node gateway (server) di `NODE_URL` (default `ws://localhost:3000`). Node mengikat WS server-nya ke `WS_BIND_HOST:WS_LISTEN_PORT` (default `127.0.0.1:3000`).
+2. Jika `LLM_WS_TOKEN` diset, client mengirim header `Authorization: Bearer <token>` (diverifikasi oleh Node).
+3. Setelah connect, client mengirim pesan `hello` berisi `folderPath` tenant-nya; Node membalas `hello_ack`:
 
 ```json
 {
   "type": "hello",
   "payload": {
-    "instanceId": "dev-gateway-1",
-    "role": "whatsapp-gateway"
+    "folderPath": "/tenants/acct-a",
+    "protocolVersion": "2.0"
   }
 }
 ```
 
-4. Jika koneksi putus, gateway auto-reconnect setelah `WS_RECONNECT_MS` (default 5 detik).
+```json
+{
+  "type": "hello_ack",
+  "payload": {
+    "folderPath": "/tenants/acct-a",
+    "waStatus": "open"
+  }
+}
+```
+
+4. Jika koneksi putus, client auto-reconnect dengan exponential backoff (`WS_RECONNECT_MS`, default 5 detik).
+
+Setelah handshake, **action** mengalir Python→Node, sedangkan **event, control event, dan ack** mengalir Node→Python. Setiap frame Node→Python membawa `folderPath` untuk routing tenant.
 
 ## Gateway → Bridge
 
@@ -306,9 +318,9 @@ JID asli tidak pernah dikirim ke LLM. Semua referensi user menggunakan `senderRe
 
 Untuk mengimplementasikan bridge kustom, Anda perlu:
 
-1. **WebSocket server** yang listen di endpoint yang dikonfigurasi.
+1. **WebSocket client** yang men-dial Node gateway (server) di `NODE_URL` dan mengirim `hello { folderPath }`, lalu menunggu `hello_ack`.
 2. **Handle `incoming_message`** — terima dan proses pesan.
-3. **Kirim command** — gunakan format di atas untuk mengirim aksi.
+3. **Kirim action** — gunakan format di atas untuk mengirim aksi (Python→Node).
 4. **Handle `action_ack`/`error`** — track status aksi.
 
-Contoh minimal ada di `examples/llm_ws_echo.py`.
+Cara termudah adalah memakai SDK `make_wa_socket` (`python/wasocket`).

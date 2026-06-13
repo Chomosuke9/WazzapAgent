@@ -44,7 +44,7 @@ def _isolate_db(tmp_path, monkeypatch):
     db_mod._subagent_enabled_cache.clear()
     db_mod._llm2_model_cache.clear()
     db_mod._mute_cache.clear()
-  db_mod._default_llm2_model_cache = None
+  db_mod._default_llm2_model_cache.clear()
   yield
 
 

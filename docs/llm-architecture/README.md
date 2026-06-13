@@ -16,8 +16,8 @@ Architecture documentation for **LLM / agent developers** who need to understand
 
 ## Key principles
 
-- **Two WS send modes**: `send()` for best-effort transient events (incoming messages); `sendReliable()` with a reconnect queue for critical state-sync events (model changes, history invalidation, settings updates).
-- **Three SQLite databases** (settings.db, stats.db, moderation.db) — each in WAL mode, kept separate to avoid locking contention between Node and Python.
+- **Two WS send modes** (Node→Python, via the account registry `src/server/accountRegistry.ts`): `sendToClient()` for best-effort transient events (incoming messages); `sendReliableToClient()` with a per-account reconnect queue for critical state-sync events (model changes, history invalidation, settings updates). The Node gateway is the WS **server**; each Python `WaSocket` client dials it at `NODE_URL`.
+- **Five per-tenant SQLite databases** (settings.db, stats.db, moderation.db, subagent.db, stickers.db) under `<folder_path>/db` — each in WAL mode, kept separate to avoid locking contention between Node and Python.
 - **LLM1/LLM2 pipeline**: LLM1 (router) decides whether to respond; LLM2 (responder) generates replies and tool calls. LLM1 is skipped in private chats and prefix mode.
 - **Sub-agent system**: external service for complex multi-step tasks, called via `execute_subtask` tool. Uses a persistent webhook server for async callbacks and supports correction re-dispatch and steering.
 - **Idle trigger**: probabilistic re-engagement — when messages since last bot reply reach a per-chat configurable range, the bot jumps in with probability `1/(max - count + 1)`.

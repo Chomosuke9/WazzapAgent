@@ -19,7 +19,7 @@ except ImportError:  # pragma: no cover - import-time guard
   aiohttp = None  # type: ignore
 
 from ..log import setup_logging
-from .config import SUBAGENT_WEBHOOK_PORT, subagent_webhook_max_body_bytes_raw
+from .config import SUBAGENT_WEBHOOK_PORT, subagent_webhook_host_env, subagent_webhook_max_body_bytes_raw
 from .tracker import SubTaskTracker
 
 logger = setup_logging()
@@ -91,9 +91,10 @@ class SubAgentWebhookServer:
     app.router.add_get("/health", self._handle_health)
     self._runner = web.AppRunner(app)
     await self._runner.setup()
-    self._site = web.TCPSite(self._runner, "0.0.0.0", self._port)
+    host = subagent_webhook_host_env()
+    self._site = web.TCPSite(self._runner, host, self._port)
     await self._site.start()
-    logger.info("SubAgent webhook server started on port %s", self._port)
+    logger.info("SubAgent webhook server started on %s:%s", host, self._port)
 
   async def start_persistent(self) -> None:
     """Start the webhook server and keep it alive indefinitely.

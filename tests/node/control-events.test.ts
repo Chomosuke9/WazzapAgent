@@ -13,7 +13,6 @@ const OWNER_JID = '15551234567@s.whatsapp.net';
 process.env.DATA_DIR = TMP_DATA_DIR;
 process.env.BOT_OWNER_JIDS = OWNER_JID;
 process.env.REQUIRE_ACTIVATION = 'false';
-process.env.LLM_WS_ENDPOINT = 'ws://127.0.0.1:1/ws';
 process.env.LOG_LEVEL = 'silent';
 
 import test from 'node:test';
@@ -138,7 +137,7 @@ test('control event emitted while the account is unbound is queued, then flushed
     assert.equal(handled, true);
 
     // No client bound + non-default account => both frames queued (not dropped,
-    // not sent through the default-account wsClient fallback).
+    // and not delivered to any other account's client).
     const entry = registry.get(folderC);
     assert.ok(entry, 'account C entry must exist');
     assert.equal(entry!.reliableQueue.length, 2, 'both control frames queued while unbound');

@@ -22,7 +22,7 @@
   "license": "ISC",
   "dependencies": {
     "axios": "^1.7.4",
-    "baileys": "7.0.0-rc11",
+    "baileys": "7.0.0-rc12",
     "better-sqlite3": "^12.9.0",
     "dotenv": "^16.4.5",
     "fluent-ffmpeg": "^2.1.3",
