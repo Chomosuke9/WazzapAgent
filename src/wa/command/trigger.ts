@@ -1,10 +1,12 @@
 import config from "../../config.js";
 import * as registry from "../../server/accountRegistry.js";
 import { VALID_TRIGGERS } from "../../db/repositories/SettingsRepository.js";
+import { parseConfigScope, scopeSuffix } from "./configScope.js";
 import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
 
 const TRIGGER_DESCRIPTIONS: Record<string, string> = {
   tag: "bot @mentioned",
+  tagall: "everyone tagged (@all)",
   reply: "replied to bot message",
   join: "new member joins group",
   name: "bot name mentioned in text",
@@ -70,15 +72,16 @@ async function handleTrigger({
   }
 
   const parts = args.trim().toLowerCase().split(/\s+/);
-  const isGlobal = parts[0] === "global";
-  const cleaned = isGlobal
+  const scope = parseConfigScope(parts[0]);
+  const isScoped = scope !== "chat";
+  const cleaned = isScoped
     ? parts.slice(1).join(" ")
     : args.trim().toLowerCase();
 
-  if (isGlobal && !senderIsOwner) {
+  if (isScoped && !senderIsOwner) {
     try {
       await sock.sendMessage(chatId, {
-        text: "Only bot owner can set global triggers.",
+        text: "Only bot owner can set global/default triggers.",
       });
     } catch (err) {
       /* ignore */
@@ -86,26 +89,27 @@ async function handleTrigger({
     return;
   }
 
-  if (cleaned === "all") {
-    if (isGlobal) {
-      repos!.settings.setGlobalTriggers(VALID_TRIGGERS);
-      registry.sendReliableToClient(folderPath, {
-        type: "invalidate_chat_settings",
-        folderPath,
-        chatId: "global",
-      });
+  const applyTriggers = (triggers: Set<string>): void => {
+    if (scope === "default") {
+      repos!.settings.setDefaultTriggers(triggers);
+    } else if (scope === "global") {
+      repos!.settings.setGlobalTriggers(triggers);
     } else {
-      repos!.settings.setTriggers(chatId, VALID_TRIGGERS);
-      registry.sendReliableToClient(folderPath, {
-        type: "invalidate_chat_settings",
-        folderPath,
-        chatId,
-      });
+      repos!.settings.setTriggers(chatId, triggers);
     }
+    registry.sendReliableToClient(folderPath, {
+      type: "invalidate_chat_settings",
+      folderPath,
+      chatId: isScoped ? "global" : chatId,
+    });
+  };
+
+  if (cleaned === "all") {
+    applyTriggers(VALID_TRIGGERS);
     try {
       await sock.sendMessage(chatId, {
         text:
-          `All triggers enabled${isGlobal ? " globally" : ""}: ` +
+          `All triggers enabled${scopeSuffix(scope)}: ` +
           [...VALID_TRIGGERS].sort().join(", "),
       });
     } catch (err) {
@@ -115,24 +119,10 @@ async function handleTrigger({
   }
 
   if (cleaned === "none") {
-    if (isGlobal) {
-      repos!.settings.setGlobalTriggers(new Set());
-      registry.sendReliableToClient(folderPath, {
-        type: "invalidate_chat_settings",
-        folderPath,
-        chatId: "global",
-      });
-    } else {
-      repos!.settings.setTriggers(chatId, new Set());
-      registry.sendReliableToClient(folderPath, {
-        type: "invalidate_chat_settings",
-        folderPath,
-        chatId,
-      });
-    }
+    applyTriggers(new Set());
     try {
       await sock.sendMessage(chatId, {
-        text: `All triggers disabled${isGlobal ? " globally" : ""}. Bot won't respond in prefix mode.`,
+        text: `All triggers disabled${scopeSuffix(scope)}. Bot won't respond in prefix mode.`,
       });
     } catch (err) {
       /* ignore */
@@ -164,21 +154,7 @@ async function handleTrigger({
   const newTriggers = new Set([...current, ...toggledOn]);
   for (const t of toggledOff) newTriggers.delete(t);
 
-  if (isGlobal) {
-    repos!.settings.setGlobalTriggers(newTriggers);
-    registry.sendReliableToClient(folderPath, {
-      type: "invalidate_chat_settings",
-      folderPath,
-      chatId: "global",
-    });
-  } else {
-    repos!.settings.setTriggers(chatId, newTriggers);
-    registry.sendReliableToClient(folderPath, {
-      type: "invalidate_chat_settings",
-      folderPath,
-      chatId,
-    });
-  }
+  applyTriggers(newTriggers);
 
   const statusLines = [...requested]
     .sort()

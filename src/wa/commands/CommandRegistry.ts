@@ -17,6 +17,7 @@
 import { unwrapMessage } from "../domain/messageParser.js";
 import config from "../../config.js";
 import { parseRawSlash } from "../command/parseCommand.js";
+import { isActivationRequired } from "../botConfig.js";
 import type { proto, WAMessage } from "baileys";
 import type { ParticipantRoleFlags, GroupContextValue } from "../domain/caches.js";
 import type { AccountContext } from "../../account/accountContext.js";
@@ -42,7 +43,6 @@ import { joinCommand } from "../command/join.js";
 import { stickerCommand } from "../command/sticker.js";
 import { addStickerCommand } from "../command/addsticker.js";
 import { removeStickerCommand } from "../command/removesticker.js";
-import { modelCommand } from "../command/model.js";
 import { modelcfgCommand } from "../command/modelcfg.js";
 import { settingCommand } from "../command/setting.js";
 import { groupStatusCommand } from "../command/groupStatus.js";
@@ -51,6 +51,7 @@ import { ownerContactCommand } from "../command/ownerContact.js";
 import { subagentCommand } from "../command/subagent.js";
 import { idleCommand } from "../command/idle.js";
 import { announcementCommand } from "../command/announcement.js";
+import { botConfCommand } from "../command/bot-conf.js";
 
 const ALL_COMMANDS: CommandHandler[] = [
   helpCommand,
@@ -71,7 +72,6 @@ const ALL_COMMANDS: CommandHandler[] = [
   stickerCommand,
   addStickerCommand,
   removeStickerCommand,
-  modelCommand,
   modelcfgCommand,
   settingCommand,
   groupStatusCommand,
@@ -80,6 +80,7 @@ const ALL_COMMANDS: CommandHandler[] = [
   subagentCommand,
   idleCommand,
   announcementCommand,
+  botConfCommand,
 ];
 
 /**
@@ -208,7 +209,7 @@ async function dispatchCommand(
   // The acting account's repositories (per-tenant DBs).
   const repos = context.repos ?? context.account?.repos;
 
-  if (config.requireActivation) {
+  if (isActivationRequired(repos)) {
     if (!ACTIVATION_EXEMPT_COMMANDS.has(command) && !senderIsOwner) {
       const activated = repos!.activation.isChatActivated(chatId);
       if (!activated) {

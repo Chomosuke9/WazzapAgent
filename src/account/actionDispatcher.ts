@@ -50,7 +50,11 @@ import {
   nextContextMsgId,
   rememberMessage,
   rememberSenderRef,
+  getIndexedMessageByContextId,
 } from '../wa/domain/identifiers.js';
+import { unwrapMessage } from '../wa/domain/messageParser.js';
+import { saveMedia } from '../mediaHandler.js';
+import { withTimeout } from '../wa/utils.js';
 import { renderOutboundMentions } from '../wa/outbound.js';
 import { getGroupContext } from '../wa/domain/groupContext.js';
 import { MAX_QUIZ_IDS } from '../wa/domain/caches.js';
@@ -184,6 +188,7 @@ export interface DispatchDeps {
   sendNativeFlow: typeof sendNativeFlow;
   sendCarousel: typeof sendCarousel;
   dispatchRunCommand: typeof dispatchRunCommand;
+  saveMedia: typeof saveMedia;
 }
 
 const DEFAULT_DEPS: DispatchDeps = {
@@ -198,6 +203,7 @@ const DEFAULT_DEPS: DispatchDeps = {
   sendNativeFlow,
   sendCarousel,
   dispatchRunCommand,
+  saveMedia,
 };
 
 // ---- router (verbatim behavior, parameterized by AccountEntry) ------------
@@ -457,6 +463,70 @@ const handleSendCopyCode: ActionHandler = async (entry, payload, requestId, deps
 };
 
 /**
+ * Lazy media (feature 8): download the bytes for a previously-forwarded
+ * attachment on demand. Inbound forwards attachment metadata WITHOUT
+ * downloading; the bridge calls this when it actually needs the file (vision /
+ * sticker / sub-agent). The original message proto is looked up from
+ * `ctx.messageCache` (by messageId, or via the contextMsgId index) and the
+ * media is fetched with `saveMedia`. If the proto has been evicted, replies
+ * `ok:false code:not_found` so the bridge degrades gracefully.
+ */
+const handleDownloadMedia: ActionHandler = async (entry, payload, requestId, deps) => {
+  const ctx = entry.ctx;
+  const { chatId, contextMsgId, messageId } = payload;
+  try {
+    let mid: string | null = (typeof messageId === 'string' && messageId) || null;
+    if (!mid && contextMsgId) {
+      const indexed = getIndexedMessageByContextId(ctx, chatId, contextMsgId);
+      mid = indexed?.id || null;
+    }
+    const cached = mid ? ctx.messageCache.get(mid) : null;
+    if (!cached || !cached.message) {
+      emitActionAck(entry, {
+        requestId,
+        action: 'download_media',
+        ok: false,
+        detail: 'media no longer available (message not cached)',
+        code: 'not_found',
+      });
+      return;
+    }
+    const { contentType, message: innerMessage } = unwrapMessage(cached.message);
+    const content = contentType && innerMessage ? (innerMessage as any)[contentType] : null;
+    if (!content) {
+      emitActionAck(entry, {
+        requestId,
+        action: 'download_media',
+        ok: false,
+        detail: 'no downloadable media in message',
+        code: 'not_found',
+      });
+      return;
+    }
+    const attachment = await deps.saveMedia(contentType, content, mid as string, withTimeout, ctx.mediaDir);
+    if (!attachment) {
+      emitActionAck(entry, {
+        requestId,
+        action: 'download_media',
+        ok: false,
+        detail: 'unsupported media type',
+        code: 'invalid_target',
+      });
+      return;
+    }
+    emitActionAck(entry, {
+      requestId,
+      action: 'download_media',
+      ok: true,
+      detail: 'downloaded',
+      result: { contextMsgId: contextMsgId ?? null, messageId: mid, ...attachment },
+    });
+  } catch (err) {
+    emitActionError(entry, { requestId, action: 'download_media', err });
+  }
+};
+
+/**
  * Action-type → handler map. Adding an action means adding one handler and one
  * entry here (no growing if/else chain). Mirrors the Step-06 command registry.
  */
@@ -473,6 +543,7 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
   send_buttons: handleSendButtons,
   send_carousel: handleSendCarousel,
   send_copy_code: handleSendCopyCode,
+  download_media: handleDownloadMedia,
 };
 
 /**

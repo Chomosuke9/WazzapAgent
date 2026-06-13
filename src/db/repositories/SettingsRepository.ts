@@ -12,6 +12,7 @@ import logger from "../../logger.js";
 import {
   DEFAULT_MODE,
   DEFAULT_TRIGGERS,
+  GLOBAL_CHAT_ID,
   initSettingsTables,
 } from "../schema/index.js";
 import { BaseRepository } from "./BaseRepository.js";
@@ -34,7 +35,7 @@ interface IdleTrigger {
 }
 
 export const VALID_MODES = new Set(["auto", "prefix", "hybrid"]);
-export const VALID_TRIGGERS = new Set(["tag", "reply", "join", "name"]);
+export const VALID_TRIGGERS = new Set(["tag", "tagall", "reply", "join", "name"]);
 
 export class SettingsRepository extends BaseRepository {
   getPrompt(chatId: string): string | null {
@@ -142,6 +143,36 @@ export class SettingsRepository extends BaseRepository {
     logger.info({ phoneNumber, displayName }, "DB set_owner_contact");
   }
 
+  // -------------------------------------------------------------------------
+  // Bot-wide owner-only config (bot_config key/value)
+  // -------------------------------------------------------------------------
+
+  getBotConfig(key: string): string | null {
+    const row = this.getOneFromState<{ value: string | null }>(
+      this.settingsState,
+      initSettingsTables,
+      "SELECT value FROM bot_config WHERE key = ?",
+      key,
+    );
+    return row?.value ?? null;
+  }
+
+  setBotConfig(key: string, value: string | null): void {
+    if (value === null) {
+      this.runSettingsQuery("DELETE FROM bot_config WHERE key = ?", key);
+      logger.info({ key }, "DB bot_config_clear");
+      return;
+    }
+    this.runSettingsQuery(
+      `INSERT INTO bot_config (key, value, updated_at)
+       VALUES (?, ?, datetime('now'))
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      key,
+      value,
+    );
+    logger.info({ key }, "DB bot_config_set");
+  }
+
   getSubagentEnabled(chatId: string): boolean {
     const row = this.getSettingRow(chatId);
     return row?.subagent_enabled === 1;
@@ -201,6 +232,99 @@ export class SettingsRepository extends BaseRepository {
       value,
     );
     logger.info({ enabled: value }, "DB set_global_subagent_enabled");
+  }
+
+  // -------------------------------------------------------------------------
+  // Default (fallback) setters — write ONLY the __global__ row.
+  //
+  // Semantics (feature 3): `default` changes the value used by chats that have
+  // NOT been touched yet (no per-chat row → reads fall back to __global__ via
+  // BaseRepository.getSettingRow). Chats with their own row keep their value.
+  // Contrast with the setGlobal* setters above, which overwrite EVERY row.
+  // -------------------------------------------------------------------------
+
+  private ensureGlobalRow(): void {
+    this.runSettingsQuery(
+      "INSERT OR IGNORE INTO chat_settings (chat_id) VALUES (?)",
+      GLOBAL_CHAT_ID,
+    );
+  }
+
+  setDefaultPrompt(prompt: string | null): void {
+    this.ensureGlobalRow();
+    this.runSettingsQuery(
+      "UPDATE chat_settings SET prompt = ?, updated_at = datetime('now') WHERE chat_id = ?",
+      prompt,
+      GLOBAL_CHAT_ID,
+    );
+    logger.info({ promptLen: prompt?.length || 0 }, "DB set_default_prompt");
+  }
+
+  setDefaultPermission(level: number | string): void {
+    const clamped = Math.max(0, Math.min(3, parseInt(level as string, 10) || 0));
+    this.ensureGlobalRow();
+    this.runSettingsQuery(
+      "UPDATE chat_settings SET permission = ?, updated_at = datetime('now') WHERE chat_id = ?",
+      clamped,
+      GLOBAL_CHAT_ID,
+    );
+    logger.info({ level: clamped }, "DB set_default_permission");
+  }
+
+  setDefaultMode(mode: string): void {
+    if (!VALID_MODES.has(mode)) mode = DEFAULT_MODE;
+    this.ensureGlobalRow();
+    this.runSettingsQuery(
+      "UPDATE chat_settings SET mode = ?, updated_at = datetime('now') WHERE chat_id = ?",
+      mode,
+      GLOBAL_CHAT_ID,
+    );
+    logger.info({ mode }, "DB set_default_mode");
+  }
+
+  setDefaultTriggers(triggers: Iterable<string>): void {
+    const valid = [...triggers].filter((t) => VALID_TRIGGERS.has(t));
+    const raw = valid.sort().join(",") || "";
+    this.ensureGlobalRow();
+    this.runSettingsQuery(
+      "UPDATE chat_settings SET triggers = ?, updated_at = datetime('now') WHERE chat_id = ?",
+      raw,
+      GLOBAL_CHAT_ID,
+    );
+    logger.info({ triggers: raw }, "DB set_default_triggers");
+  }
+
+  setDefaultIdleTrigger(min: number | null, max: number | null): void {
+    this.ensureGlobalRow();
+    this.runSettingsQuery(
+      "UPDATE chat_settings SET idle_trigger_min = ?, idle_trigger_max = ?, updated_at = datetime('now') WHERE chat_id = ?",
+      min,
+      max,
+      GLOBAL_CHAT_ID,
+    );
+    logger.info({ min, max }, "DB set_default_idle_trigger");
+  }
+
+  setDefaultAnnouncementEnabled(enabled: boolean): void {
+    const value = enabled ? 1 : 0;
+    this.ensureGlobalRow();
+    this.runSettingsQuery(
+      "UPDATE chat_settings SET announcement_enabled = ?, updated_at = datetime('now') WHERE chat_id = ?",
+      value,
+      GLOBAL_CHAT_ID,
+    );
+    logger.info({ enabled: value }, "DB set_default_announcement_enabled");
+  }
+
+  setDefaultSubagentEnabled(enabled: boolean): void {
+    const value = enabled ? 1 : 0;
+    this.ensureGlobalRow();
+    this.runSettingsQuery(
+      "UPDATE chat_settings SET subagent_enabled = ?, updated_at = datetime('now') WHERE chat_id = ?",
+      value,
+      GLOBAL_CHAT_ID,
+    );
+    logger.info({ enabled: value }, "DB set_default_subagent_enabled");
   }
 
   getIdleTrigger(chatId: string): IdleTrigger | null {

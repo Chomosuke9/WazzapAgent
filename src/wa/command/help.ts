@@ -17,11 +17,15 @@ const HELP_TEXT = `*WazzapAgents - Daftar Perintah*
 • \`/setting\` — Menu pengaturan interaktif
 • \`/prompt\` [teks] — Atur kepribadian bot
 • \`/reset\` — Hapus memori percakapan
-• \`/model\` — Pilih model AI
 • \`/mode\` [auto|prefix|hybrid] — Mode respon
-• \`/trigger\` [opsi] — Atur pemicu respon
+• \`/trigger\` [tag|tagall|reply|name|join] — Atur pemicu respon (_tagall_ = saat tag semua orang)
 • \`/idle\` [n|n-m|off] — Auto-trigger LLM2 setelah n pesan tanpa bicara
 • \`/group-status\` [text/media] — Kirim group status
+
+_Perintah konfigurasi di atas mendukung argumen \`global\` (semua chat) dan \`default\` (chat yang belum diatur sendiri), khusus owner. Contoh: \`/mode default auto\`._
+
+*Owner*
+• \`/bot-conf\` — Konfigurasi bot global (pesan aktivasi, prompt dasar, wajib-aktivasi)
 
 _Ketik perintah tanpa argumen untuk melihat status saat ini._
 

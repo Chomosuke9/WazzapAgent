@@ -1,5 +1,6 @@
 import config from "../../config.js";
 import * as registry from "../../server/accountRegistry.js";
+import { parseConfigScope, scopeSuffix } from "./configScope.js";
 import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
 
 async function handleAnnouncement({
@@ -43,7 +44,8 @@ async function handleAnnouncement({
           `Announcement broadcasts: *${current ? "ON" : "OFF"}*\n\n` +
           "_/announcement on_ — receive broadcasts in this group\n" +
           "_/announcement off_ — opt out of broadcasts in this group\n" +
-          "_/announcement global on/off_ — set default for all groups (owner only)",
+          "_/announcement global on/off_ — set default for all groups (owner only)\n" +
+          "_/announcement default on/off_ — set for groups that haven't set their own (owner only)",
       });
     } catch (err) {
       /* ignore */
@@ -52,13 +54,14 @@ async function handleAnnouncement({
   }
 
   const parts = args.trim().toLowerCase().split(/\s+/);
-  const isGlobal = parts[0] === "global";
-  const value = isGlobal ? parts[1] : parts[0];
+  const scope = parseConfigScope(parts[0]);
+  const isScoped = scope !== "chat";
+  const value = isScoped ? parts[1] : parts[0];
 
-  if (isGlobal && !senderIsOwner) {
+  if (isScoped && !senderIsOwner) {
     try {
       await sock.sendMessage(chatId, {
-        text: "Only bot owner can set global announcement.",
+        text: "Only bot owner can set global/default announcement.",
       });
     } catch (err) {
       /* ignore */
@@ -68,24 +71,21 @@ async function handleAnnouncement({
 
   if (value === "on" || value === "off") {
     const enabled = value === "on";
-    if (isGlobal) {
+    if (scope === "default") {
+      repos!.settings.setDefaultAnnouncementEnabled(enabled);
+    } else if (scope === "global") {
       repos!.settings.setGlobalAnnouncementEnabled(enabled);
-      registry.sendReliableToClient(folderPath, {
-        type: "invalidate_chat_settings",
-        folderPath,
-        chatId: "global",
-      });
     } else {
       repos!.settings.setAnnouncementEnabled(chatId, enabled);
-      registry.sendReliableToClient(folderPath, {
-        type: "invalidate_chat_settings",
-        folderPath,
-        chatId,
-      });
     }
+    registry.sendReliableToClient(folderPath, {
+      type: "invalidate_chat_settings",
+      folderPath,
+      chatId: isScoped ? "global" : chatId,
+    });
     try {
       await sock.sendMessage(chatId, {
-        text: `Announcement broadcasts ${enabled ? "enabled" : "disabled"}${isGlobal ? " globally" : ""}.`,
+        text: `Announcement broadcasts ${enabled ? "enabled" : "disabled"}${scopeSuffix(scope)}.`,
       });
     } catch (err) {
       /* ignore */
@@ -95,7 +95,7 @@ async function handleAnnouncement({
 
   try {
     await sock.sendMessage(chatId, {
-      text: "Usage: `/announcement on`, `/announcement off`, or `/announcement global on/off`",
+      text: "Usage: `/announcement on`, `/announcement off`, `/announcement global on/off`, or `/announcement default on/off`",
     });
   } catch (err) {
     /* ignore */

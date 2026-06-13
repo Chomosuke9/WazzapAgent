@@ -1,0 +1,81 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+process.env.REQUIRE_ACTIVATION = 'false';
+
+import { handleGenerate } from '../../src/wa/command/generate.js';
+
+function makeCtx(captured: any) {
+  const sock: any = {
+    user: { id: '123:1@s.whatsapp.net', name: 'TestBot' },
+    sendMessage: async (_jid: string, content: any) => {
+      captured.textMessages.push(content);
+      return { key: { id: 'm1' } };
+    },
+    relayMessage: async (_jid: string, message: any) => {
+      captured.relayed.push(message);
+    },
+  };
+  const repos: any = {
+    activation: {
+      generateActivationCode: (type: string, days: number) => {
+        captured.gen = { type, days };
+        return { code: 'WA-ABCD1234' };
+      },
+    },
+  };
+  return {
+    chatId: '12345@g.us',
+    chatType: 'group',
+    senderId: 'owner@s.whatsapp.net',
+    senderIsAdmin: true,
+    senderIsOwner: true,
+    botIsAdmin: true,
+    args: 'group 30',
+    text: 'group 30',
+    contextMsgId: null,
+    quotedMessageId: null,
+    senderDisplay: 'Owner',
+    senderRole: null,
+    isGroup: true,
+    fromMe: false,
+    group: null,
+    msg: {} as any,
+    folderPath: '/data',
+    sock,
+    repos,
+  } as any;
+}
+
+function findCopyCode(message: any): string | null {
+  const buttons = message?.viewOnceMessage?.message?.interactiveMessage?.nativeFlowMessage?.buttons;
+  if (!Array.isArray(buttons)) return null;
+  for (const b of buttons) {
+    if (b.name === 'cta_copy') {
+      try {
+        const params = JSON.parse(b.buttonParamsJson);
+        return params.copy_code ?? null;
+      } catch { return null; }
+    }
+  }
+  return null;
+}
+
+test('/generate sends a cta_copy button carrying "/activate <code>" (feature 4)', async () => {
+  const captured = { textMessages: [] as any[], relayed: [] as any[], gen: null as any };
+  await handleGenerate(makeCtx(captured));
+
+  assert.equal(captured.relayed.length, 1, 'should relay one interactive message');
+  const copyCode = findCopyCode(captured.relayed[0]);
+  assert.equal(copyCode, '/activate WA-ABCD1234');
+  assert.deepEqual(captured.gen, { type: 'group', days: 30 });
+});
+
+test('/generate rejects invalid type', async () => {
+  const captured = { textMessages: [] as any[], relayed: [] as any[], gen: null as any };
+  const ctx = makeCtx(captured);
+  ctx.args = 'bogus 10';
+  await handleGenerate(ctx);
+  assert.equal(captured.relayed.length, 0);
+  assert.ok(captured.textMessages.some((m) => /Tipe harus/i.test(m.text || '')));
+});

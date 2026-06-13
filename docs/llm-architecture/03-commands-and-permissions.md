@@ -251,10 +251,10 @@ Only the bot owner can use the `global` variant.
 | `/mode` | `/mode global auto\|prefix\|hybrid` | `src/wa/command/mode.ts` |
 | `/prompt` | `/prompt global <text>` / `/prompt global clear` | `src/wa/command/prompt.ts` |
 | `/permission` | `/permission global <0-3>` | `src/wa/command/permission.ts` |
-| `/idle` | `/idle global <min-max>` / `/idle global off` | `src/wa/command/idle.ts` |
-| `/subagent` | `/subagent global on\|off` | `src/wa/command/subagent.ts` |
-| `/model` | `/model global <modelId>` | `src/wa/command/model.ts` |
-| `/announcement` | `/announcement global on\|off` | `src/wa/command/announcement.ts` |
+| `/idle` | `/idle global <min-max>` / `/idle default ...` / `/idle global off` | `src/wa/command/idle.ts` |
+| `/subagent` | `/subagent global on\|off` / `/subagent default on\|off` | `src/wa/command/subagent.ts` |
+| `/bot-conf` | owner-only: `activation-msg`, `prompt-override`, `require-activation` | `src/wa/command/bot-conf.ts` |
+| `/announcement` | `/announcement global on\|off` / `/announcement default on\|off` | `src/wa/command/announcement.ts` |
 
 ## Command summary table
 

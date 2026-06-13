@@ -1,5 +1,6 @@
 import config from "../../config.js";
 import * as registry from "../../server/accountRegistry.js";
+import { parseConfigScope, scopeSuffix } from "./configScope.js";
 import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
 
 type TriggerRange = { min: number; max: number };
@@ -47,7 +48,8 @@ async function handleIdle({ chatId, senderIsOwner, senderIsAdmin, args, folderPa
           "_/idle 50_ — trigger after exactly 50 messages\n" +
           "_/idle 60-80_ — random trigger between 60-80 messages\n" +
           "_/idle off_ — disable idle trigger\n" +
-          "_/idle global <value>_ — set for all chats",
+          "_/idle global <value>_ — set for all chats\n" +
+          "_/idle default <value>_ — set for chats that haven't set their own",
       });
     } catch (err) {
       /* ignore */
@@ -56,13 +58,14 @@ async function handleIdle({ chatId, senderIsOwner, senderIsAdmin, args, folderPa
   }
 
   const parts = args.trim().toLowerCase().split(/\s+/);
-  const isGlobal = parts[0] === "global";
-  const value = isGlobal ? parts.slice(1).join(" ") : parts.join(" ");
+  const scope = parseConfigScope(parts[0]);
+  const isScoped = scope !== "chat";
+  const value = isScoped ? parts.slice(1).join(" ") : parts.join(" ");
 
-  if (isGlobal && !senderIsOwner) {
+  if (isScoped && !senderIsOwner) {
     try {
       await sock.sendMessage(chatId, {
-        text: "Only bot owner can use `/idle global`.",
+        text: "Only bot owner can use `/idle global` / `/idle default`.",
       });
     } catch (err) {
       /* ignore */
@@ -70,25 +73,26 @@ async function handleIdle({ chatId, senderIsOwner, senderIsAdmin, args, folderPa
     return;
   }
 
-  if (value === "off") {
-    if (isGlobal) {
-      repos!.settings.setGlobalIdleTrigger(null, null);
-      registry.sendReliableToClient(folderPath, {
-        type: "invalidate_chat_settings",
-        folderPath,
-        chatId: "global",
-      });
+  const applyIdle = (min: number | null, max: number | null): void => {
+    if (scope === "default") {
+      repos!.settings.setDefaultIdleTrigger(min, max);
+    } else if (scope === "global") {
+      repos!.settings.setGlobalIdleTrigger(min, max);
     } else {
-      repos!.settings.setIdleTrigger(chatId, null, null);
-      registry.sendReliableToClient(folderPath, {
-        type: "invalidate_chat_settings",
-        folderPath,
-        chatId,
-      });
+      repos!.settings.setIdleTrigger(chatId, min, max);
     }
+    registry.sendReliableToClient(folderPath, {
+      type: "invalidate_chat_settings",
+      folderPath,
+      chatId: isScoped ? "global" : chatId,
+    });
+  };
+
+  if (value === "off") {
+    applyIdle(null, null);
     try {
       await sock.sendMessage(chatId, {
-        text: `Idle trigger disabled${isGlobal ? " globally" : ""}.`,
+        text: `Idle trigger disabled${scopeSuffix(scope)}.`,
       });
     } catch (err) {
       /* ignore */
@@ -108,25 +112,11 @@ async function handleIdle({ chatId, senderIsOwner, senderIsAdmin, args, folderPa
     return;
   }
 
-  if (isGlobal) {
-    repos!.settings.setGlobalIdleTrigger(range.min, range.max);
-    registry.sendReliableToClient(folderPath, {
-      type: "invalidate_chat_settings",
-      folderPath,
-      chatId: "global",
-    });
-  } else {
-    repos!.settings.setIdleTrigger(chatId, range.min, range.max);
-    registry.sendReliableToClient(folderPath, {
-      type: "invalidate_chat_settings",
-      folderPath,
-      chatId,
-    });
-  }
+  applyIdle(range.min, range.max);
 
   try {
     await sock.sendMessage(chatId, {
-      text: `Idle trigger set${isGlobal ? " globally" : ""}: *${formatTrigger(range)}*`,
+      text: `Idle trigger set${scopeSuffix(scope)}: *${formatTrigger(range)}*`,
     });
   } catch (err) {
     /* ignore */

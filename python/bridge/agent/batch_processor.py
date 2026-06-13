@@ -50,6 +50,7 @@ from ..db import (
   invalidate_chat_caches as db_invalidate_chat_caches,
   get_subagent_enabled as db_get_subagent_enabled,
   is_chat_activated as db_is_chat_activated,
+  get_model_vision_support as db_get_model_vision_support,
 )
 from ..stickers import resolve_sticker
 from ..messaging.processing import (
@@ -104,6 +105,8 @@ from ..media import (
   _resolve_quoted_media_attachments,
   _resolve_sticker_media,
   _store_media_path,
+  materialize_visual_media,
+  llm1_media_enabled,
 )
 
 
@@ -626,6 +629,11 @@ class BatchProcessor:
     llm1_payload = dict(last_payload)
     llm1_payload.update(llm_context_metadata)
 
+    # Lazy media (feature 8): only when LLM1 vision input is explicitly enabled
+    # do we download the bytes for LLM1's routing decision (off by default).
+    if llm1_media_enabled():
+      await materialize_visual_media(session.sock, llm1_payload, session.media_paths_by_chat)
+
     # --- Dashboard: record messages processed ---
     for _dp in llm1_trigger_payloads:
       session._dashboard.record_stat(chat_id, "messages_processed")
@@ -1006,6 +1014,13 @@ class BatchProcessor:
 
     # Keep typing indicator alive while LLM2 generates (refreshes every 8s)
     llm2_started = time.perf_counter()
+    # Lazy media (feature 8): inbound forwarded attachment metadata only. Now
+    # that LLM2 is actually about to run, download the visual bytes ON DEMAND —
+    # and only when the active model has vision (otherwise build_visual_parts
+    # would not use them anyway). This is the single point where media is
+    # genuinely "needed".
+    if llm2_payload and db_get_model_vision_support(chat_id):
+      await materialize_visual_media(ws, llm2_payload, session.media_paths_by_chat)
     async with typing_indicator(ws, chat_id):
       _validate_llm2_result = session._llm2.make_validator(
         fallback_reply_to=fallback_reply_to,

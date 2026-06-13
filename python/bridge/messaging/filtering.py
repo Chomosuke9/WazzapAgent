@@ -43,6 +43,8 @@ def _message_matches_prefix(payload: dict, triggers: set[str]) -> bool:
     return False
   if "tag" in triggers and bool(payload.get("botMentioned")):
     return True
+  if "tagall" in triggers and bool(payload.get("taggedAll")):
+    return True
   if "reply" in triggers and bool(payload.get("repliedToBot")):
     return True
   if "join" in triggers:

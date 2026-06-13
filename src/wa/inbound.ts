@@ -42,21 +42,44 @@ import {
 import {
   unwrapMessage,
   extractMentionedJids,
+  extractNonJidMentions,
   extractLocationData,
   formatLocationText,
   extractText,
   extractQuoted,
 } from './domain/messageParser.js';
-import { saveMedia } from '../mediaHandler.js';
-import { withTimeout, escapeRegex } from './utils.js';
+import { buildAttachmentMetadata } from '../mediaHandler.js';
+import { escapeRegex } from './utils.js';
 import {
   resolveParticipantLabel,
   emitGroupJoinContextEvent,
   emitBotRoleChangeEvent,
 } from './events.js';
 import { parseSlashCommand } from './command/index.js';
+import { isActivationRequired, getActivationMessage } from './botConfig.js';
 import type { WhatsAppMessagePayload, AccountEntry } from '../protocol/types.js';
 import type { AccountContext } from '../account/accountContext.js';
+
+// Per-(account,chat) cooldown for the "not activated" notice (feature 1) so a
+// burst of tags can't flood the chat. Keyed by `${folderPath}:${chatId}`.
+const NOT_ACTIVATED_NOTICE_COOLDOWN_MS = 10 * 60 * 1000;
+const lastNotActivatedNotice = new Map<string, number>();
+
+function shouldNotifyNotActivated(folderPath: string, chatId: string): boolean {
+  const key = `${folderPath}:${chatId}`;
+  const now = Date.now();
+  const last = lastNotActivatedNotice.get(key) ?? 0;
+  if (now - last < NOT_ACTIVATED_NOTICE_COOLDOWN_MS) return false;
+  lastNotActivatedNotice.set(key, now);
+  // Bound the map so it can't grow unboundedly across many chats.
+  if (lastNotActivatedNotice.size > 5000) {
+    const cutoff = now - NOT_ACTIVATED_NOTICE_COOLDOWN_MS;
+    for (const [k, t] of lastNotActivatedNotice) {
+      if (t < cutoff) lastNotActivatedNotice.delete(k);
+    }
+  }
+  return true;
+}
 
 /** Resolved mention row as embedded in inbound payloads. */
 interface MentionedParticipant {
@@ -263,6 +286,11 @@ async function handleIncomingMessage(
     ))
   );
   const botMentioned = botMentionedByJid || botMentionedByText;
+  // Tag-everyone (@all) carries a nonJidMentions count rather than listing each
+  // participant JID, so it does NOT set botMentioned. Tracked separately so it
+  // can drive the `tagall` trigger (feature 2) and be excluded from the
+  // not-activated notification (feature 1).
+  const taggedAll = extractNonJidMentions(innerMessage) >= 1;
   const quotedSenderId = normalizeJid(quoted?.senderId) || quoted?.senderId || null;
   const repliedToBot = Boolean(quotedSenderId && botAliases.has(quotedSenderId));
   if (quoted && repliedToBot) {
@@ -291,15 +319,14 @@ async function handleIncomingMessage(
     'stickerMessage',
   ];
   if (mediaKinds.includes(contentType)) {
+    // Lazy media (feature 8): do NOT download here. Forward metadata only;
+    // the Python bridge issues a `download_media` action to fetch the bytes
+    // on demand (vision / sticker / sub-agent). Avoids downloading media that
+    // is never used.
     const mediaStartMs = Date.now();
-    try {
-      const mediaInfo = await saveMedia(contentType, content, msg.key.id, withTimeout, ctx.mediaDir);
-      if (mediaInfo) attachments.push(mediaInfo);
-    } catch (err) {
-      logger.error({ err }, 'failed saving media');
-    } finally {
-      perf.mediaMs = Date.now() - mediaStartMs;
-    }
+    const meta = buildAttachmentMetadata(contentType, content, msg.key.id);
+    if (meta) attachments.push(meta);
+    perf.mediaMs = Date.now() - mediaStartMs;
   }
 
   // Detect slash commands for context
@@ -313,22 +340,32 @@ async function handleIncomingMessage(
   const commandHandled = slashCommand ? true : false;
 
   // Activation gate: skip sending to Python if chat is not activated
-  if (config.requireActivation && !fromMe) {
+  if (isActivationRequired(ctx.repos) && !fromMe) {
     const isOwner = isOwnerJid(senderId);
     if (!isOwner) {
       const activated = ctx.repos!.activation.isChatActivated(chatId);
       if (!activated) {
-        const activation = ctx.repos!.activation.getChatActivation(chatId);
-        if (activation && activation.expiresAt) {
-          const now = new Date();
-          const expiry = new Date(activation.expiresAt);
-          if (expiry <= now && !activation.expiryNotified) {
-            try {
-              await sock.sendMessage(chatId, {
-                text: `Aktivasi sudah kadaluarsa. Gunakan /activate <kode> untuk memperpanjang.`,
-              });
-            } catch (e) { /* ignore */ }
-            ctx.repos!.activation.markExpiryNotified(chatId);
+        // Feature 1: when the bot is explicitly @-mentioned (but NOT via a
+        // tag-everyone, which would spam every group) in a chat that isn't
+        // activated, reply with the activation instructions — throttled per
+        // chat so repeated tags don't flood the chat.
+        if (botMentioned && !taggedAll && shouldNotifyNotActivated(entry.folderPath, chatId)) {
+          try {
+            await sock.sendMessage(chatId, { text: getActivationMessage(ctx.repos!) });
+          } catch (e) { /* ignore */ }
+        } else {
+          const activation = ctx.repos!.activation.getChatActivation(chatId);
+          if (activation && activation.expiresAt) {
+            const now = new Date();
+            const expiry = new Date(activation.expiresAt);
+            if (expiry <= now && !activation.expiryNotified) {
+              try {
+                await sock.sendMessage(chatId, {
+                  text: `Aktivasi sudah kadaluarsa. Gunakan /activate <kode> untuk memperpanjang.`,
+                });
+              } catch (e) { /* ignore */ }
+              ctx.repos!.activation.markExpiryNotified(chatId);
+            }
           }
         }
         return;
@@ -368,6 +405,7 @@ async function handleIncomingMessage(
     mentionedJids,
     mentionedParticipants: mentionedParticipants as WhatsAppMessagePayload['mentionedParticipants'],
     botMentioned,
+    taggedAll,
     repliedToBot,
     location,
     groupDescription: group?.description || null,
@@ -407,4 +445,5 @@ export {
   buildMentionedParticipants,
   handleGroupParticipantsUpdate,
   handleIncomingMessage,
+  shouldNotifyNotActivated,
 };

@@ -118,7 +118,7 @@ def _tenant_cache_key(chat_id: str) -> tuple[str, str]:
 
 VALID_MODES = {'auto', 'prefix', 'hybrid'}
 DEFAULT_MODE = 'prefix'
-VALID_TRIGGERS = {'tag', 'reply', 'join', 'name'}
+VALID_TRIGGERS = {'tag', 'tagall', 'reply', 'join', 'name'}
 DEFAULT_TRIGGERS = 'tag,reply,name'
 DEFAULT_SUBAGENT_ENABLED = False
 GLOBAL_CHAT_ID = '__global__'

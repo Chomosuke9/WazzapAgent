@@ -145,6 +145,14 @@ class RunCommandAction:
     context_msg_id: Optional[str] = None
 
 
+@dataclass(frozen=True)
+class DownloadMediaAction:
+    request_id: str
+    chat_id: str
+    context_msg_id: Optional[str] = None
+    message_id: Optional[str] = None
+
+
 # ---- events Python RECEIVES ----
 @dataclass(frozen=True)
 class WhatsAppStatusEvent:
@@ -240,6 +248,7 @@ _FRAME_TABLE: tuple[tuple[type, str, bool], ...] = (
     (SendButtonsAction, "send_buttons", False),
     (SendCarouselAction, "send_carousel", False),
     (RunCommandAction, "run_command", False),
+    (DownloadMediaAction, "download_media", False),
     # acks / errors (Node -> Python)
     (AckResult, "action_ack", False),
     (ErrorResult, "error", False),

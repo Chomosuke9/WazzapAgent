@@ -142,6 +142,7 @@ export interface WhatsAppMessagePayload {
   mentionedJids?: string[] | null;                      // Optional
   mentionedParticipants?: { jid: string; senderRef: string; name: string; isBot: boolean }[] | null; // Optional
   botMentioned?: boolean;                               // Optional
+  taggedAll?: boolean;                                  // Optional — true when message tags everyone (@all / nonJidMentions)
   repliedToBot?: boolean;                               // Optional
   location?: {
     degreesLatitude: number;

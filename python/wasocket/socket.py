@@ -491,6 +491,31 @@ class WaSocket:
             frame, rid, caller_supplied=request_id is not None
         )
 
+    async def download_media(
+        self,
+        chat_id: str,
+        *,
+        context_msg_id: Optional[str] = None,
+        message_id: Optional[str] = None,
+        request_id: Optional[str] = None,
+    ) -> dict:
+        """Fetch the media bytes for a previously-forwarded attachment on demand
+        (feature 8 lazy media). The gateway re-downloads from its cached message
+        proto and returns the attachment ActionResult (``{path, mime, kind,
+        fileName, ...}``). Identify the message by ``context_msg_id`` or
+        ``message_id``. Raises ``NotFoundError`` (proto evicted / no media),
+        ``InvalidTargetError`` or ``TimeoutError``."""
+        rid = request_id if request_id is not None else make_request_id("dl")
+        frame = protocol.DownloadMediaAction(
+            request_id=rid,
+            chat_id=chat_id,
+            context_msg_id=context_msg_id,
+            message_id=message_id,
+        )
+        return await self._dispatch_action(
+            frame, rid, caller_supplied=request_id is not None
+        )
+
     # ------------------------------------------------------------------ #
     # Internal: await-ack plumbing
     # ------------------------------------------------------------------ #

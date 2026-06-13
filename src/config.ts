@@ -90,6 +90,7 @@ export interface Config {
   stickerPackName: string;
   stickerEmoji: string;
   requireActivation: boolean;
+  subagentEnabledDefault: boolean;
 }
 
 const config: Config = {
@@ -131,6 +132,10 @@ const config: Config = {
   stickerPackName: process.env.STICKER_PACK_NAME || 'WazzapAgents',
   stickerEmoji: process.env.STICKER_EMOJI || '🤖',
   requireActivation: process.env.REQUIRE_ACTIVATION === 'true',
+  // Default sub-agent enablement for chats that haven't set their own value.
+  // Seeded into the per-tenant __global__ settings row on first boot (see
+  // openAccountPersistence); runtime /subagent default on|off overrides it.
+  subagentEnabledDefault: process.env.SUBAGENT_ENABLED_DEFAULT === 'true',
 };
 
 // Startup validation for required transport vars. Defaults exist

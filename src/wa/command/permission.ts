@@ -1,5 +1,6 @@
 import config from "../../config.js";
 import * as registry from "../../server/accountRegistry.js";
+import { parseConfigScope, scopeSuffix } from "./configScope.js";
 import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
 
 const PERMISSION_LABELS: Record<number, string> = {
@@ -51,7 +52,8 @@ async function handlePermission({
         text:
           `Current permission level: ${label}\n\n` +
           "Usage: `/permission` 0, 1, 2, or 3.\n" +
-          "Global usage: `/permission global` 0, 1, 2, or 3",
+          "Global usage: `/permission global` 0-3 (all chats)\n" +
+          "Default usage: `/permission default` 0-3 (chats that haven't set their own)",
       });
     } catch (err) {
       /* ignore */
@@ -60,14 +62,15 @@ async function handlePermission({
   }
 
   const parts = args.trim().toLowerCase().split(/\s+/);
-  const isGlobal = parts[0] === "global";
-  const levelStr = isGlobal ? parts[1] : parts[0];
+  const scope = parseConfigScope(parts[0]);
+  const isScoped = scope !== "chat";
+  const levelStr = isScoped ? parts[1] : parts[0];
   const level = parseInt(levelStr, 10);
 
   if (isNaN(level)) {
     try {
       await sock.sendMessage(chatId, {
-        text: "Usage: `/permission` 0, 1, 2, or 3. Use `/permission global` <level> to set for all chats.",
+        text: "Usage: `/permission` 0, 1, 2, or 3. Use `/permission global` <level> for all chats, `/permission default` <level> for untouched chats.",
       });
     } catch (err) {
       /* ignore */
@@ -86,7 +89,7 @@ async function handlePermission({
     return;
   }
 
-  if (level > 0 && !botIsAdmin && !isGlobal) {
+  if (level > 0 && !botIsAdmin && !isScoped) {
     try {
       await sock.sendMessage(chatId, {
         text: "Bot must be an admin to enable moderation (permission 1-3). Promote the bot first, then try again.",
@@ -97,18 +100,22 @@ async function handlePermission({
     return;
   }
 
-  if (isGlobal) {
+  if (isScoped) {
     if (!senderIsOwner) {
       try {
         await sock.sendMessage(chatId, {
-          text: "Only bot owner can set global permission.",
+          text: "Only bot owner can set global/default permission.",
         });
       } catch (err) {
         /* ignore */
       }
       return;
     }
-    repos!.settings.setGlobalPermission(level);
+    if (scope === "default") {
+      repos!.settings.setDefaultPermission(level);
+    } else {
+      repos!.settings.setGlobalPermission(level);
+    }
     registry.sendReliableToClient(folderPath, {
       type: "invalidate_chat_settings",
       folderPath,
@@ -126,7 +133,7 @@ async function handlePermission({
   const label = PERMISSION_LABELS[level] || String(level);
   try {
     await sock.sendMessage(chatId, {
-      text: `Permission updated${isGlobal ? " globally" : ""}: ${label}`,
+      text: `Permission updated${scopeSuffix(scope)}: ${label}`,
     });
   } catch (err) {
     /* ignore */

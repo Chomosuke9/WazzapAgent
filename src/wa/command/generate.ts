@@ -1,4 +1,5 @@
 import logger from '../../logger.js';
+import { sendCopyCode } from '../interactive/index.js';
 import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
 
 async function handleGenerate({ chatId, senderId, args, sock, repos }: CommandContext): Promise<void> {
@@ -31,19 +32,39 @@ async function handleGenerate({ chatId, senderId, args, sock, repos }: CommandCo
     return;
   }
 
+  let code: string;
   try {
     const result = repos!.activation.generateActivationCode(type, days, senderId);
-    const typeLabel = type === 'all' ? 'semua (private & grup)' : (type === 'group' ? 'grup' : 'private');
-    const durationLabel = days === 0 ? 'Permanen' : `${days} hari`;
-
-    await sock.sendMessage(chatId, {
-      text: `Kode aktivasi berhasil dibuat!\nTipe: ${typeLabel}\nMasa aktif: ${durationLabel}\nDibuat oleh: owner`,
-    });
-    await sock.sendMessage(chatId, { text: result.code });
+    code = result.code;
   } catch (err) {
     logger.error({ err }, 'failed generating activation code');
     try {
       await sock.sendMessage(chatId, { text: 'Gagal membuat kode aktivasi.' });
+    } catch (e) { /* ignore */ }
+    return;
+  }
+
+  const botName = sock.user?.name?.trim() || 'bot ini';
+  const typeLabel = type === 'all' ? 'semua (private & grup)' : (type === 'group' ? 'grup' : 'private');
+  const durationLabel = days === 0 ? 'Permanen' : `${days} hari`;
+  const activateCommand = `/activate ${code}`;
+
+  const body =
+    `*Kode aktivasi berhasil dibuat!*\n` +
+    `Tipe: ${typeLabel}\n` +
+    `Masa aktif: ${durationLabel}\n\n` +
+    `Salin kodenya dengan menekan tombol di bawah, lalu kirim ke grup tempat ${botName} ingin diaktifkan (atau ke chat pribadi ${botName}).`;
+
+  try {
+    await sendCopyCode(sock, chatId, body, activateCommand, 'Salin Kode', {
+      footer: durationLabel === 'Permanen' ? 'Aktivasi permanen' : `Berlaku ${durationLabel}`,
+    });
+  } catch (err) {
+    logger.warn({ err, chatId }, 'failed sending /generate cta_copy, falling back to text');
+    try {
+      await sock.sendMessage(chatId, {
+        text: `${body}\n\n${activateCommand}`,
+      });
     } catch (e) { /* ignore */ }
   }
 }

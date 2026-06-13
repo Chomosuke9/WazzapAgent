@@ -151,8 +151,10 @@ src/                          Node.js gateway runtime (WS SERVER, TypeScript)
       info.ts                 /info — Show bot info
       join.ts                 /join <link> — Join group via invite link
       mode.ts                 /mode <auto|prefix|hybrid> — Set chat response mode
-      model.ts                /model <name> — Set per-chat LLM2 model
       modelcfg.ts             /modelcfg — Configure default model config
+      botConfig.ts (../)      Owner bot-wide config helpers (activation msg, require-activation)
+      bot-conf.ts             /bot-conf — Owner-only bot-wide config (activation-msg, prompt-override, require-activation)
+      configScope.ts          Shared global|default scope parsing for config commands
       monitor.ts              /monitor — Show dashboard monitor (owner only)
       ownerContact.ts         /owner-contact — Show bot owner contact info
       permission.ts           /permission <level> — Set moderation permission level
@@ -163,7 +165,7 @@ src/                          Node.js gateway runtime (WS SERVER, TypeScript)
       setting.ts              /setting — Show/edit per-chat settings
       sticker.ts              /sticker [upper#lower] — Create meme sticker (ffmpeg/sharp)
       subagent.ts             /subagent <on|off> — Toggle sub-agent per chat
-      trigger.ts              /trigger <type> — Set prefix triggers (tag, reply, name, join)
+      trigger.ts              /trigger <type> — Set prefix triggers (tag, tagall, reply, name, join)
     interactive/              Interactive message modules (NativeFlow)
       index.ts                Barrel re-export + sendCopyCode
       sendInteractive.ts      Quick reply, CTA URL, copy, call, combined buttons, list, native flow, rich message (sendRichMessage)
@@ -256,7 +258,7 @@ CONTRACT.md  README.md  AGENTS.md  REFACTOR_PLAN.md  steps/
 | **route** | Not a formal concept in this codebase. When you see "routing" it refers to LLM1's decision of whether to respond. |
 | **context window** | The rolling history of messages passed to the LLM (capped by `HISTORY_LIMIT`, default 20). |
 | **interactive message** | A WhatsApp NativeFlow message (buttons, carousels, lists). Requires special protobuf wrapping and binary XML nodes. |
-| **action** | A command from Python to Node via WS: `send_message`, `react_message`, `delete_message`, `kick_member`, `mark_read`, `send_presence`, `send_buttons`, `send_carousel`, `run_command`, `send_quiz`, `send_copy_code`, `relay_lottie_sticker`. |
+| **action** | A command from Python to Node via WS: `send_message`, `react_message`, `delete_message`, `kick_member`, `mark_read`, `send_presence`, `send_buttons`, `send_carousel`, `run_command`, `send_quiz`, `send_copy_code`, `relay_lottie_sticker`, `download_media`. |
 | **action_ack** | Node's confirmation response to an action, containing `{ requestId, action, ok, detail, result?, code? }`. |
 | **sub-agent** | External service (WazzapSubAgents) that handles complex multi-step tasks delegated via `execute_subtask` tool. Uses a persistent webhook server for callbacks. |
 | **idle trigger** | Probabilistic trigger based on message count since last bot reply. Configured per-chat via `/idle <min>-<max>`. Bot re-engages with probability `1/(max - count + 1)`. |
@@ -398,6 +400,7 @@ Node→Python frame carries `folderPath` for tenant routing.
 | `relay_lottie_sticker` | Relay Lottie sticker from stored JSON: `{chatId, lottiePayload, replyTo?}` |
 | `send_buttons` | Generic NativeFlow buttons (legacy): `{chatId, text, buttons[], footer?}` |
 | `send_carousel` | Swipeable carousel cards: `{chatId, cards[], text?}` |
+| `download_media` | Lazy media (feature 8): fetch attachment bytes on demand for a previously-forwarded message: `{chatId, contextMsgId? | messageId?}` → `action_ack.result` carries `{path, mime, kind, fileName, ...}` (or `not_found` if the source proto was evicted). Inbound forwards attachment metadata only (`path:null, pending:true`); the bridge calls this when it actually needs the bytes (vision / sticker / sub-agent). |
 
 ### Node → Python (responses)
 

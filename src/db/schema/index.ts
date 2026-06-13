@@ -145,6 +145,18 @@ function initSettingsTables(db: SqliteDb): void {
     )
   `);
 
+  // Bot-wide owner-only configuration (key/value). Holds knobs that are not
+  // per-chat settings: e.g. `activation_msg` (the "not activated" notice text)
+  // and `require_activation` (runtime override of the env default). Configured
+  // via the owner-only /bot-conf command.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS bot_config (
+      key        TEXT PRIMARY KEY,
+      value      TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
   db.run(`
     CREATE TABLE IF NOT EXISTS activation_codes (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,

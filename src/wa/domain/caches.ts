@@ -79,7 +79,11 @@ export interface GroupMetadataCacheEntry {
   value: GroupContextValue;
 }
 
-const MAX_CACHE = 400;
+// Max cached WhatsApp message protos per account (keyed by messageId). This is
+// also the re-download source for lazy media (feature 8 download_media), so it
+// is kept generous to reduce the chance the proto is evicted before Python
+// asks for the media bytes.
+const MAX_CACHE = 1000;
 const MAX_KEY_INDEX = 12_000;
 const GROUP_METADATA_TTL_MS = 60_000;
 const GROUP_JOIN_DEDUP_TTL_MS = 15_000;

@@ -97,6 +97,19 @@ function extractMentionedJids(message: proto.IMessage | null | undefined): strin
   return Array.from(new Set(mentions));
 }
 
+/**
+ * Read the `nonJidMentions` count from the message contextInfo. WhatsApp's
+ * "tag everyone" / `@all` does not list each participant JID in `mentionedJid`;
+ * instead it sets a `nonJidMentions` count. A value >= 1 marks the message as a
+ * tag-all (feature 2), distinct from an individual `@`-mention.
+ */
+function extractNonJidMentions(message: proto.IMessage | null | undefined): number {
+  const ctx = extractContextInfo(message);
+  const raw = (ctx as { nonJidMentions?: unknown } | null | undefined)?.nonJidMentions;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 function parseVcardPhones(vcard: string | null | undefined): string[] {
   if (!vcard) return [];
   const lines = vcard.split(/\r?\n/);
@@ -307,6 +320,7 @@ export {
   unwrapMessage,
   extractContextInfo,
   extractMentionedJids,
+  extractNonJidMentions,
   parseVcardPhones,
   extractContactPlaceholder,
   extractLocationData,

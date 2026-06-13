@@ -556,6 +556,29 @@ Relay a stored Lottie (animated premium) sticker using its original JSON payload
 
 ---
 
+#### `download_media`
+
+Lazy media (feature 8): fetch the bytes for a previously-forwarded attachment on demand. Inbound `incoming_message` payloads forward attachment **metadata only** (`path: null`, `pending: true`) — no download happens up front. The bridge issues this action when it actually needs the file (vision input, sticker creation, sub-agent), identifying the message by `contextMsgId` or `messageId`.
+
+```json
+{
+  "type": "download_media",
+  "payload": {
+    "requestId": "req-dl-001",
+    "chatId": "12345@g.us",
+    "contextMsgId": "000125"
+  }
+}
+```
+
+**Notes:**
+- Provide either `contextMsgId` or `messageId` to identify the source message.
+- On success the `action_ack.result` carries the downloaded attachment: `{ path, mime, kind, fileName, originalFileName, jpegThumbnail, size, isAnimated, contextMsgId, messageId }`.
+- If the gateway has already evicted the source message proto from its bounded cache, it replies `action_ack` with `ok: false, code: "not_found"` and the bridge degrades gracefully (the attachment is skipped).
+- The gateway re-downloads from the cached Baileys message proto via `saveMedia`.
+
+---
+
 #### `run_command`
 
 Silently execute a slash command on the gateway without posting the command text to the WhatsApp chat. The gateway returns an `action_ack` with the canonical command name so the bridge can log a synthetic result.
@@ -587,7 +610,7 @@ The gateway sends acknowledgements for every action command. The Python bridge s
 
 #### `action_ack`
 
-Standard acknowledgement for most action commands. Every action type (`send_message`, `react_message`, `delete_message`, `kick_member`, `send_quiz`, `send_buttons`, `send_carousel`, `send_copy_code`, `relay_lottie_sticker`, `run_command`, etc.) produces one. **Exceptions:** `mark_read` and `send_presence` do **not** emit an `action_ack` — they return silently.
+Standard acknowledgement for most action commands. Every action type (`send_message`, `react_message`, `delete_message`, `kick_member`, `send_quiz`, `send_buttons`, `send_carousel`, `send_copy_code`, `relay_lottie_sticker`, `run_command`, `download_media`, etc.) produces one. **Exceptions:** `mark_read` and `send_presence` do **not** emit an `action_ack` — they return silently.
 
 ```json
 {
@@ -679,7 +702,7 @@ can assert tenant ownership.
 | `hello_ack` | Node → Python | `{ folderPath, waStatus }` | Account's Baileys socket created/resumed + client bound. |
 | `whatsapp_status` | Node → Python | `{ folderPath, status, reason?, instanceId }` | WhatsApp connection state change. `reason` is a `DisconnectReason` on `"close"`. |
 | `clear_history` | Node → Python | `{ folderPath, chatId \| "global" }` (top-level) | After `/reset`. |
-| `set_llm2_model` | Node → Python | `{ folderPath, chatId \| "global", modelId }` (top-level) | After `/model`. |
+| `set_llm2_model` | Node → Python | `{ folderPath, chatId \| "global", modelId }` (top-level) | After model selection via `/setting`. |
 | `invalidate_llm2_model` | Node → Python | `{ folderPath, chatId \| "global" }` (top-level) | After model config change. |
 | `invalidate_default_model` | Node → Python | `{ folderPath }` (top-level) | After `/modelcfg`. |
 | `invalidate_chat_settings` | Node → Python | `{ folderPath, chatId \| "global" }` (top-level) | After `/mode`, `/prompt`, `/permission`, `/trigger`, `/idle`, `/announcement`. |

@@ -1,5 +1,6 @@
 import config from "../../config.js";
 import * as registry from "../../server/accountRegistry.js";
+import { parseConfigScope, scopeSuffix } from "./configScope.js";
 import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
 
 const PROMPT_MAX_CHARS = 4000;
@@ -40,7 +41,7 @@ async function handlePrompt({
     } else {
       try {
         await sock.sendMessage(chatId, {
-          text: "No custom prompt set for this chat. Use `/prompt` <text> to set one.\nUse `/prompt global <text>` to set for all chats.",
+          text: "No custom prompt set for this chat. Use `/prompt` <text> to set one.\nUse `/prompt global <text>` for all chats, or `/prompt default <text>` for chats that haven't set their own.",
         });
       } catch (err) {
         /* ignore */
@@ -50,13 +51,14 @@ async function handlePrompt({
   }
 
   const parts = args.trim().split(/\s+/);
-  const isGlobal = parts[0].toLowerCase() === "global";
-  const newArgs = isGlobal ? args.trim().slice(7).trim() : args.trim();
+  const scope = parseConfigScope(parts[0].toLowerCase());
+  const isScoped = scope !== "chat";
+  const newArgs = isScoped ? args.trim().replace(/^\S+\s*/, "").trim() : args.trim();
 
-  if (isGlobal && !senderIsOwner) {
+  if (isScoped && !senderIsOwner) {
     try {
       await sock.sendMessage(chatId, {
-        text: "Only bot owner can set global prompt.",
+        text: "Only bot owner can set global/default prompt.",
       });
     } catch (err) {
       /* ignore */
@@ -64,40 +66,41 @@ async function handlePrompt({
     return;
   }
 
-  if (isGlobal && !newArgs) {
+  if (isScoped && !newArgs) {
     try {
       await sock.sendMessage(chatId, {
-        text: "Usage: `/prompt global <text>`",
+        text: `Usage: \`/prompt ${scope} <text>\``,
       });
     } catch (err) {
       /* ignore */
     }
     return;
   }
+
+  const applyPrompt = (value: string | null): void => {
+    if (scope === "default") {
+      repos!.settings.setDefaultPrompt(value);
+    } else if (scope === "global") {
+      repos!.settings.setGlobalPrompt(value);
+    } else {
+      repos!.settings.setPrompt(chatId, value);
+    }
+    registry.sendReliableToClient(folderPath, {
+      type: "invalidate_chat_settings",
+      folderPath,
+      chatId: isScoped ? "global" : chatId,
+    });
+  };
 
   if (
     newArgs.toLowerCase() === "-" ||
     newArgs.toLowerCase() === "clear" ||
     newArgs.toLowerCase() === "reset"
   ) {
-    if (isGlobal) {
-      repos!.settings.setGlobalPrompt(null);
-      registry.sendReliableToClient(folderPath, {
-        type: "invalidate_chat_settings",
-        folderPath,
-        chatId: "global",
-      });
-    } else {
-      repos!.settings.setPrompt(chatId, null);
-      registry.sendReliableToClient(folderPath, {
-        type: "invalidate_chat_settings",
-        folderPath,
-        chatId,
-      });
-    }
+    applyPrompt(null);
     try {
       await sock.sendMessage(chatId, {
-        text: `Custom prompt cleared${isGlobal ? " globally" : ""}. Bot will use the default.`,
+        text: `Custom prompt cleared${scopeSuffix(scope)}. Bot will use the default.`,
       });
     } catch (err) {
       /* ignore */
@@ -116,27 +119,13 @@ async function handlePrompt({
     return;
   }
 
-  if (isGlobal) {
-    repos!.settings.setGlobalPrompt(newArgs);
-    registry.sendReliableToClient(folderPath, {
-      type: "invalidate_chat_settings",
-      folderPath,
-      chatId: "global",
-    });
-  } else {
-    repos!.settings.setPrompt(chatId, newArgs);
-    registry.sendReliableToClient(folderPath, {
-      type: "invalidate_chat_settings",
-      folderPath,
-      chatId,
-    });
-  }
+  applyPrompt(newArgs);
 
   const preview =
     newArgs.length > 200 ? newArgs.slice(0, 197) + "..." : newArgs;
   try {
     await sock.sendMessage(chatId, {
-      text: `Prompt updated${isGlobal ? " globally" : ""}:\n${preview}`,
+      text: `Prompt updated${scopeSuffix(scope)}:\n${preview}`,
     });
   } catch (err) {
     /* ignore */

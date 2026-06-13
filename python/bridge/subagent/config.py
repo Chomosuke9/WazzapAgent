@@ -23,10 +23,12 @@ SUBAGENT_SUBMIT_RETRY_MAX_BACKOFF = _parse_positive_float(
 )
 SUBAGENT_HTTP_TIMEOUT = _parse_positive_float(os.getenv("SUBAGENT_HTTP_TIMEOUT"), 30.0)
 
-# Whether the execute_subtask tool is enabled by default for new chats.
-# Can be overridden per-chat via DB (the /subagent command toggles the
-# database row, which takes precedence over this default).
-SUBAGENT_ENABLED_DEFAULT = os.getenv("SUBAGENT_ENABLED_DEFAULT", "false").lower() == "true"
+# NOTE: SUBAGENT_ENABLED_DEFAULT is consumed by the Node gateway
+# (src/config.ts -> openAccountPersistence), which seeds the per-tenant
+# __global__ settings row ONCE on first boot. The bridge then reads the
+# effective default from that row via get_subagent_enabled() (the __global__
+# fallback). It is intentionally NOT read here — a bridge-side constant would
+# never reach the DB fallback and silently do nothing.
 
 # Maximum time (in seconds) to wait for the sub-agent to call back via the
 # always-on webhook server. The webhook server auto-restarts on crash so

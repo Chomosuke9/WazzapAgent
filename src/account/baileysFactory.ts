@@ -196,6 +196,23 @@ export function openAccountPersistence(entry: AccountEntry, dbDir: string): void
   database.open();
   entry.database = database;
   entry.repos = createRepositories(database);
+  seedSubagentDefault(entry.repos);
+}
+
+// One-time seed of the per-tenant default sub-agent enablement from
+// SUBAGENT_ENABLED_DEFAULT. The effective default for an untouched chat is the
+// __global__ settings row (subagent_enabled, SQL-default 0), so the env had no
+// effect before this. We seed it ONCE (guarded by a bot_config marker) and only
+// ever turn it ON — never off — so an explicit `/subagent default on` (or the
+// legacy `/subagent global on`) is never clobbered. Runtime
+// `/subagent default on|off` overrides it afterwards.
+export function seedSubagentDefault(repos: ReturnType<typeof createRepositories>): void {
+  const SEED_MARKER = "subagent_default_seeded";
+  if (repos.settings.getBotConfig(SEED_MARKER) !== null) return;
+  if (config.subagentEnabledDefault && !repos.settings.getSubagentEnabled("__global__")) {
+    repos.settings.setDefaultSubagentEnabled(true);
+  }
+  repos.settings.setBotConfig(SEED_MARKER, "1");
 }
 
 /**

@@ -1,6 +1,7 @@
 import config from "../../config.js";
 import * as registry from "../../server/accountRegistry.js";
 import { VALID_MODES } from "../../db/repositories/SettingsRepository.js";
+import { parseConfigScope, scopeSuffix } from "./configScope.js";
 import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
 
 async function handleMode({
@@ -50,7 +51,8 @@ async function handleMode({
           "_auto_ = LLM1 decides when to respond\n" +
           "_prefix_ = only responds when tagged, replied, or name mentioned\n" +
           "_hybrid_ = checks prefix triggers first, falls back to auto (LLM1). If a prefix trigger arrives while LLM1 is running, LLM1 is cancelled and bot responds immediately\n\n" +
-          "_/mode global <mode>_ = set mode for all chats",
+          "_/mode global <mode>_ = set mode for all chats\n" +
+          "_/mode default <mode>_ = set mode for chats that haven't set their own",
       });
     } catch (err) {
       /* ignore */
@@ -59,8 +61,9 @@ async function handleMode({
   }
 
   const parts = args.trim().toLowerCase().split(/\s+/);
-  const isGlobal = parts[0] === "global";
-  const mode = isGlobal ? parts[1] : parts[0];
+  const scope = parseConfigScope(parts[0]);
+  const isScoped = scope !== "chat";
+  const mode = isScoped ? parts[1] : parts[0];
 
   if (!mode || !VALID_MODES.has(mode)) {
     try {
@@ -73,18 +76,22 @@ async function handleMode({
     return;
   }
 
-  if (isGlobal) {
+  if (isScoped) {
     if (!senderIsOwner) {
       try {
         await sock.sendMessage(chatId, {
-          text: "Only bot owner can set global mode.",
+          text: "Only bot owner can set global/default mode.",
         });
       } catch (err) {
         /* ignore */
       }
       return;
     }
-    repos!.settings.setGlobalMode(mode);
+    if (scope === "default") {
+      repos!.settings.setDefaultMode(mode);
+    } else {
+      repos!.settings.setGlobalMode(mode);
+    }
     registry.sendReliableToClient(folderPath, {
       type: "invalidate_chat_settings",
       folderPath,
@@ -101,7 +108,7 @@ async function handleMode({
 
   try {
     await sock.sendMessage(chatId, {
-      text: `Mode updated${isGlobal ? " globally" : ""}: *${mode}*`,
+      text: `Mode updated${scopeSuffix(scope)}: *${mode}*`,
     });
   } catch (err) {
     /* ignore */

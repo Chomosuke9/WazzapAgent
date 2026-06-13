@@ -218,3 +218,57 @@ def _append_sticker_log_to_history(
     text=log_text,
     role="assistant",
   ))
+
+
+# Visual attachment kinds that genuinely need the file bytes for vision input.
+# Documents are excluded: their inline ``jpegThumbnail`` is enough for a preview.
+_VISUAL_DOWNLOAD_KINDS = {"image", "sticker"}
+
+
+async def materialize_visual_media(sock, payload: dict, media_paths_by_chat: dict) -> None:
+  """Lazy media (feature 8): download visual attachments that have no local
+  ``path`` yet, mutating the payload's attachment dicts in place.
+
+  Inbound now forwards attachment metadata WITHOUT downloading (``path: None``,
+  ``pending: True``); this fetches the bytes ON DEMAND — only when the bot is
+  actually about to feed them to a vision model. The resolved paths are
+  re-recorded via :func:`_store_media_path` so a later quoted-image reuse /
+  sticker / sub-agent lookup finds the file. Failures (e.g. the gateway evicted
+  the source proto) degrade gracefully: the attachment simply keeps no path and
+  ``build_visual_parts`` skips it with a note.
+  """
+  atts = payload.get("attachments") or []
+  if not atts or sock is None:
+    return
+  chat_id = payload.get("chatId")
+  ctx_id = payload.get("contextMsgId")
+  message_id = payload.get("messageId")
+  if not chat_id:
+    return
+  changed = False
+  for att in atts:
+    if not isinstance(att, dict):
+      continue
+    if att.get("path"):
+      continue
+    kind = str(att.get("kind") or "").lower()
+    if kind not in _VISUAL_DOWNLOAD_KINDS:
+      continue
+    try:
+      result = await sock.download_media(
+        chat_id, context_msg_id=ctx_id, message_id=message_id
+      )
+    except Exception as err:  # NotFoundError / TimeoutError / etc.
+      logger.info(
+        "materialize_visual_media: download failed ctx=%s: %s",
+        ctx_id, err, extra={"chat_id": chat_id},
+      )
+      continue
+    path = result.get("path") if isinstance(result, dict) else None
+    if path:
+      att["path"] = path
+      if isinstance(result, dict) and result.get("mime") and not att.get("mime"):
+        att["mime"] = result["mime"]
+      changed = True
+  if changed and ctx_id:
+    _store_media_path(media_paths_by_chat, payload)

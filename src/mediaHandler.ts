@@ -250,6 +250,68 @@ function mapMediaKind(contentType: string | null | undefined): MediaKindOrUnknow
   return 'unknown';
 }
 
+/**
+ * Extract the JPEG thumbnail (document/image preview) as a base64 string, if
+ * present. Baileys decodes the proto `bytes` field as a Buffer/Uint8Array.
+ */
+function extractJpegThumbnail(content: any): string | null {
+  const raw = content?.jpegThumbnail;
+  if (!raw) return null;
+  if (typeof raw === 'string' && raw.length > 0) return raw;
+  if ((Buffer.isBuffer(raw) || ArrayBuffer.isView(raw)) && (raw as Uint8Array).length > 0) {
+    return Buffer.from(raw as Uint8Array).toString('base64');
+  }
+  return null;
+}
+
+/**
+ * Inbound attachment metadata WITHOUT downloading the media bytes (feature 8).
+ *
+ * The gateway forwards this to the Python bridge so it knows an attachment
+ * exists (kind/mime/name/thumbnail) without paying the download cost up front.
+ * `path` is deliberately `null`: when the bridge actually needs the bytes
+ * (vision, sticker creation, sub-agent) it issues a `download_media` action and
+ * Node downloads on demand. `pending: true` marks it as not-yet-downloaded.
+ *
+ * Document `jpegThumbnail` is included so the bridge can render a document
+ * preview to the LLM with no download at all.
+ */
+export interface PendingAttachment {
+  kind: MediaKind;
+  mime: string;
+  fileName: string;
+  originalFileName: string | null;
+  jpegThumbnail: string | null;
+  size: number;
+  isAnimated: boolean;
+  path: null;
+  pending: true;
+}
+
+function buildAttachmentMetadata(
+  contentType: string | null | undefined,
+  content: any,
+  messageId: string,
+): PendingAttachment | null {
+  const kind = mapMediaKind(contentType);
+  if (kind === 'unknown') return null;
+  const declaredMime = normalizeMime(content?.mimetype);
+  const mime = declaredMime || (kind === 'sticker' ? 'image/webp' : 'application/octet-stream');
+  const ext = inferExtension(mime);
+  const sizeRaw = Number(content?.fileLength);
+  return {
+    kind,
+    mime,
+    fileName: `${messageId}_${kind}.${ext}`,
+    originalFileName: content?.fileName || null,
+    jpegThumbnail: extractJpegThumbnail(content),
+    size: Number.isFinite(sizeRaw) && sizeRaw > 0 ? sizeRaw : 0,
+    isAnimated: Boolean(content?.isAnimated),
+    path: null,
+    pending: true,
+  };
+}
+
 async function saveMedia(
   contentType: string | null | undefined,
   content: any,
@@ -270,19 +332,8 @@ async function saveMedia(
   // Falls back to null for media types that don't carry a fileName.
   const originalFileName: string | null = content?.fileName || null;
 
-  // Preserve the JPEG thumbnail for document previews.  Baileys decodes
-  // the proto ``bytes`` field as a Buffer or Uint8Array; convert to
-  // base64 for JSON-safe transport to the Python bridge.
-  const rawThumbnail = content?.jpegThumbnail;
-  let jpegThumbnail: string | null = null;
-  if (rawThumbnail) {
-    if (typeof rawThumbnail === 'string' && rawThumbnail.length > 0) {
-      // Already base64 (unlikely from Baileys, but defensive).
-      jpegThumbnail = rawThumbnail;
-    } else if ((Buffer.isBuffer(rawThumbnail) || ArrayBuffer.isView(rawThumbnail)) && (rawThumbnail as Uint8Array).length > 0) {
-      jpegThumbnail = Buffer.from(rawThumbnail as Uint8Array).toString('base64');
-    }
-  }
+  // Preserve the JPEG thumbnail for document previews (base64 for JSON transport).
+  const jpegThumbnail: string | null = extractJpegThumbnail(content);
 
   let size: number;
   try {
@@ -333,4 +384,6 @@ export {
   downloadMediaToFile,
   mapMediaKind,
   saveMedia,
+  buildAttachmentMetadata,
+  extractJpegThumbnail,
 };
