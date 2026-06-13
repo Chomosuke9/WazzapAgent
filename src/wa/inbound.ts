@@ -369,7 +369,7 @@ async function handleIncomingMessage(
     mentionedParticipants: mentionedParticipants as WhatsAppMessagePayload['mentionedParticipants'],
     botMentioned,
     repliedToBot,
-    location: location as unknown as WhatsAppMessagePayload['location'],
+    location,
     groupDescription: group?.description || null,
     slashCommand: slashCommand || null,
     commandHandled,

@@ -143,7 +143,15 @@ export interface WhatsAppMessagePayload {
   mentionedParticipants?: { jid: string; senderRef: string; name: string; isBot: boolean }[] | null; // Optional
   botMentioned?: boolean;                               // Optional
   repliedToBot?: boolean;                               // Optional
-  location?: { degreesLatitude: number; degreesLongitude: number } | null; // Optional
+  location?: {
+    degreesLatitude: number;
+    degreesLongitude: number;
+    accuracy?: number | null;
+    caption?: string | null;
+    name?: string | null;
+    address?: string | null;
+    isLive: boolean;
+  } | null;                                             // Optional
   groupDescription?: string | null;                    // Optional
   slashCommand?: { command: string; args: string } | null; // Optional
   commandHandled?: boolean;                             // Optional

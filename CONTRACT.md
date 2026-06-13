@@ -344,7 +344,12 @@ Example: `send-1715097600000-000042`.
 
 ## 4. WaSocket Python Interface
 
-`make_wa_socket(folder_path: str) -> WaSocket`
+`make_wa_socket(folder_path: str, *, ack_timeout: float = 30.0, **transport_options) -> WaSocket`
+
+`ack_timeout` (default 30s) and `transport_options` (e.g. `base_ms`, `max_ms`,
+`jitter_ratio`, `heartbeat_interval_ms`, `headers`) are additive knobs forwarded
+to the underlying `WSClientTransport`. The minimal contract signature remains
+`make_wa_socket(folder_path) -> WaSocket`.
 
 ```python
 class WaSocket:
@@ -382,28 +387,42 @@ class WaSocket:
     # Each awaits the matching action_ack and returns its `result` dict,
     # or raises a WaSocketError subclass (Section 2) on an `error` frame /
     # ack with ok=False, or `timeout` on ack-wait expiry.
+    #
+    # Every awaiting action also accepts an optional keyword-only seam
+    # `request_id: str | None = None`: when omitted (the default) the SDK
+    # allocates a request_id (Section 3) and returns the `result` dict; when the
+    # caller supplies one, the SDK uses it on the wire and returns `None` (the
+    # caller correlates the ack itself). The fire-and-forget methods
+    # (`send_presence`, `mark_read`) take no `request_id`.
 
     async def send_message(self, destination: str, text: str | None = None, *,
                            reply_to: str | None = None,
                            attachments: list[dict] | None = None,
-                           mentions: list[str] | None = None) -> dict: ...
+                           request_id: str | None = None) -> dict: ...
         # returns ActionResult.send_message; raises NotFoundError (bad reply_to),
-        # SendFailedError, InvalidTargetError, TimeoutError
+        # SendFailedError, InvalidTargetError, TimeoutError.
+        # NOTE: mentions are written inline in `text` as "@Name (senderRef)" —
+        # there is NO `mentions` parameter and no `mentions` wire field.
 
     async def send_quiz(self, destination: str, question: str,
                         choices: list[dict], *,
                         reply_to: str | None = None,
-                        footer: str | None = None) -> dict: ...
+                        footer: str | None = None,
+                        request_id: str | None = None) -> dict: ...
         # raises SendFailedError, InvalidTargetError, TimeoutError
 
-    async def react(self, destination: str, msg_id: str, emoji: str) -> dict: ...
+    async def react(self, destination: str, msg_id: str, emoji: str, *,
+                    request_id: str | None = None) -> dict: ...
         # msg_id is a contextMsgId; raises NotFoundError, SendFailedError, TimeoutError
 
-    async def delete_message(self, destination: str, msg_id: str) -> dict: ...
+    async def delete_message(self, destination: str, msg_id: str, *,
+                             request_id: str | None = None) -> dict: ...
         # raises NotFoundError, PermissionDeniedError, SendFailedError, TimeoutError
 
     async def kick(self, group_id: str, members: list[dict], *,
-                   mode: str = "partial_success") -> dict: ...
+                   mode: str = "partial_success",
+                   auto_reply_anchor: bool = False,
+                   request_id: str | None = None) -> dict: ...
         # members: [{"senderRef": str, "anchorContextMsgId": str}, ...]
         # raises NotGroupError, PermissionDeniedError, InvalidTargetError,
         # SendFailedError, TimeoutError
@@ -416,24 +435,39 @@ class WaSocket:
         # FIRE-AND-FORGET, no ack
 
     async def send_buttons(self, destination: str, body: str,
-                           buttons: list[dict], *, reply_to: str | None = None) -> dict: ...
-        # raises SendFailedError, TimeoutError
+                           buttons: list[dict], *,
+                           footer: str | None = None,
+                           request_id: str | None = None) -> dict: ...
+        # NOTE: the wire `send_buttons` payload has no `replyTo`, so there is no
+        # `reply_to` parameter. raises SendFailedError, TimeoutError
 
     async def send_carousel(self, destination: str, cards: list[dict], *,
-                            body: str | None = None) -> dict: ...
+                            body: str | None = None,
+                            request_id: str | None = None) -> dict: ...
         # raises SendFailedError, TimeoutError
 
     async def send_copy_code(self, destination: str, code: str, *,
-                             reply_to: str | None = None) -> dict: ...
+                             display_text: str = "Copy Code",
+                             reply_to: str | None = None,
+                             quoted_preview_text: str | None = None,
+                             request_id: str | None = None) -> dict: ...
         # raises SendFailedError, TimeoutError
 
+    async def relay_lottie_sticker(self, destination: str, lottie_payload: str, *,
+                                   reply_to: str | None = None,
+                                   request_id: str | None = None) -> dict: ...
+        # relays a stored Lottie/premium sticker by its raw JSON payload,
+        # preserving the animation; raises SendFailedError, TimeoutError
+
     async def send_sticker(self, destination: str, path: str, *,
-                           reply_to: str | None = None) -> dict: ...
+                           reply_to: str | None = None,
+                           request_id: str | None = None) -> dict: ...
         # builds a send_message frame with a sticker attachment;
         # raises SendFailedError, TimeoutError
 
     async def run_command(self, chat_id: str, command: str, *,
-                          context_msg_id: str | None = None) -> dict: ...
+                          context_msg_id: str | None = None,
+                          request_id: str | None = None) -> dict: ...
         # returns ActionResult.run_command; raises InvalidTargetError, TimeoutError
 ```
 
@@ -736,7 +770,7 @@ the Node side by `WhatsAppMessagePayload` in `src/protocol/types.ts`.
 | `senderRef` | `str` | Always | Short 6-char LLM-friendly reference (e.g. `u8k2d1`). |
 | `senderName` | `str` | Always | Sender display name. |
 | `senderIsAdmin` | `bool` | Always | Sender is a group admin (or superadmin). |
-| `senderIsSuperAdmin` | `bool` | Always | Sender is a WhatsApp community super-admin. |
+| `senderIsSuperAdmin` | `bool` | Always* | Sender is a WhatsApp community super-admin. *Omitted on synthetic events (`actionLog`/`groupParticipantsUpdate`/`botRoleChange`). |
 | `senderIsOwner` | `bool` | Optional | Sender is a bot owner (from `BOT_OWNER_JIDS`). |
 | `isGroup` | `bool` | Always | Whether the chat is a group. |
 | `botIsAdmin` | `bool` | Always | Bot has admin role in the group. |
@@ -747,13 +781,13 @@ the Node side by `WhatsAppMessagePayload` in `src/protocol/types.ts`.
 | `timestampMs` | `int` | Always | Unix timestamp in ms. |
 | `messageType` | `str` | Always | WhatsApp type, or synthetic `actionLog`/`groupParticipantsUpdate`/`botRoleChange`. |
 | `text` | `str \| None` | Optional | Message text content. |
-| `quoted` | `object \| None` | Optional | `{ messageId, contextMsgId, senderId, senderRef?, text, type, fromMe?, senderIsAdmin?, senderIsSuperAdmin?, mentionedParticipants? }`. |
+| `quoted` | `object \| None` | Optional | `{ messageId, contextMsgId, senderId, senderRef?, senderName?, text, type, fromMe?, senderIsAdmin?, senderIsSuperAdmin?, mentionedJids?, mentionedParticipants?, location? }`. Inner string fields (`contextMsgId`/`senderId`/`text`/`type`/`senderRef`) may be `null`. |
 | `attachments` | `Attachment[]` | Always (may be `[]`) | Media: `{ kind, mime, fileName, originalFileName?, size, path, isAnimated?, jpegThumbnail? }`. |
 | `mentionedJids` | `str[] \| None` | Optional | Raw JIDs of mentioned participants. |
 | `mentionedParticipants` | `{ jid, senderRef, name, isBot }[] \| None` | Optional | Resolved mentions (prefer over `mentionedJids`). |
 | `botMentioned` | `bool` | Optional | Bot was `@`-mentioned. |
 | `repliedToBot` | `bool` | Optional | Message is a direct reply to a bot message. |
-| `location` | `{ degreesLatitude, degreesLongitude } \| None` | Optional | Location data. |
+| `location` | `{ degreesLatitude, degreesLongitude, accuracy?, caption?, name?, address?, isLive } \| None` | Optional | Location/pin data — static `locationMessage` or `isLive=true` for a `liveLocationMessage`. |
 | `groupDescription` | `str \| None` | Optional | Group description text for context. |
 | `slashCommand` | `{ command: str, args: str } \| None` | Optional | Parsed slash command. |
 | `commandHandled` | `bool` | Optional | Slash command already processed by Node. |

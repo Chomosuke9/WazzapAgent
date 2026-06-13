@@ -28,8 +28,8 @@ interface UnwrappedMessage {
  * Normalized location payload extracted from a live or static location message.
  */
 interface LocationData {
-  latitude: number;
-  longitude: number;
+  degreesLatitude: number;
+  degreesLongitude: number;
   accuracy?: number | null;
   caption?: string | null;
   name?: string | null;
@@ -132,8 +132,8 @@ function extractLocationData(message: proto.IMessage | null | undefined): Locati
   const live = message.liveLocationMessage;
   if (live?.degreesLatitude != null && live?.degreesLongitude != null) {
     return {
-      latitude: Number(live.degreesLatitude),
-      longitude: Number(live.degreesLongitude),
+      degreesLatitude: Number(live.degreesLatitude),
+      degreesLongitude: Number(live.degreesLongitude),
       accuracy: live.accuracyInMeters,
       caption: live.caption,
       isLive: true,
@@ -142,8 +142,8 @@ function extractLocationData(message: proto.IMessage | null | undefined): Locati
   const location = message.locationMessage;
   if (location?.degreesLatitude != null && location?.degreesLongitude != null) {
     return {
-      latitude: Number(location.degreesLatitude),
-      longitude: Number(location.degreesLongitude),
+      degreesLatitude: Number(location.degreesLatitude),
+      degreesLongitude: Number(location.degreesLongitude),
       accuracy: location.accuracyInMeters,
       name: location.name,
       address: location.address,
@@ -158,8 +158,8 @@ function formatLocationText(loc: LocationData): string {
   const parts: string[] = [];
   if (loc.name) parts.push(loc.name);
   if (loc.address && loc.address !== loc.name) parts.push(loc.address);
-  const coords = Number.isFinite(loc.latitude) && Number.isFinite(loc.longitude)
-    ? `${loc.latitude.toFixed(5)}, ${loc.longitude.toFixed(5)}`
+  const coords = Number.isFinite(loc.degreesLatitude) && Number.isFinite(loc.degreesLongitude)
+    ? `${loc.degreesLatitude.toFixed(5)}, ${loc.degreesLongitude.toFixed(5)}`
     : null;
   if (coords) parts.push(coords);
   if (loc.caption) parts.push(loc.caption);
