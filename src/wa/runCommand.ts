@@ -19,8 +19,8 @@
  * self-trigger would have looked under the old two-reply protocol.
  */
 import logger from '../logger.js';
-import { parseSlashCommand } from './command/index.js';
-import { dispatchCommand } from './commands/CommandRegistry.js';
+import { parseSlashCommand } from './commands/index.js';
+import { dispatchCommand } from './command/CommandRegistry.js';
 import { roleFlagsForJid } from './domain/participants.js';
 import {
   getCachedGroupMetadata,

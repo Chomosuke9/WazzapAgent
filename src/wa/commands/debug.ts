@@ -1,8 +1,7 @@
 import logger from '../../logger.js';
-import { isOwnerJid } from '../domain/participants.js';
 import type { WaSocketLike } from '../../protocol/ports.js';
 import { sendNativeFlow, sendCarousel, sendRichMessage, sendList, sendCombinedButtons } from '../interactive/index.js';
-import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
+import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 
 // ---------------------------------------------------------------------------
 // /debug command
@@ -227,17 +226,7 @@ async function sendDebugCarouselImg(sock: WaSocketLike, chatId: string, imageUrl
   ], { text: `[DEBUG] carousel + image header (${url})` });
 }
 
-async function handleDebugCommand({ chatId, senderId, args, sock }: CommandContext): Promise<void> {
-  if (!isOwnerJid(senderId)) {
-    logger.info({ senderId, chatId }, '/debug rejected: not owner');
-    try {
-      await sock.sendMessage(chatId, { text: 'Only bot owners can use `/debug`.' });
-    } catch (err) {
-      logger.warn({ err }, 'failed sending debug rejection');
-    }
-    return;
-  }
-
+async function handleDebugCommand({ chatId, args, sock }: CommandContext): Promise<void> {
   const [subTypeRaw = '', ...restParts] = (args || '').trim().split(/\s+/);
   const subType = subTypeRaw.toLowerCase();
   const extraArg = restParts.join(' ').trim();
@@ -296,4 +285,10 @@ async function handleDebugCommand({ chatId, senderId, args, sock }: CommandConte
 
 export { handleDebugCommand };
 
-export const debugCommand: CommandHandler = { name: "debug", aliases: ["debugs"], run: handleDebugCommand };
+export const debugCommand: CommandHandler = {
+  commands: ["debug", "debugs"],
+  description: "Tampilkan info debug teknis untuk chat ini.",
+  isHidden: true,
+  permission: "isOwner",
+  run: (_sock, _message, ctx) => handleDebugCommand(ctx),
+};

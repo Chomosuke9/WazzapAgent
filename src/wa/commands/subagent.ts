@@ -2,7 +2,7 @@ import config from "../../config.js";
 import * as registry from "../../server/accountRegistry.js";
 import type { AccountRepositories } from "../../db/repositories/index.js";
 import { parseConfigScope, scopeSuffix, type ConfigScope } from "./configScope.js";
-import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
+import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 
 async function applyAndNotify(repos: AccountRepositories, folderPath: string, scope: ConfigScope, chatId: string, enabled: boolean): Promise<void> {
   // Persist + notify the Python bridge so its in-process cache
@@ -28,18 +28,7 @@ async function applyAndNotify(repos: AccountRepositories, folderPath: string, sc
   });
 }
 
-async function handleSubagent({ chatId, senderIsOwner, args, folderPath = config.dataDir, sock, repos }: CommandContext): Promise<void> {
-
-  if (!senderIsOwner) {
-    try {
-      await sock.sendMessage(chatId, {
-        text: "Only bot owner can use `/subagent`.",
-      });
-    } catch (err) {
-      /* ignore */
-    }
-    return;
-  }
+async function handleSubagent({ chatId, args, folderPath = config.dataDir, sock, repos }: CommandContext): Promise<void> {
 
   if (!args) {
     const current = repos!.settings.getSubagentEnabled(chatId);
@@ -88,4 +77,9 @@ async function handleSubagent({ chatId, senderIsOwner, args, folderPath = config
 
 export { handleSubagent };
 
-export const subagentCommand: CommandHandler = { name: "subagent", aliases: ["subagents"], run: handleSubagent };
+export const subagentCommand: CommandHandler = {
+  commands: ["subagent", "subagents"],
+  description: "Aktifkan atau nonaktifkan sub-agent untuk chat ini. Sub-agent memungkinkan bot mendelegasikan tugas kompleks ke layanan eksternal (WazzapSubAgents). Perlu SUBAGENT_URL dikonfigurasi. Contoh: /subagent on.",
+  permission: "isOwner",
+  run: (_sock, _message, ctx) => handleSubagent(ctx),
+};

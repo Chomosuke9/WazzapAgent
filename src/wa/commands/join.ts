@@ -1,5 +1,5 @@
 import logger from "../../logger.js";
-import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
+import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 
 // ---------------------------------------------------------------------------
 // /join command — join a group via invite link
@@ -98,4 +98,9 @@ async function handleJoinCommand({ chatId, senderId, args, sock }: CommandContex
 
 export { handleJoinCommand, joinErrorMessage };
 
-export const joinCommand: CommandHandler = { name: "join", aliases: ["joins"], run: handleJoinCommand };
+export const joinCommand: CommandHandler = {
+  commands: ["join", "joins"],
+  description: "Perintahkan bot untuk bergabung ke grup WhatsApp menggunakan link undangan. Bot akan join atas namanya sendiri. Contoh: /join https://chat.whatsapp.com/AbCdEfGhIjK.",
+  permission: "public",
+  run: (_sock, _message, ctx) => handleJoinCommand(ctx),
+};

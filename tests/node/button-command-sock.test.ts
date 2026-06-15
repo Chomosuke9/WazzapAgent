@@ -24,11 +24,21 @@ process.env.BOT_OWNER_JIDS = OWNER_JID;
 process.env.REQUIRE_ACTIVATION = 'false';
 process.env.LOG_LEVEL = 'silent';
 
-import test from 'node:test';
+import test, { before } from 'node:test';
 import assert from 'node:assert/strict';
 
 const { handleButtonResponse } = await import('../../src/wa/connection.ts');
 const { createAccountContext } = await import('../../src/account/accountContext.ts');
+
+// The command registry is populated asynchronously via auto-discovery; the
+// gateway does this in bootstrap() before serving. Dispatching here (a button
+// tap of `/help`) requires the registry to be initialised first.
+before(async () => {
+  const { initCommandRegistry } = await import(
+    '../../src/wa/command/CommandRegistry.ts'
+  );
+  await initCommandRegistry();
+});
 
 /** Minimal fake Baileys socket that records every sendMessage call. */
 function makeSock() {

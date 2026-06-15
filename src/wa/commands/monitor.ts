@@ -1,6 +1,6 @@
 import logger from '../../logger.js';
 import { getCachedGroupMetadata } from '../domain/groupContext.js';
-import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
+import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 import type { AccountContext } from '../../account/accountContext.js';
 
 function formatDuration(expiresAt: string | null): string {
@@ -91,4 +91,10 @@ async function handleMonitor({ chatId, account, sock, repos }: CommandContext): 
 
 export { handleMonitor, formatDuration, formatDurationShort };
 
-export const monitorCommand: CommandHandler = { name: "monitor", permission: "owner", run: handleMonitor };
+export const monitorCommand: CommandHandler = {
+  commands: ["monitor"],
+  description: "Tampilkan monitor dashboard ringkas untuk semua chat (khusus owner).",
+  isHidden: true,
+  permission: "owner",
+  run: (_sock, _message, ctx) => handleMonitor(ctx),
+};

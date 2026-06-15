@@ -33,7 +33,7 @@ import { unwrapMessage } from '../domain/messageParser.js';
 import { downloadMediaToFile } from '../../mediaHandler.js';
 import config from '../../config.js';
 import { withTimeout } from '../utils.js';
-import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
+import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -221,8 +221,6 @@ function upsertLottieSticker(chatId: string, name: string, lottiePayloadJson: st
 
 async function handleAddSticker({
   chatId,
-  chatType,
-  senderIsAdmin,
   senderIsOwner,
   senderId,
   args,
@@ -260,12 +258,6 @@ async function handleAddSticker({
   // ------------------------------------------------------------------
   if (isGlobal && !senderIsOwner) {
     await reply('Hanya bot owner yang bisa menambahkan sticker global. ❌');
-    return;
-  }
-
-  const isPrivate = chatType === 'private';
-  if (!isGlobal && !isPrivate && !senderIsAdmin && !senderIsOwner) {
-    await reply('Hanya admin grup yang bisa menambahkan sticker. ❌');
     return;
   }
 
@@ -421,4 +413,9 @@ async function handleAddSticker({
 
 export { handleAddSticker };
 
-export const addStickerCommand: CommandHandler = { name: "add-sticker", aliases: ["addsticker", "addstickers", "add-stickers"], run: handleAddSticker };
+export const addStickerCommand: CommandHandler = {
+  commands: ["add-sticker", "addsticker", "addstickers", "add-stickers"],
+  description: "Tambahkan stiker ke katalog bot dengan membalas sebuah stiker dan menyebut namanya. Bot dapat mengirim stiker dari katalog ini menggunakan tool send_sticker. Gunakan /add-sticker global <nama> untuk menambah ke katalog global semua chat (khusus owner). Contoh: /add-sticker kucing lucu.",
+  permission: "isPrivate or isAdmin or isOwner",
+  run: (_sock, _message, ctx) => handleAddSticker(ctx),
+};

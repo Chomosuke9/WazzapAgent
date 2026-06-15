@@ -21,6 +21,7 @@ import {
   openAccountPersistence,
 } from './account/baileysFactory.js';
 import { startWsServer } from './server/wsServer.js';
+import { initCommandRegistry } from './wa/command/CommandRegistry.js';
 import type { WebSocketServer } from 'ws';
 
 let wss: WebSocketServer | undefined;
@@ -45,6 +46,10 @@ async function bootstrap(): Promise<void> {
   const defaultEntry = registry.getOrCreate(config.dataDir);
   const layout = ensureFolderLayout(config.dataDir);
   openAccountPersistence(defaultEntry, layout.dbDir);
+
+  // Auto-discover and register all slash command handlers before accepting any
+  // client connection, so the registry is fully populated before dispatch.
+  await initCommandRegistry();
 
   // Start the inbound WS server. Each Python WaSocket client connects here and
   // is bound to its tenant account by the server's `hello` handshake; action

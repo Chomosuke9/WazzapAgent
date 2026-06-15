@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 process.env.REQUIRE_ACTIVATION = 'false';
 
-import { joinErrorMessage } from '../../src/wa/command/join.js';
+import { joinErrorMessage } from '../../src/wa/commands/join.js';
 
 test('/join maps not-authorized to a friendly message (feature 7)', () => {
   const msg = joinErrorMessage({ message: 'not-authorized' });

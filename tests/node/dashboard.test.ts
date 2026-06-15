@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 process.env.REQUIRE_ACTIVATION = 'false';
 
-import { handleDashboard } from '../../src/wa/command/dashboard.js';
+import { handleDashboard } from '../../src/wa/commands/dashboard.js';
 
 type TopUser = { senderRef: string; senderName: string; invokeCount: number };
 

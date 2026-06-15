@@ -1,5 +1,5 @@
 import logger from '../../logger.js';
-import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
+import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 
 async function handleActivate({ chatId, chatType, args, sock, repos }: CommandContext): Promise<void> {
   const code = (args || '').trim().toUpperCase();
@@ -22,4 +22,9 @@ async function handleActivate({ chatId, chatType, args, sock, repos }: CommandCo
 
 export { handleActivate };
 
-export const activateCommand: CommandHandler = { name: "activate", run: handleActivate };
+export const activateCommand: CommandHandler = {
+  commands: ["activate"],
+  description: "Aktifkan chat ini menggunakan kode aktivasi yang diberikan oleh owner. Setelah diaktifkan, bot akan merespon pesan di chat ini. Contoh: /activate WA-ABC12345.",
+  permission: "public",
+  run: (_sock, _message, ctx) => handleActivate(ctx),
+};

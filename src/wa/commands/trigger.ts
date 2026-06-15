@@ -2,7 +2,7 @@ import config from "../../config.js";
 import * as registry from "../../server/accountRegistry.js";
 import { VALID_TRIGGERS } from "../../db/repositories/SettingsRepository.js";
 import { parseConfigScope, scopeSuffix } from "./configScope.js";
-import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
+import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 
 const TRIGGER_DESCRIPTIONS: Record<string, string> = {
   tag: "bot @mentioned",
@@ -14,8 +14,6 @@ const TRIGGER_DESCRIPTIONS: Record<string, string> = {
 
 async function handleTrigger({
   chatId,
-  chatType,
-  senderIsAdmin,
   senderIsOwner,
   senderId: _senderId,
   args,
@@ -23,28 +21,6 @@ async function handleTrigger({
   sock,
   repos,
 }: CommandContext): Promise<void> {
-
-  if (chatType === "private") {
-    try {
-      await sock.sendMessage(chatId, {
-        text: "`/trigger` can only be used in group chats.",
-      });
-    } catch (err) {
-      /* ignore */
-    }
-    return;
-  }
-
-  if (!senderIsOwner && !senderIsAdmin) {
-    try {
-      await sock.sendMessage(chatId, {
-        text: "Only group admins can change triggers.",
-      });
-    } catch (err) {
-      /* ignore */
-    }
-    return;
-  }
 
   if (!args) {
     const current = repos!.settings.getTriggers(chatId);
@@ -172,4 +148,9 @@ async function handleTrigger({
 
 export { handleTrigger };
 
-export const triggerCommand: CommandHandler = { name: "trigger", aliases: ["triggers"], run: handleTrigger };
+export const triggerCommand: CommandHandler = {
+  commands: ["trigger", "triggers"],
+  description: "Konfigurasi pemicu respon prefix di mode prefix/hybrid. Jenis pemicu: tag (di-mention), tagall (saat @all), reply (membalas pesan bot), name (menyebut nama bot), join (anggota baru bergabung). Contoh: /trigger reply on.",
+  permission: "isGroup and (isAdmin or isOwner)",
+  run: (_sock, _message, ctx) => handleTrigger(ctx),
+};

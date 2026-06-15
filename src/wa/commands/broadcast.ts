@@ -1,8 +1,7 @@
 import logger from "../../logger.js";
-import { isOwnerJid } from "../domain/participants.js";
 import { sendRichMessage } from "../interactive/index.js";
 import { withJidQueue } from "../sendQueue.js";
-import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
+import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 import type { AccountContext } from "../../account/accountContext.js";
 import type { WaSocketLike } from "../../protocol/ports.js";
 
@@ -80,18 +79,6 @@ async function handleBroadcastCommand({
   sock,
   repos,
 }: CommandContext): Promise<void> {
-  if (!isOwnerJid(senderId)) {
-    logger.info({ senderId, chatId }, "/broadcast rejected: not owner");
-    try {
-      await sock.sendMessage(chatId, {
-        text: "Only bot owners can use `/broadcast`.",
-      });
-    } catch (err) {
-      logger.warn({ err }, "failed sending broadcast rejection");
-    }
-    return;
-  }
-
   const trimmedText = text && text.trim();
   const firstWord = trimmedText
     ? trimmedText.split(/\s+/)[0].toLowerCase()
@@ -225,4 +212,10 @@ async function handleBroadcastCommand({
 
 export { handleBroadcastCommand, reconstructAndSend };
 
-export const broadcastCommand: CommandHandler = { name: "broadcast", aliases: ["broadcasts"], run: handleBroadcastCommand };
+export const broadcastCommand: CommandHandler = {
+  commands: ["broadcast", "broadcasts"],
+  description: "Kirim pesan siaran ke semua grup tempat bot berada (khusus owner). Contoh: /broadcast Halo semua.",
+  isHidden: true,
+  permission: "isOwner",
+  run: (_sock, _message, ctx) => handleBroadcastCommand(ctx),
+};

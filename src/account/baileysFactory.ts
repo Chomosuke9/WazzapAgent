@@ -51,7 +51,7 @@ import {
   getGroupContext,
   parseGroupJoinStub,
 } from "../wa/domain/groupContext.js";
-import { parseSlashCommand } from "../wa/command/index.js";
+import { parseSlashCommand } from "../wa/commands/index.js";
 import { roleFlagsForJid, isOwnerJid } from "../wa/domain/participants.js";
 import {
   normalizeJid,
@@ -62,7 +62,7 @@ import { unwrapMessage, extractText } from "../wa/domain/messageParser.js";
 import { runWithConcurrency } from "../wa/utils.js";
 import { GROUP_JOIN_STUB_TYPES } from "../wa/domain/caches.js";
 import type { GroupContextValue } from "../wa/domain/caches.js";
-import { dispatchCommand } from "../wa/commands/CommandRegistry.js";
+import { dispatchCommand } from "../wa/command/CommandRegistry.js";
 import {
   handleButtonResponse,
   parseModelReply,

@@ -1,33 +1,18 @@
 import logger from "../../logger.js";
 import config from "../../config.js";
 import * as registry from "../../server/accountRegistry.js";
-import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
+import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 
 async function handleReset({
   chatId,
-  chatType,
-  senderIsAdmin,
+  chatType: _chatType,
+  senderIsAdmin: _senderIsAdmin,
   senderIsOwner,
   contextMsgId: _contextMsgId,
   args,
   folderPath = config.dataDir,
   sock,
 }: CommandContext): Promise<void> {
-  const isPrivate = chatType === "private";
-
-  if (isPrivate || senderIsOwner || senderIsAdmin) {
-    // proceed
-  } else {
-    try {
-      await sock.sendMessage(chatId, {
-        text: "Only group admins can use `/reset`.",
-      });
-    } catch (err) {
-      /* ignore */
-    }
-    return;
-  }
-
   const isGlobal = args?.trim().toLowerCase() === "global";
   if (isGlobal && !senderIsOwner) {
     try {
@@ -61,4 +46,9 @@ async function handleReset({
 
 export { handleReset };
 
-export const resetCommand: CommandHandler = { name: "reset", aliases: ["resets"], run: handleReset };
+export const resetCommand: CommandHandler = {
+  commands: ["reset", "resets"],
+  description: "Hapus memori percakapan bot di chat ini (termasuk riwayat pesan). Bot akan mulai dari awal tanpa konteks sebelumnya. Gunakan /reset global untuk menghapus memori semua chat sekaligus (khusus owner).",
+  permission: "private or (isGroup and isAdmin) or isOwner",
+  run: (_sock, _message, ctx) => handleReset(ctx),
+};

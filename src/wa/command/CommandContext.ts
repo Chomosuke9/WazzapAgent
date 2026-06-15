@@ -68,18 +68,49 @@ export interface CommandContext {
 // CommandHandler descriptor
 // ---------------------------------------------------------------------------
 
-export type CommandPermission = "owner";
+/**
+ * Permission atoms usable in a command's `permission` expression. They combine
+ * with `and` / `or` and optional parentheses (`and` binds tighter than `or`),
+ * e.g. `"private or (isGroup and isAdmin) or isOwner"`. Names are
+ * case-insensitive and each accepts a short and an `is*`/camel alias.
+ *
+ * - `public`             — always allowed.
+ * - `owner`   / `isOwner`   — sender is a configured bot owner.
+ * - `admin`   / `isAdmin`   — sender is a group admin/superadmin.
+ * - `group`   / `isGroup`   — invoked in a group chat.
+ * - `private` / `isPrivate` — invoked in a private chat.
+ * - `from_me` / `fromMe`    — the underlying message was sent by the bot itself.
+ */
+export type PermissionAtom =
+  | "public"
+  | "owner"
+  | "admin"
+  | "group"
+  | "private"
+  | "from_me";
 
 /**
- * A single slash command. `name` is the canonical token reported to the bridge;
- * `aliases` are the additional tokens that resolve to it (single source of
- * truth — no parallel alias table). `permission: "owner"` reproduces the old
- * inline owner-gate: the dispatcher replies with the standard rejection and
- * skips `run` for non-owners.
+ * A single slash command, auto-discovered from `src/wa/commands/`.
+ *
+ * `commands` lists every token that resolves to this handler; `commands[0]` is
+ * the canonical name reported to the bridge and the rest are aliases (single
+ * source of truth — no parallel alias table). `description` is human-facing
+ * metadata. `permission` is a boolean expression over {@link PermissionAtom}
+ * values, evaluated per invocation by the dispatcher (atoms are validated at
+ * registry-init time). `run` receives the live socket and the originating
+ * message positionally, plus the fully-resolved {@link CommandContext}.
  */
 export interface CommandHandler {
-  name: string;
-  aliases?: string[];
-  permission?: CommandPermission;
-  run(ctx: CommandContext): Promise<void>;
+  commands: string[];
+  description: string;
+  permission: string;
+  /** When true, the command is omitted from the auto-generated `/help` listing
+   * (it still dispatches normally — this only hides it from discovery). Use for
+   * dangerous or internal commands. */
+  isHidden?: boolean;
+  run(
+    sock: WaSocketLike,
+    message: WAMessage,
+    ctx: CommandContext,
+  ): Promise<void>;
 }

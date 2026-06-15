@@ -2,16 +2,9 @@ import logger from '../../logger.js';
 import { sendNativeFlow } from '../interactive/index.js';
 import config from '../../config.js';
 import * as registry from '../../server/accountRegistry.js';
-import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
+import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 
-async function handleModelcfg({ chatId, senderId: _senderId, senderIsOwner, args, folderPath = config.dataDir, sock, repos }: CommandContext): Promise<void> {
-  if (!senderIsOwner) {
-    try {
-      await sock.sendMessage(chatId, { text: 'Only bot owner can use `/modelcfg`.' });
-    } catch (err) { /* ignore */ }
-    return;
-  }
-
+async function handleModelcfg({ chatId, senderId: _senderId, args, folderPath = config.dataDir, sock, repos }: CommandContext): Promise<void> {
   // If args contains |, use | as field separator; otherwise fall back to whitespace
   const rawArgs = (args || '').trim();
   let parts: string[];
@@ -272,4 +265,9 @@ async function handleModelcfg({ chatId, senderId: _senderId, senderIsOwner, args
 
 export { handleModelcfg };
 
-export const modelcfgCommand: CommandHandler = { name: "modelcfg", aliases: ["modelcfgs"], run: handleModelcfg };
+export const modelcfgCommand: CommandHandler = {
+  commands: ["modelcfg", "modelcfgs"],
+  description: "Konfigurasi model LLM dan parameternya (temperature, max token, dll) untuk chat ini atau secara global. Tanpa argumen menampilkan konfigurasi saat ini. Khusus owner.",
+  permission: "isOwner",
+  run: (_sock, _message, ctx) => handleModelcfg(ctx),
+};

@@ -9,7 +9,7 @@ process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'wazzap-botconf-cfg
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const { handleBotConf } = await import('../../src/wa/command/bot-conf.ts');
+const { handleBotConf } = await import('../../src/wa/commands/bot-conf.ts');
 const { Database } = await import('../../src/db/Database.ts');
 const { createRepositories } = await import('../../src/db/repositories/index.ts');
 

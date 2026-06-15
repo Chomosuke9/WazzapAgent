@@ -1,7 +1,7 @@
 import config from "../../config.js";
 import * as registry from "../../server/accountRegistry.js";
 import { parseConfigScope, scopeSuffix } from "./configScope.js";
-import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
+import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 
 type TriggerRange = { min: number; max: number };
 
@@ -25,18 +25,7 @@ function formatTrigger(trigger: TriggerRange | null): string {
   return `${trigger.min}-${trigger.max} messages`;
 }
 
-async function handleIdle({ chatId, senderIsOwner, senderIsAdmin, args, folderPath = config.dataDir, sock, repos }: CommandContext): Promise<void> {
-
-  if (!senderIsOwner && !senderIsAdmin) {
-    try {
-      await sock.sendMessage(chatId, {
-        text: "Only admins can use `/idle`.",
-      });
-    } catch (err) {
-      /* ignore */
-    }
-    return;
-  }
+async function handleIdle({ chatId, senderIsOwner, args, folderPath = config.dataDir, sock, repos }: CommandContext): Promise<void> {
 
   if (!args) {
     const current = repos!.settings.getIdleTrigger(chatId);
@@ -125,4 +114,9 @@ async function handleIdle({ chatId, senderIsOwner, senderIsAdmin, args, folderPa
 
 export { handleIdle };
 
-export const idleCommand: CommandHandler = { name: "idle", run: handleIdle };
+export const idleCommand: CommandHandler = {
+  commands: ["idle"],
+  description: "Konfigurasi pemicu idle: bot ikut berkomentar setelah sejumlah pesan berlalu tanpa dibalas. Format: /idle <n> (setelah tepat n pesan), /idle <min>-<max> (acak dalam rentang), /idle off (nonaktifkan). Contoh: /idle 5-10.",
+  permission: "isAdmin or isOwner",
+  run: (_sock, _message, ctx) => handleIdle(ctx),
+};

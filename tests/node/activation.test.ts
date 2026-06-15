@@ -2,8 +2,8 @@
 // read env at import time).
 //
 // Ported from the legacy tests/node/activation.test.mjs (Phase 0, step-01):
-// the legacy `src/db.js`, `src/wa/command/parseCommand.js` and
-// `src/wa/command/monitor.js` were deleted; this targets the migration
+// the legacy `src/db.js`, `src/wa/commands/parseCommand.js` and
+// `src/wa/commands/monitor.js` were deleted; this targets the migration
 // equivalents instead.
 process.env.LOG_LEVEL = 'warn';
 process.env.DATA_DIR = '/tmp/wazzap-test-activation';
@@ -348,8 +348,15 @@ describe('config.requireActivation default', () => {
 // ---------------------------------------------------------------------------
 
 describe('parseSlashCommand recognizes new commands', () => {
+  before(async () => {
+    const { initCommandRegistry } = await import(
+      '../../src/wa/command/CommandRegistry.ts'
+    );
+    await initCommandRegistry();
+  });
+
   it('parses /activate with argument', async () => {
-    const { parseSlashCommand } = await import('../../src/wa/commands/CommandRegistry.ts');
+    const { parseSlashCommand } = await import('../../src/wa/command/CommandRegistry.ts');
     const result = parseSlashCommand('/activate WA-ABC12345');
     assert.ok(result !== null, 'should parse /activate');
     assert.equal(result.command, 'activate');
@@ -357,7 +364,7 @@ describe('parseSlashCommand recognizes new commands', () => {
   });
 
   it('parses /generate with arguments', async () => {
-    const { parseSlashCommand } = await import('../../src/wa/commands/CommandRegistry.ts');
+    const { parseSlashCommand } = await import('../../src/wa/command/CommandRegistry.ts');
     const result = parseSlashCommand('/generate private 30');
     assert.ok(result !== null, 'should parse /generate');
     assert.equal(result.command, 'generate');
@@ -365,7 +372,7 @@ describe('parseSlashCommand recognizes new commands', () => {
   });
 
   it('parses /monitor', async () => {
-    const { parseSlashCommand } = await import('../../src/wa/commands/CommandRegistry.ts');
+    const { parseSlashCommand } = await import('../../src/wa/command/CommandRegistry.ts');
     const result = parseSlashCommand('/monitor');
     assert.ok(result !== null, 'should parse /monitor');
     assert.equal(result.command, 'monitor');
@@ -373,7 +380,7 @@ describe('parseSlashCommand recognizes new commands', () => {
   });
 
   it('parses /revoke with argument', async () => {
-    const { parseSlashCommand } = await import('../../src/wa/commands/CommandRegistry.ts');
+    const { parseSlashCommand } = await import('../../src/wa/command/CommandRegistry.ts');
     const result = parseSlashCommand('/revoke 5');
     assert.ok(result !== null, 'should parse /revoke');
     assert.equal(result.command, 'revoke');
@@ -381,7 +388,7 @@ describe('parseSlashCommand recognizes new commands', () => {
   });
 
   it('does not parse unknown commands', async () => {
-    const { parseSlashCommand } = await import('../../src/wa/commands/CommandRegistry.ts');
+    const { parseSlashCommand } = await import('../../src/wa/command/CommandRegistry.ts');
     const result = parseSlashCommand('/unknowncommand');
     assert.equal(result, null);
   });
@@ -393,17 +400,17 @@ describe('parseSlashCommand recognizes new commands', () => {
 
 describe('formatDuration', () => {
   it('returns Permanen for null expiresAt', async () => {
-    const { formatDuration } = await import('../../src/wa/command/monitor.ts');
+    const { formatDuration } = await import('../../src/wa/commands/monitor.ts');
     assert.equal(formatDuration(null), 'Permanen');
   });
 
   it('returns Kadaluarsa for past date', async () => {
-    const { formatDuration } = await import('../../src/wa/command/monitor.ts');
+    const { formatDuration } = await import('../../src/wa/commands/monitor.ts');
     assert.equal(formatDuration('2020-01-01 00:00:00'), 'Kadaluarsa');
   });
 
   it('returns days and hours for future date', async () => {
-    const { formatDuration } = await import('../../src/wa/command/monitor.ts');
+    const { formatDuration } = await import('../../src/wa/commands/monitor.ts');
     const future = new Date(Date.now() + 3 * 86400000 + 5 * 3600000);
     // Use SQLite-compatible format
     const futureStr = future.getFullYear() + '-' +
@@ -418,24 +425,24 @@ describe('formatDuration', () => {
   });
 
   it('returns Permanen for undefined expiresAt', async () => {
-    const { formatDuration } = await import('../../src/wa/command/monitor.ts');
+    const { formatDuration } = await import('../../src/wa/commands/monitor.ts');
     assert.equal(formatDuration(undefined), 'Permanen');
   });
 });
 
 describe('formatDurationShort', () => {
   it('returns Permanen for null expiresAt', async () => {
-    const { formatDurationShort } = await import('../../src/wa/command/monitor.ts');
+    const { formatDurationShort } = await import('../../src/wa/commands/monitor.ts');
     assert.equal(formatDurationShort(null), 'Permanen');
   });
 
   it('returns Kadaluarsa for past date', async () => {
-    const { formatDurationShort } = await import('../../src/wa/command/monitor.ts');
+    const { formatDurationShort } = await import('../../src/wa/commands/monitor.ts');
     assert.equal(formatDurationShort('2020-01-01 00:00:00'), 'Kadaluarsa');
   });
 
   it('returns short format for future date', async () => {
-    const { formatDurationShort } = await import('../../src/wa/command/monitor.ts');
+    const { formatDurationShort } = await import('../../src/wa/commands/monitor.ts');
     const future = new Date(Date.now() + 3 * 86400000 + 5 * 3600000);
     const futureStr = future.getFullYear() + '-' +
       String(future.getMonth() + 1).padStart(2, '0') + '-' +

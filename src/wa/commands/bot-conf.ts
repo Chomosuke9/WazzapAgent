@@ -5,7 +5,7 @@ import {
   DEFAULT_ACTIVATION_MESSAGE,
   isActivationRequired,
 } from "../botConfig.js";
-import type { CommandContext, CommandHandler } from "../commands/CommandContext.js";
+import type { CommandContext, CommandHandler } from "../command/CommandContext.js";
 
 const USAGE = [
   "*/bot-conf — Konfigurasi bot (owner only)*",
@@ -112,4 +112,9 @@ async function handleBotConf({ chatId, folderPath = config.dataDir, args, sock, 
 
 export { handleBotConf };
 
-export const botConfCommand: CommandHandler = { name: "bot-conf", aliases: ["botconf"], permission: "owner", run: handleBotConf };
+export const botConfCommand: CommandHandler = {
+  commands: ["bot-conf", "botconf"],
+  description: "Konfigurasi bot secara global (berlaku untuk semua chat): ubah pesan aktivasi, atur system prompt dasar, atau aktifkan/nonaktifkan wajib-aktivasi. Khusus owner.",
+  permission: "owner",
+  run: (_sock, _message, ctx) => handleBotConf(ctx),
+};

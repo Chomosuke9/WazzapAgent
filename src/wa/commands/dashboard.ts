@@ -5,7 +5,7 @@ import type { WaSocketLike } from "../../protocol/ports.js";
 import type {
   CommandContext,
   CommandHandler,
-} from "../commands/CommandContext.js";
+} from "../command/CommandContext.js";
 
 /**
  * ISO-8601 week key, formatted as `YYYY-Www` to match the keys the Python
@@ -243,7 +243,8 @@ async function handleDashboard(ctx: CommandContext): Promise<void> {
 export { handleDashboard };
 
 export const dashboardCommand: CommandHandler = {
-  name: "dashboard",
-  aliases: ["dashboards"],
-  run: handleDashboard,
+  commands: ["dashboard", "dashboards"],
+  description: "Tampilkan statistik penggunaan bot untuk chat ini: jumlah pesan, respon bot, dan aktivitas pengguna dalam periode tertentu.",
+  permission: "public",
+  run: (_sock, _message, ctx) => handleDashboard(ctx),
 };

@@ -1,6 +1,6 @@
 import logger from '../../logger.js';
 import { sendCopyCode } from '../interactive/index.js';
-import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
+import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 
 async function handleGenerate({ chatId, senderId, args, sock, repos }: CommandContext): Promise<void> {
   const parts = (args || '').trim().split(/\s+/);
@@ -71,4 +71,10 @@ async function handleGenerate({ chatId, senderId, args, sock, repos }: CommandCo
 
 export { handleGenerate };
 
-export const generateCommand: CommandHandler = { name: "generate", permission: "owner", run: handleGenerate };
+export const generateCommand: CommandHandler = {
+  commands: ["generate"],
+  description: "Buat gambar dari prompt teks (khusus owner). Contoh: /generate kucing astronot pakai helm.",
+  isHidden: true,
+  permission: "owner",
+  run: (_sock, _message, ctx) => handleGenerate(ctx),
+};

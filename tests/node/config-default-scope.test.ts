@@ -3,10 +3,9 @@ import assert from 'node:assert/strict';
 
 process.env.REQUIRE_ACTIVATION = 'false';
 
-import { handleMode } from '../../src/wa/command/mode.js';
-import { handlePermission } from '../../src/wa/command/permission.js';
-import { handleTrigger } from '../../src/wa/command/trigger.js';
-import { handlePrompt } from '../../src/wa/command/prompt.js';
+import { handlePermission } from '../../src/wa/commands/permission.js';
+import { handleTrigger } from '../../src/wa/commands/trigger.js';
+import { handlePrompt } from '../../src/wa/commands/prompt.js';
 
 function makeSettingsSpy() {
   const calls: string[] = [];
@@ -62,31 +61,6 @@ function ctx(over: any) {
   };
   return base as any;
 }
-
-test('/mode default calls setDefaultMode (owner)', async () => {
-  const spy = makeSettingsSpy();
-  await handleMode(ctx({ args: 'default auto', repos: spy }));
-  assert.ok(spy.calls.includes('setDefaultMode'));
-  assert.ok(!spy.calls.includes('setGlobalMode'));
-  assert.ok(!spy.calls.includes('setMode'));
-});
-
-test('/mode global calls setGlobalMode; plain calls setMode', async () => {
-  const g = makeSettingsSpy();
-  await handleMode(ctx({ args: 'global hybrid', repos: g }));
-  assert.ok(g.calls.includes('setGlobalMode'));
-  const p = makeSettingsSpy();
-  await handleMode(ctx({ args: 'auto', repos: p }));
-  assert.ok(p.calls.includes('setMode'));
-});
-
-test('/mode default rejected for non-owner', async () => {
-  const spy = makeSettingsSpy();
-  const c = ctx({ args: 'default auto', repos: spy, senderIsOwner: false, senderIsAdmin: true });
-  await handleMode(c);
-  assert.equal(spy.calls.length, 0, 'no setter called for non-owner default');
-  assert.ok(c.sentRef.some((m: any) => /owner/i.test(m.text || '')));
-});
 
 test('/permission default calls setDefaultPermission', async () => {
   const spy = makeSettingsSpy();

@@ -1,7 +1,7 @@
 import logger from '../../logger.js';
 import { sendNativeFlow } from '../interactive/index.js';
 import config from '../../config.js';
-import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
+import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 import type { AccountRepositories } from '../../db/repositories/index.js';
 
 function formatActivationInfo(repos: AccountRepositories, chatId: string): string {
@@ -20,17 +20,7 @@ function formatActivationInfo(repos: AccountRepositories, chatId: string): strin
   return `${Math.floor(diffMs / 60000)} menit`;
 }
 
-async function handleSettings({ chatId, chatType, senderId: _senderId, senderIsAdmin, senderIsOwner, args: _args, sock, repos }: CommandContext): Promise<void> {
-  const isPrivate = chatType === 'private';
-  const canUse = isPrivate || senderIsOwner || senderIsAdmin;
-
-  if (!canUse) {
-    try {
-      await sock.sendMessage(chatId, { text: 'Only group admins can access settings.' });
-    } catch (err) { /* ignore */ }
-    return;
-  }
-
+async function handleSettings({ chatId, senderId: _senderId, args: _args, sock, repos }: CommandContext): Promise<void> {
   const currentModelId = repos!.model.getLlm2Model(chatId);
   const defaultModel = repos!.model.getDefaultLlm2Model();
   const activeModelId = currentModelId || defaultModel?.modelId;
@@ -45,20 +35,6 @@ async function handleSettings({ chatId, chatType, senderId: _senderId, senderIsA
   const permissionLabel = permissionLabels[currentPermission] || String(currentPermission);
 
   const buttons = [
-    {
-      name: 'single_select',
-      buttonParamsJson: JSON.stringify({
-        title: 'Change Mode',
-        sections: [{
-          title: 'Select Mode',
-          rows: [
-            { id: '/mode auto', title: 'Auto', description: 'LLM decides when to respond' },
-            { id: '/mode prefix', title: 'Prefix', description: 'Only responds when triggered' },
-            { id: '/mode hybrid', title: 'Hybrid', description: 'Prefix first, fallback to auto' },
-          ],
-        }],
-      }),
-    },
     {
       name: 'single_select',
       buttonParamsJson: JSON.stringify({
@@ -115,4 +91,9 @@ async function handleSettings({ chatId, chatType, senderId: _senderId, senderIsA
 
 export { handleSettings };
 
-export const settingCommand: CommandHandler = { name: "setting", aliases: ["settings"], run: handleSettings };
+export const settingCommand: CommandHandler = {
+  commands: ["setting", "settings"],
+  description: "Buka menu pengaturan interaktif untuk chat ini. Dari sini kamu bisa mengubah mode respon, model LLM, system prompt, permission moderasi, dan pengaturan lainnya tanpa menghafal perintah.",
+  permission: "isPrivate or isAdmin or isOwner",
+  run: (_sock, _message, ctx) => handleSettings(ctx),
+};

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 process.env.REQUIRE_ACTIVATION = 'false';
 
-import { handleGenerate } from '../../src/wa/command/generate.js';
+import { handleGenerate } from '../../src/wa/commands/generate.js';
 
 function makeCtx(captured: any) {
   const sock: any = {

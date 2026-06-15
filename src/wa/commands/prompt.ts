@@ -1,35 +1,18 @@
 import config from "../../config.js";
 import * as registry from "../../server/accountRegistry.js";
 import { parseConfigScope, scopeSuffix } from "./configScope.js";
-import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
+import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 
 const PROMPT_MAX_CHARS = 4000;
 
 async function handlePrompt({
   chatId,
-  chatType,
-  senderIsAdmin,
   senderIsOwner,
   args,
   folderPath = config.dataDir,
   sock,
   repos,
 }: CommandContext): Promise<void> {
-  const isPrivate = chatType === "private";
-
-  if (isPrivate || senderIsOwner || senderIsAdmin) {
-    // proceed
-  } else {
-    try {
-      await sock.sendMessage(chatId, {
-        text: "Only group admins can use `/prompt`.",
-      });
-    } catch (err) {
-      /* ignore */
-    }
-    return;
-  }
-
   if (!args) {
     const current = repos!.settings.getPrompt(chatId);
     if (current) {
@@ -134,4 +117,9 @@ async function handlePrompt({
 
 export { handlePrompt };
 
-export const promptCommand: CommandHandler = { name: "prompt", aliases: ["prompts"], run: handlePrompt };
+export const promptCommand: CommandHandler = {
+  commands: ["prompt", "prompts"],
+  description: "Atur instruksi atau kepribadian bot khusus untuk chat ini (system prompt). Tanpa argumen menampilkan prompt saat ini. Gunakan /prompt clear untuk menghapus. Contoh: /prompt Jawab dengan singkat, sopan, dan dalam bahasa Indonesia.",
+  permission: "isPrivate or isAdmin or isOwner",
+  run: (_sock, _message, ctx) => handlePrompt(ctx),
+};

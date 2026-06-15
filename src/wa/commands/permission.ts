@@ -1,7 +1,7 @@
 import config from "../../config.js";
 import * as registry from "../../server/accountRegistry.js";
 import { parseConfigScope, scopeSuffix } from "./configScope.js";
-import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
+import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 
 const PERMISSION_LABELS: Record<number, string> = {
   0: "0 (all moderation forbidden)",
@@ -12,8 +12,6 @@ const PERMISSION_LABELS: Record<number, string> = {
 
 async function handlePermission({
   chatId,
-  chatType,
-  senderIsAdmin,
   senderIsOwner,
   botIsAdmin,
   args,
@@ -21,28 +19,6 @@ async function handlePermission({
   sock,
   repos,
 }: CommandContext): Promise<void> {
-
-  if (chatType === "private") {
-    try {
-      await sock.sendMessage(chatId, {
-        text: "`/permission` can only be used in group chats.",
-      });
-    } catch (err) {
-      /* ignore */
-    }
-    return;
-  }
-
-  if (!senderIsOwner && !senderIsAdmin) {
-    try {
-      await sock.sendMessage(chatId, {
-        text: "Only group admins or bot owner can use `/permission`.",
-      });
-    } catch (err) {
-      /* ignore */
-    }
-    return;
-  }
 
   if (!args) {
     const current = repos!.settings.getPermission(chatId);
@@ -142,4 +118,9 @@ async function handlePermission({
 
 export { handlePermission };
 
-export const permissionCommand: CommandHandler = { name: "permission", aliases: ["permissions"], run: handlePermission };
+export const permissionCommand: CommandHandler = {
+  commands: ["permission", "permissions"],
+  description: "Atur level izin moderasi untuk chat ini. Level 0 = tidak ada moderasi; level 1 = bot bisa hapus pesan; level 2 = + mute anggota; level 3 = + kick anggota. Tanpa argumen menampilkan level saat ini. Contoh: /permission 2.",
+  permission: "isGroup and (isAdmin or isOwner)",
+  run: (_sock, _message, ctx) => handlePermission(ctx),
+};

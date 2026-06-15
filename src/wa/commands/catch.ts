@@ -1,6 +1,6 @@
 import logger from '../../logger.js';
 import { resolveQuotedMessage } from '../domain/identifiers.js';
-import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
+import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 
 async function handleCatch({ chatId, quotedMessageId, account, sock }: CommandContext): Promise<void> {
   if (!quotedMessageId) {
@@ -47,4 +47,9 @@ async function handleCatch({ chatId, quotedMessageId, account, sock }: CommandCo
 
 export { handleCatch };
 
-export const catchCommand: CommandHandler = { name: "catch", aliases: ["catches"], run: handleCatch };
+export const catchCommand: CommandHandler = {
+  commands: ["catch", "catches"],
+  description: "Tandai pesan yang kamu balas agar dapat diproses ulang oleh bot. Berguna ketika bot perlu menganalisis ulang pesan tertentu tanpa harus mengirim ulang.",
+  permission: "public",
+  run: (_sock, _message, ctx) => handleCatch(ctx),
+};

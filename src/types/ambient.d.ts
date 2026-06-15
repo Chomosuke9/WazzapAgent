@@ -3,7 +3,7 @@
 //
 // Covered here (proof: `node_modules/<dep>/package.json` has no `types`/`typings`
 // field AND `npm view @types/<dep>` returns "NOT PUBLISHED"):
-//   - node-webpmux  (imported in src/wa/command/sticker.js)
+//   - node-webpmux  (imported in src/wa/commands/sticker.js)
 //
 // Deps that genuinely lack bundled types but DO have a published `@types/*`
 // package (better-sqlite3, fs-extra, fluent-ffmpeg) are covered by installing

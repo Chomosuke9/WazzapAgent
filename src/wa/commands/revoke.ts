@@ -1,5 +1,5 @@
 import logger from '../../logger.js';
-import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
+import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 
 async function handleRevoke({ chatId, args, sock, repos }: CommandContext): Promise<void> {
   const idStr = (args || '').trim();
@@ -38,4 +38,9 @@ async function handleRevoke({ chatId, args, sock, repos }: CommandContext): Prom
 
 export { handleRevoke };
 
-export const revokeCommand: CommandHandler = { name: "revoke", permission: "owner", run: handleRevoke };
+export const revokeCommand: CommandHandler = {
+  commands: ["revoke"],
+  description: "Cabut link undangan grup saat ini dan buat link baru yang fresh. Berguna ketika link lama bocor atau disebar sembarangan. Opsional: ulangi beberapa kali. Contoh: /revoke 3.",
+  permission: "owner",
+  run: (_sock, _message, ctx) => handleRevoke(ctx),
+};

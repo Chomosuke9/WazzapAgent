@@ -17,7 +17,7 @@ import fs from 'fs-extra';
 import Database from 'better-sqlite3';
 import logger from '../../logger.js';
 import config from '../../config.js';
-import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
+import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 
 // ---------------------------------------------------------------------------
 // Constants (must mirror addsticker.js and sticker_db.py)
@@ -66,8 +66,6 @@ function deleteSticker(chatId: string, name: string): boolean {
 
 async function handleRemoveSticker({
   chatId,
-  chatType,
-  senderIsAdmin,
   senderIsOwner,
   args,
   sock,
@@ -95,12 +93,6 @@ async function handleRemoveSticker({
   // ------------------------------------------------------------------
   if (isGlobal && !senderIsOwner) {
     await reply('Hanya bot owner yang bisa menghapus sticker global. ❌');
-    return;
-  }
-
-  const isPrivate = chatType === 'private';
-  if (!isGlobal && !isPrivate && !senderIsAdmin && !senderIsOwner) {
-    await reply('Hanya admin grup yang bisa menghapus sticker. ❌');
     return;
   }
 
@@ -155,4 +147,9 @@ async function handleRemoveSticker({
 
 export { handleRemoveSticker };
 
-export const removeStickerCommand: CommandHandler = { name: "remove-sticker", aliases: ["remove-stickers", "removesticker", "removestickers"], run: handleRemoveSticker };
+export const removeStickerCommand: CommandHandler = {
+  commands: ["remove-sticker", "remove-stickers", "removesticker", "removestickers"],
+  description: "Hapus stiker dari katalog bot berdasarkan namanya. Gunakan /remove-sticker global <nama> untuk menghapus dari katalog global (khusus owner). Contoh: /remove-sticker kucing lucu.",
+  permission: "isPrivate or isAdmin or isOwner",
+  run: (_sock, _message, ctx) => handleRemoveSticker(ctx),
+};

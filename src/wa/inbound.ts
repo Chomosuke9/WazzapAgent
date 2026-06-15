@@ -55,7 +55,7 @@ import {
   emitGroupJoinContextEvent,
   emitBotRoleChangeEvent,
 } from './events.js';
-import { parseSlashCommand } from './command/index.js';
+import { parseSlashCommand } from './commands/index.js';
 import { isActivationRequired, getActivationMessage } from './botConfig.js';
 import type { WhatsAppMessagePayload, AccountEntry } from '../protocol/types.js';
 import type { AccountContext } from '../account/accountContext.js';

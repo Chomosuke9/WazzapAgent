@@ -11,7 +11,7 @@ import { unwrapMessage } from '../domain/messageParser.js';
 import { downloadMediaToFile, mapMediaKind } from '../../mediaHandler.js';
 import config from '../../config.js';
 import { withTimeout } from '../utils.js';
-import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
+import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -331,4 +331,9 @@ async function handleSticker({ chatId, chatType: _chatType, senderIsAdmin: _send
 
 export { handleSticker };
 
-export const stickerCommand: CommandHandler = { name: "sticker", aliases: ["stickers"], run: handleSticker };
+export const stickerCommand: CommandHandler = {
+  commands: ["sticker", "stickers"],
+  description: "Buat stiker WhatsApp dari gambar atau video yang kamu balas. Untuk stiker meme, tambahkan teks atas dan bawah dipisah tanda #. Contoh: /sticker teks atas#teks bawah.",
+  permission: "public",
+  run: (_sock, _message, ctx) => handleSticker(ctx),
+};

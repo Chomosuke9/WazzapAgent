@@ -1,40 +1,16 @@
 import config from "../../config.js";
 import * as registry from "../../server/accountRegistry.js";
 import { parseConfigScope, scopeSuffix } from "./configScope.js";
-import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
+import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 
 async function handleAnnouncement({
   chatId,
-  chatType,
-  senderIsAdmin,
   senderIsOwner,
   args,
   folderPath = config.dataDir,
   sock,
   repos,
 }: CommandContext): Promise<void> {
-
-  if (chatType === "private") {
-    try {
-      await sock.sendMessage(chatId, {
-        text: "`/announcement` can only be used in group chats.",
-      });
-    } catch (err) {
-      /* ignore */
-    }
-    return;
-  }
-
-  if (!senderIsOwner && !senderIsAdmin) {
-    try {
-      await sock.sendMessage(chatId, {
-        text: "Only group admins can use `/announcement`.",
-      });
-    } catch (err) {
-      /* ignore */
-    }
-    return;
-  }
 
   if (!args) {
     const current = repos!.settings.getAnnouncementEnabled(chatId);
@@ -104,4 +80,9 @@ async function handleAnnouncement({
 
 export { handleAnnouncement };
 
-export const announcementCommand: CommandHandler = { name: "announcement", aliases: ["announcements"], run: handleAnnouncement };
+export const announcementCommand: CommandHandler = {
+  commands: ["announcement", "announcements"],
+  description: "Kirim pesan pengumuman ke seluruh anggota grup dengan mention @all. Tanpa argumen menampilkan status on/off saat ini. Contoh: /announcement Rapat malam ini jam 20.00 WIB.",
+  permission: "isGroup and (isAdmin or isOwner)",
+  run: (_sock, _message, ctx) => handleAnnouncement(ctx),
+};

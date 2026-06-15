@@ -1,6 +1,6 @@
 import logger from '../../logger.js';
 import { isOwnerJid } from '../domain/participants.js';
-import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
+import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 
 function truncateText(value: unknown, maxChars = 300): string | null {
   if (typeof value !== 'string') return null;
@@ -51,4 +51,9 @@ async function handleInfoCommand({ chatId, senderId, senderDisplay, senderRole, 
 
 export { handleInfoCommand };
 
-export const infoCommand: CommandHandler = { name: "info", aliases: ["infos"], run: handleInfoCommand };
+export const infoCommand: CommandHandler = {
+  commands: ["info", "infos"],
+  description: "Tampilkan informasi lengkap tentang konteks saat ini: nama pengirim, peran (admin/owner/anggota), tipe chat (grup/pribadi), status aktivasi, dan konfigurasi bot yang berlaku.",
+  permission: "public",
+  run: (_sock, _message, ctx) => handleInfoCommand(ctx),
+};

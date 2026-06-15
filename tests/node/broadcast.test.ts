@@ -1,6 +1,6 @@
 // Ported from the legacy tests/node/broadcast.test.mjs (Phase 0, step-01).
 //
-// The legacy `src/wa/command/broadcast.js` `reconstructAndSend` had complex
+// The legacy `src/wa/commands/broadcast.js` `reconstructAndSend` had complex
 // branching (sendMessage with reconstructed linkPreview for invite links /
 // canonical URLs, plain-text sendMessage, relayMessage for newsletter
 // forwards). That module was deleted. The migration `broadcast.ts`
@@ -13,7 +13,7 @@ process.env.LOG_LEVEL = 'warn';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-const { reconstructAndSend } = await import('../../src/wa/command/broadcast.ts');
+const { reconstructAndSend } = await import('../../src/wa/commands/broadcast.ts');
 
 // Minimal fake AccountContext: reconstructAndSend only touches `ctx.jidQueues`
 // (through withJidQueue), a per-JID serialization Map.

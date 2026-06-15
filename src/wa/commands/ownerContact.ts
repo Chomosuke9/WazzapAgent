@@ -1,5 +1,5 @@
 import logger from "../../logger.js";
-import type { CommandContext, CommandHandler } from '../commands/CommandContext.js';
+import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 
 /**
  * Strip all non-digit characters to produce a WhatsApp ID (waid).
@@ -138,4 +138,9 @@ async function handleOwnerContact({
 
 export { handleOwnerContact };
 
-export const ownerContactCommand: CommandHandler = { name: "owner-contact", run: handleOwnerContact };
+export const ownerContactCommand: CommandHandler = {
+  commands: ["owner-contact"],
+  description: "Kirim kartu kontak owner bot ke chat ini. Owner dapat mengatur kontak yang dikirim menggunakan /owner-contact set <nomor>.",
+  permission: "public",
+  run: (_sock, _message, ctx) => handleOwnerContact(ctx),
+};

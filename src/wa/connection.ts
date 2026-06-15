@@ -23,7 +23,7 @@ import { spawn } from "child_process";
 import type { WASocket, WAMessage } from "baileys";
 import logger from "../logger.js";
 import config from "../config.js";
-import { parseSlashCommand } from "./command/index.js";
+import { parseSlashCommand } from "./commands/index.js";
 import { isOwnerJid } from "./domain/participants.js";
 import { roleFlagsForJid } from "./domain/participants.js";
 import {
@@ -31,7 +31,7 @@ import {
   defaultGroupContext,
 } from "./domain/groupContext.js";
 import { sendNativeFlow } from "./interactive/index.js";
-import { dispatchCommand } from "./commands/CommandRegistry.js";
+import { dispatchCommand } from "./command/CommandRegistry.js";
 import type { AccountContext, PendingForm } from "../account/accountContext.js";
 import type { GroupContextValue, ParticipantRoleFlags } from "./domain/caches.js";
 import * as registry from "../server/accountRegistry.js";
