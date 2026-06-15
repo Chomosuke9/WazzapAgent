@@ -44,20 +44,29 @@ Key fields:
 | `commandHandled` | `boolean` | Whether this slash command was already processed by Node (Python should not re-process) |
 | `actionLog` | `object\|null` | Present when `messageType === "actionLog"`: `{ action, result }` details |
 
-### Control events
+### Handshake, status & control events
 
-`hello` is sent once via `send()` (best-effort handshake). All other control events use `sendReliable()`.
+The `hello`/`hello_ack` handshake opens every (re)connect: the Python `WaSocket`
+sends `hello` (reliable, Python→Node) and Node replies `hello_ack` (reliable)
+once the account's Baileys socket is created/resumed and the client is bound.
+`whatsapp_status` and the control events then flow Node→Python; reliable
+Node→Python frames are queued per account on the registry
+(`sendReliableToClient()`) and flushed when that account's client reconnects.
 
-| Event | Payload | Trigger |
-|-------|---------|---------|
-| `hello` | `{ instanceId, role }` | Sent once when WS opens (handshake); uses `send()` |
-| `whatsapp_status` | `{ status, reason?, instanceId }` | WhatsApp connection state changes |
-| `clear_history` | `{ chatId }` or `{ chatId: "global" }` | After `/reset` |
-| `set_llm2_model` | `{ chatId, modelId }` or `{ chatId: "global", modelId }` or `{ chatId, modelId: null }` (when model is deleted) | After `/model` |
-| `invalidate_llm2_model` | `{ chatId }` or `{ chatId: "global" }` | After model config change |
-| `invalidate_default_model` | `{}` | After `/modelcfg` |
-| `invalidate_chat_settings` | `{ chatId }` or `{ chatId: "global" }` | After `/mode`, `/prompt`, `/permission`, `/trigger`, `/idle`, or `/announcement` changes |
-| `set_subagent_enabled` | `{ chatId, enabled }` | After `/subagent on\|off` |
+Every Node→Python frame carries `folderPath` for tenant routing. Control events
+carry their fields at the **top level** of the frame (no `payload` wrapper).
+
+| Event | Direction | Payload | Trigger |
+|-------|-----------|---------|---------|
+| `hello` | Python → Node | `{ folderPath, protocolVersion: "2.0" }` | First frame on every (re)connect (reliable) |
+| `hello_ack` | Node → Python | `{ folderPath, waStatus }` | Account's Baileys socket created/resumed + client bound (reliable) |
+| `whatsapp_status` | Node → Python | `{ folderPath, status, reason?, instanceId }` | WhatsApp connection state changes |
+| `clear_history` | Node → Python | `{ folderPath, chatId \| "global" }` (top-level) | After `/reset` |
+| `set_llm2_model` | Node → Python | `{ folderPath, chatId \| "global", modelId }` (top-level; `modelId: null` when the model is deleted) | After model selection via `/setting` |
+| `invalidate_llm2_model` | Node → Python | `{ folderPath, chatId \| "global" }` (top-level) | After model config change |
+| `invalidate_default_model` | Node → Python | `{ folderPath }` (top-level) | After `/modelcfg` |
+| `invalidate_chat_settings` | Node → Python | `{ folderPath, chatId \| "global" }` (top-level) | After `/prompt`, `/permission`, `/trigger`, `/idle`, or `/announcement` changes |
+| `set_subagent_enabled` | Node → Python | `{ folderPath, chatId \| "global", enabled }` (top-level) | After `/subagent on\|off` |
 
 See `README.md` for full payload shape examples for each control event.
 
@@ -77,6 +86,7 @@ See `README.md` for full payload shape examples for each control event.
 | `send_buttons` | `chatId`, `text`, `buttons` | NativeFlow button message (legacy) |
 | `send_carousel` | `chatId`, `cards[]` | Swipeable carousel cards |
 | `run_command` | `chatId`, `command` | Execute a slash command silently (not posted to WhatsApp). Optional `contextMsgId` for anchor. |
+| `download_media` | `chatId`, `contextMsgId` \| `messageId` | Lazily fetch the bytes for a previously-forwarded attachment on demand (vision / sticker / sub-agent). Inbound forwards metadata only (`path: null`, `pending: true`). |
 
 ## Ack/Error responses (Node → Python)
 
@@ -95,6 +105,7 @@ See `README.md` for full payload shape examples for each control event.
 | `permission_denied` | The bot lacks the required role (admin/superadmin) for this action |
 | `invalid_target` | The target `senderRef` or `contextMsgId` is malformed or unresolvable |
 | `send_failed` | The underlying WhatsApp send operation failed (network, media, rate-limit) |
+| `timeout` | The operation timed out (e.g. media download or send exceeded its deadline) |
 
 ### action_ack result formats
 
@@ -112,6 +123,7 @@ The `result` field is action-specific:
 | `relay_lottie_sticker` | `{ contextMsgId, messageId }` |
 | `send_buttons` | Raw Baileys message object from `generateWAMessageFromContent` (the full `msg` with `key`, `message`, etc.) |
 | `send_carousel` | Raw Baileys message object from `generateWAMessageFromContent` (the full `msg` with `key`, `message`, etc.) |
+| `download_media` | `{ path, mime, kind, fileName, originalFileName, jpegThumbnail, size, isAnimated, contextMsgId, messageId }` on success; `ok: false, code: "not_found"` if the source proto was evicted |
 
 See `README.md` § *Acknowledgements and errors* for full JSON examples.
 
@@ -133,10 +145,10 @@ Bots send a synthetic `[QUESTION SENT]` history entry so LLM2 sees its own
 quiz on the next turn.
 
 ## Reliability contract
-- Critical control events from Node to Python **must** use `sendReliable()` to survive WS reconnects.
-- If WS is not open, reliable events are stored in an in-memory queue (max 1000 entries, oldest dropped on overflow).
-- The queue is flushed when the connection reopens.
-- Regular `incoming_message` events use `send()` (best-effort) because they're transient.
+- Critical control events from Node to Python **must** use `sendReliableToClient()` to survive WS reconnects.
+- If that account's client is not OPEN, reliable events are stored in a per-account in-memory queue (max 1000 entries, oldest dropped on overflow).
+- The queue is flushed when that account's client reconnects.
+- Regular `incoming_message` events use `sendToClient()` (best-effort) because they're transient.
 
 ## Full payload reference
 See `README.md` for the complete `incoming_message`, `send_message`, and all

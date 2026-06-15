@@ -4,20 +4,20 @@
 
 | Category | Commands |
 |----------|----------|
-| **Configuration** | `/mode`, `/trigger`, `/prompt`, `/model`, `/modelcfg`, `/setting`, `/subagent`, `/idle` |
+| **Configuration** | `/trigger`, `/prompt`, `/modelcfg`, `/setting`, `/subagent`, `/idle`, `/bot-conf` |
 | **Moderation** | `/permission` |
-| **Information** | `/help`, `/info`, `/debug`, `/dashboard`, `/monitor`, `/owner-contact`, `/group-status` |
+| **Information** | `/help`, `/info`, `/debug`, `/dashboard`, `/monitor`, `/owner-contact` |
 | **Management** | `/reset`, `/broadcast`, `/join`, `/revoke`, `/announcement`, `/generate`, `/activate` |
 | **Stickers** | `/sticker`, `/add-sticker`, `/remove-sticker` |
 | **Utility** | `/catch`, `/dump` |
 
 ## Canonical command list
 
-The following commands are registered as per-command handler modules under `src/wa/command/*.ts` (parsed by `src/wa/command/parseCommand.ts` via the `COMMAND_ALIASES` map) and dispatched by the `CommandRegistry` in `src/wa/commands/CommandRegistry.ts`:
+The following commands are registered as per-command handler modules under `src/wa/commands/*.ts` (parsed by `src/wa/commands/parseCommand.ts` via the `COMMAND_ALIASES` map) and dispatched by the `CommandRegistry` in `src/wa/command/CommandRegistry.ts`:
 
 | Command | Alias(es) | Description |
 |---------|-----------|-------------|
-| `help` | `helps` | Show command list |
+| `help` | `helps`, `menu`, `list` | Show command list |
 | `activate` | — | Activate chat with activation code |
 | `generate` | — | Generate activation code (owner only) |
 | `monitor` | — | Show monitor dashboard (owner only) |
@@ -25,7 +25,6 @@ The following commands are registered as per-command handler modules under `src/
 | `prompt` | `prompts` | Set/view/clear per-chat prompt override |
 | `reset` | `resets` | Clear chat history in Python |
 | `permission` | `permissions` | Set moderation permission level (0–3) |
-| `mode` | `modes` | Set response mode (auto/prefix/hybrid) |
 | `trigger` | `triggers` | Set prefix triggers for prefix/hybrid mode |
 | `dashboard` | `dashboards` | Display usage statistics |
 | `broadcast` | `broadcasts` | Send broadcast to all groups (owner only) |
@@ -35,18 +34,16 @@ The following commands are registered as per-command handler modules under `src/
 | `sticker` | `stickers` | Create sticker from image/video |
 | `add-sticker` | `addsticker`, `addstickers`, `add-stickers` | Add sticker to catalog |
 | `remove-sticker` | `removesticker`, `remove-stickers`, `removestickers` | Remove sticker from catalog |
-| `model` | `models` | Select LLM2 model per chat |
 | `modelcfg` | `modelcfgs` | Configure model list (owner only) |
 | `setting` | `settings` | Interactive settings menu |
-| `group-status` | `gs` | Show/edit group description |
 | `catch` | `catches` | Catch/forward quoted message |
 | `owner-contact` | — | Show bot owner contact info |
 | `subagent` | `subagents` | Toggle sub-agent per chat |
 | `idle` | — | Configure idle trigger range |
 | `announcement` | `announcements` | Toggle announcement broadcast opt-in per group |
-| `dump` | — | Export full LLM context as .txt attachment |
+| `bot-conf` | `botconf` | Owner-only bot-wide config (activation-msg, prompt-override, require-activation) |
 
-Total: 28 canonical commands.
+Total: 25 canonical commands.
 
 ## Singular/plural aliases
 
@@ -56,11 +53,9 @@ has at least a singular/plural pair. Examples:
 | Input | Canonical |
 |-------|-----------|
 | `/setting`, `/settings` | `setting` |
-| `/model`, `/models` | `model` |
 | `/prompt`, `/prompts` | `prompt` |
 | `/dashboard`, `/dashboards` | `dashboard` |
 | `/addsticker`, `/addstickers` | `add-sticker` |
-| `/gs` | `group-status` |
 
 ## Permission model
 
@@ -75,7 +70,7 @@ When `REQUIRE_ACTIVATION=true` (env var), only two commands are exempt:
 
 All other commands are blocked for unactivated chats. The gate is enforced at
 two levels:
-1. **Node.js** (`src/wa/commands/CommandRegistry.ts`, `dispatchCommand`): checks `ACTIVATION_EXEMPT_COMMANDS` set before dispatch.
+1. **Node.js** (`src/wa/command/CommandRegistry.ts`, `dispatchCommand`): checks `ACTIVATION_EXEMPT_COMMANDS` set before dispatch.
 2. **Python bridge** (`main.py`): drops `incoming_message` payloads from unactivated
    chats before they enter the debounce/batch pipeline.
 
@@ -95,7 +90,7 @@ The following commands are restricted to JIDs listed in `BOT_OWNER_JIDS`:
 | `/debug` | Sends test interactive payloads; exposes internal state |
 
 The owner check is performed in each handler's guard clause (dispatched via
-`src/wa/commands/CommandRegistry.ts`) before the handler runs. Non-owner senders receive an
+`src/wa/command/CommandRegistry.ts`) before the handler runs. Non-owner senders receive an
 Indonesian-language rejection message.
 
 ### Admin-only commands in groups
@@ -104,7 +99,6 @@ In group chats, the following commands require sender to be a group admin (or bo
 
 | Command | Admin required |
 |---------|:--------------:|
-| `/mode` | ✅ |
 | `/trigger` | ✅ |
 | `/prompt` | ✅ |
 | `/reset` | ✅ |
@@ -113,7 +107,6 @@ In group chats, the following commands require sender to be a group admin (or bo
 | `/subagent` | ✅ (owner only) |
 | `/idle` | ✅ |
 | `/announcement` | ✅ |
-| `/group-status` | ✅ |
 | `/add-sticker` | ✅ |
 | `/remove-sticker` | ✅ |
 | `/sticker` | ❌ (anyone can use) |
@@ -160,8 +153,8 @@ from Baileys group participant role metadata.
 Commands can reach the system through three paths:
 
 1. **Human-typed in WhatsApp** — the primary path. Baileys fires `messages.upsert`,
-   `src/wa/connection.ts` runs two listeners sequentially:
-   - **Listener 1** (`src/wa/commands/CommandRegistry.ts`): handles the command immediately, sends
+   `src/account/baileysFactory.ts` runs two listeners sequentially:
+   - **Listener 1** (`src/wa/command/CommandRegistry.ts`): handles the command immediately, sends
      the reply on WhatsApp, and returns `true`.
    - **Listener 2** (`src/wa/inbound.ts` → WS `incoming_message`): always sets
      `commandHandled: true` for any slash command, then forwards the payload to
@@ -182,7 +175,7 @@ Commands can reach the system through three paths:
 
 ### Where each command is handled
 
-| Command | Node (`commands/CommandRegistry.ts`) | Python (`main.py`) | Notes |
+| Command | Node (`command/CommandRegistry.ts`) | Python | Notes |
 |---------|:--------------------------:|:------------------:|-------|
 | `help` | ✅ | — | Sends help text directly |
 | `activate` | ✅ | — | Updates activation DB record |
@@ -194,9 +187,7 @@ Commands can reach the system through three paths:
 | `subagent` | ✅ | — | Toggles sub-agent flag; sends WS event |
 | `idle` | ✅ | — | Updates idle trigger range in DB |
 | `announcement` | ✅ | — | Toggles announcement broadcast opt-in per group |
-| `group-status` | ✅ | — | Shows/edits group description |
 | `setting` | ✅ | — | Sends interactive settings menu |
-| `model` | ✅ | — | Sends interactive model selection menu |
 | `add-sticker` | ✅ | — | Requires WhatsApp socket for media download |
 | `remove-sticker` | ✅ | — | Removes sticker from catalog DB |
 | `sticker` | ✅ | — | Node path uses sharp + ffmpeg |
@@ -208,17 +199,17 @@ Commands can reach the system through three paths:
 | `prompt` | ✅ | —¹ | Node handles reply; sends `invalidate_chat_settings` WS event |
 | `reset` | ✅ | —¹ | Node handles reply; sends `clear_history` WS event |
 | `permission` | ✅ | —¹ | Node handles reply; sends `invalidate_chat_settings` WS event |
-| `mode` | ✅ | —¹ | Node handles reply; sends `invalidate_chat_settings` WS event |
 | `trigger` | ✅ | —¹ | Node handles reply; sends `invalidate_chat_settings` WS event |
 | `dashboard` | ✅ | —¹ | Node builds dashboard text from stats DB |
 | `dump` | — | ✅ | Python builds full LLM context and sends as `.txt` attachment |
 
-> ¹ Python's `commands.py` contains handlers for `prompt`/`reset`/`permission`/
-> `mode`/`trigger`/`dashboard`/`help`, but `handle_command()` is never invoked from
-> `main.py` because Node always sets `commandHandled=true` (see `src/wa/inbound.ts`).
-> These are effectively dead code. Python does handle `/reset` (memory clear) and
-> `/dump` (context export) inline in `main.py` (lines 1116, 1145) before the
-> `commandHandled` check.
+> ¹ Slash commands are dispatched entirely Node-side through the `CommandRegistry`
+> (`src/wa/command/CommandRegistry.ts`); Python never parses or handles them
+> (`incoming_message` always carries `commandHandled=true`, see `src/wa/inbound.ts`).
+> For these commands Node handles the reply and emits the matching reliable
+> control event (`clear_history`, `invalidate_chat_settings`, …) so the bridge
+> keeps its caches/history in sync. `/dump` is the only command produced
+> Python-side, because it needs the full assembled LLM context.
 
 ### Silent LLM2 command execution
 
@@ -248,13 +239,12 @@ Only the bot owner can use the `global` variant.
 
 | Command | Global usage | Source file |
 |---------|-------------|-------------|
-| `/mode` | `/mode global auto\|prefix\|hybrid` | `src/wa/command/mode.ts` |
-| `/prompt` | `/prompt global <text>` / `/prompt global clear` | `src/wa/command/prompt.ts` |
-| `/permission` | `/permission global <0-3>` | `src/wa/command/permission.ts` |
-| `/idle` | `/idle global <min-max>` / `/idle default ...` / `/idle global off` | `src/wa/command/idle.ts` |
-| `/subagent` | `/subagent global on\|off` / `/subagent default on\|off` | `src/wa/command/subagent.ts` |
-| `/bot-conf` | owner-only: `activation-msg`, `prompt-override`, `require-activation` | `src/wa/command/bot-conf.ts` |
-| `/announcement` | `/announcement global on\|off` / `/announcement default on\|off` | `src/wa/command/announcement.ts` |
+| `/prompt` | `/prompt global <text>` / `/prompt global clear` | `src/wa/commands/prompt.ts` |
+| `/permission` | `/permission global <0-3>` | `src/wa/commands/permission.ts` |
+| `/idle` | `/idle global <min-max>` / `/idle default ...` / `/idle global off` | `src/wa/commands/idle.ts` |
+| `/subagent` | `/subagent global on\|off` / `/subagent default on\|off` | `src/wa/commands/subagent.ts` |
+| `/bot-conf` | owner-only: `activation-msg`, `prompt-override`, `require-activation` | `src/wa/commands/bot-conf.ts` |
+| `/announcement` | `/announcement global on\|off` / `/announcement default on\|off` | `src/wa/commands/announcement.ts` |
 
 ## Command summary table
 
@@ -270,20 +260,18 @@ Only the bot owner can use the `global` variant.
 | `/dashboard` | Everyone | Node | Display usage statistics |
 | `/dump` | Everyone | Python | Export full LLM context as .txt |
 | `/sticker [upper#lower]` | Everyone | Node + Python | Create sticker from image/video |
-| `/mode <auto\|prefix\|hybrid>` | Admin/owner | Node | Set response mode |
 | `/trigger <type>` | Admin/owner | Node | Set prefix triggers |
 | `/prompt [text\|clear]` | Admin/owner | Node | Set/view/clear per-chat prompt |
 | `/reset` | Admin/owner | Node | Clear chat history |
 | `/permission <0-3>` | Admin/owner | Node | Set moderation permission level |
 | `/setting` | Admin/owner | Node | Interactive settings menu |
-| `/group-status` | Admin/owner | Node | Show/edit group description |
 | `/subagent <on\|off>` | Owner only | Node | Toggle sub-agent per chat |
 | `/idle <min-max>` | Admin/owner | Node | Configure idle trigger range |
 | `/announcement <on\|off>` | Admin/owner | Node | Toggle announcement broadcast opt-in per group |
 | `/add-sticker <name>` | Admin/owner | Node | Add sticker to catalog |
 | `/remove-sticker <name>` | Admin/owner | Node | Remove sticker from catalog |
-| `/model` | Admin/owner | Node | Select LLM2 model per chat |
 | `/modelcfg` | Owner only | Node | Configure model list |
+| `/bot-conf` | Owner only | Node | Bot-wide config (activation-msg, prompt-override, require-activation) |
 | `/broadcast <text>` | Owner only | Node | Broadcast to all groups |
 | `/generate <type> <days>` | Owner only | Node | Generate activation code |
 | `/revoke` | Owner only | Node | Revoke activation code |

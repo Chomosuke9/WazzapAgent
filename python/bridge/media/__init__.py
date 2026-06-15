@@ -1,7 +1,6 @@
 """``bridge.media`` — media + sticker concerns.
 
-Consolidates two cohesive media concerns into one package (per REFACTOR_PLAN
-§3.3):
+Consolidates two cohesive media concerns into one package:
 
 * ``visual`` — visual-attachment processing for the LLM pipeline
   (``build_visual_parts`` / ``redact_multimodal_content`` / the media-enable +

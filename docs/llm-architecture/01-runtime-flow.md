@@ -42,7 +42,7 @@
 1. Baileys emits `messages.upsert` on the tenant's socket. Listeners attached by
    `account/baileysFactory.ts` (`attachCommandListener`, `attachChatbotListener`)
    run against that account's `AccountContext`.
-2. **Slash command path** (`attachCommandListener` → `wa/commands/CommandRegistry.ts`):
+2. **Slash command path** (`attachCommandListener` → `wa/command/CommandRegistry.ts`):
    interactive button/list replies, pending `/modelcfg` form replies, then
    slash-command dispatch. Handled commands set `commandHandled: true`.
 3. **Normalization** (`attachChatbotListener` → `wa/inbound.ts`):
@@ -92,7 +92,7 @@
 ## C. Model switching flow
 1. User picks a model from the `/setting` interactive menu (the standalone
    `/model` command was removed — it is fully superseded by `/setting`).
-2. **Node** (`wa/command/setting.ts` model_select handler) writes
+2. **Node** (`wa/commands/setting.ts` model_select handler) writes
    `chat_settings.llm2_model` to the tenant's `settings.db`.
 3. **Node → Python** (reliable, via the registry): `set_llm2_model
    { folderPath, chatId, modelId }` (+ `invalidate_llm2_model` as a cache

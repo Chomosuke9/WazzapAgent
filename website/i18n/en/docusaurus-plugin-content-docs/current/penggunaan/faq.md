@@ -7,6 +7,7 @@ sidebar_position: 9
 ## Why isn't the bot responding to my message?
 
 Possible causes:
+- **Prefix mode is active** — The bot only responds to @mentions, replies, or when its name is mentioned. Check and change the mode via the `/setting` menu.
 - In groups, the bot doesn't always respond to every message. Try **mentioning or replying** directly to the bot.
 - The bot is processing another message (visible from the typing indicator).
 - Your message is too old (the bot only looks at the most recent messages).

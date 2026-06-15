@@ -21,7 +21,7 @@ Guide for contributing to the WazzapAgents project.
 - ESM modules (`import`/`export`, not `require`).
 - 2-space indentation, single quotes, no trailing commas.
 - Async/await for all asynchronous operations.
-- Use `logger` from `src/logger.js` for logging.
+- Use `logger` from `src/logger.ts` for logging.
 - No formatter/linter configured — match existing style and keep diffs minimal.
 
 ### Python (Bridge)

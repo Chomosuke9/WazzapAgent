@@ -122,7 +122,7 @@ pnpm dev
 **Terminal 2 — Python bridge (WS client):**
 
 ```bash
-python -m python.bridge.main
+PYTHONPATH=python python -m bridge.main
 ```
 
 On first run, the gateway prints a QR code in the terminal. Scan it with WhatsApp to pair the account.
@@ -139,7 +139,7 @@ Steps:
 ![model add](/img/slash_model_add.jpg)
 
 ```txt
-/model add <model id>|<model name>|<model description>|<vision support>
+/modelcfg add <model id>|<model name>|<model description>|<vision support>
 ```
 
 :::warning
@@ -375,5 +375,5 @@ Sub-Agent runs code inside a Docker sandbox. Although isolated, only run it on a
 | `LLM2_FALLBACK_MODEL` | *(empty)* | Fallback model — **ignored** if a model exists in the database, because the model is always taken from the DB for all targets |
 
 :::info
-**How LLM2 fallback works:** At runtime, the model is always taken from the database (configured via `/modelcfg add` and `/model`). The `LLM2_MODEL` and `LLM2_FALLBACK_MODEL` env vars are only used as a fallback when the database has no models at all. The endpoint and API key (`LLM2_ENDPOINT`, `LLM2_API_KEY`, `LLM2_FALLBACK_ENDPOINT`, `LLM2_FALLBACK_API_KEY`) remain important because they determine **which provider** receives the request. So if the primary endpoint times out or errors, the system automatically retries against the fallback endpoint using the same model (from the database).
+**How LLM2 fallback works:** At runtime, the model is always taken from the database (configured via `/modelcfg add` and `/modelcfg`). The `LLM2_MODEL` and `LLM2_FALLBACK_MODEL` env vars are only used as a fallback when the database has no models at all. The endpoint and API key (`LLM2_ENDPOINT`, `LLM2_API_KEY`, `LLM2_FALLBACK_ENDPOINT`, `LLM2_FALLBACK_API_KEY`) remain important because they determine **which provider** receives the request. So if the primary endpoint times out or errors, the system automatically retries against the fallback endpoint using the same model (from the database).
 :::

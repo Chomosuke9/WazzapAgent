@@ -111,7 +111,7 @@ pnpm dev
 
 **Terminal 2 — Python Bridge (WS client):**
 ```bash
-python -m python.bridge.main
+PYTHONPATH=python python -m bridge.main
 ```
 
 Saat pertama kali jalan, gateway akan menampilkan QR code di terminal. Scan dengan WhatsApp untuk pairing.
@@ -127,7 +127,7 @@ Langkah-langkah:
 
 Perhatikan, format nya adalah seperti ini
 ```txt
-/model add <id model>|<nama model>|<deskripsi model>|<vision support modelnya>
+/modelcfg add <id model>|<nama model>|<deskripsi model>|<vision support modelnya>
 ```
 
 :::warning
@@ -363,7 +363,7 @@ Sub-Agent menjalankan kode di dalam sandbox Docker. Meskipun terisolasi, jalanka
 | `LLM2_FALLBACK_MODEL` | *(kosong)* | Model fallback — **diabaikan** jika sudah ada model di database, karena model selalu diambil dari DB untuk semua target |
 
 :::info
-**Cara kerja fallback LLM2:** Saat runtime, model selalu diambil dari database (diatur via `/modelcfg add` dan `/model`). Env var `LLM2_MODEL` dan `LLM2_FALLBACK_MODEL` hanya dipakai sebagai fallback kalau database belum punya model sama sekali. Endpoint dan API key (`LLM2_ENDPOINT`, `LLM2_API_KEY`, `LLM2_FALLBACK_ENDPOINT`, `LLM2_FALLBACK_API_KEY`) tetap penting karena mereka menentukan **provider mana** yang menerima request. Jadi jika primary endpoint timeout/error, sistem otomatis mencoba fallback endpoint dengan model yang sama (dari database).
+**Cara kerja fallback LLM2:** Saat runtime, model selalu diambil dari database (diatur via `/modelcfg add` dan `/modelcfg`). Env var `LLM2_MODEL` dan `LLM2_FALLBACK_MODEL` hanya dipakai sebagai fallback kalau database belum punya model sama sekali. Endpoint dan API key (`LLM2_ENDPOINT`, `LLM2_API_KEY`, `LLM2_FALLBACK_ENDPOINT`, `LLM2_FALLBACK_API_KEY`) tetap penting karena mereka menentukan **provider mana** yang menerima request. Jadi jika primary endpoint timeout/error, sistem otomatis mencoba fallback endpoint dengan model yang sama (dari database).
 :::
 
 ### Logging Bridge

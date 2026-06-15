@@ -71,16 +71,16 @@
 - `presence.ts` — Mark read / typing.
 - `events.ts` — Synthetic context events (action log, group join, role change).
 - `utils.ts` — `semaphore`, `withRetry`, `escapeRegex`.
-- `commands/` — `CommandRegistry.ts` (Map<name, handler>, aliases on each
+- `command/` — `CommandRegistry.ts` (Map<name, handler>, aliases on each
   handler), `CommandContext.ts` (strict typed context incl. `account`,
   `folderPath`, `sock`, `repos`).
-- `command/` — One module per slash command (`activate`, `addsticker`,
-  `announcement`, `broadcast`, `catch`, `dashboard`, `debug`, `generate`,
-  `groupStatus`, `help`, `idle`, `info`, `join`, `mode`, `model`, `modelcfg`,
+- `commands/` — One module per slash command (`activate`, `addsticker`,
+  `announcement`, `bot-conf`, `broadcast`, `catch`, `dashboard`, `debug`,
+  `generate`, `help`, `idle`, `info`, `join`, `modelcfg`,
   `monitor`, `ownerContact`, `permission`, `prompt`, `removesticker`, `reset`,
   `revoke`, `setting`, `sticker`, `subagent`, `trigger`) + `index.ts` /
-  `parseCommand.ts`. Sticker/group-status handlers write temp/output files into
-  the tenant's media/sticker dir (threaded from `ctx.account`).
+  `parseCommand.ts` / `configScope.ts`. Sticker handlers write temp/output files
+  into the tenant's media/sticker dir (threaded from `ctx.account`).
 - `interactive/` — `sendInteractive.ts` (NativeFlow via `relayMessage` +
   `additionalNodes`), `sendButtons.ts`, `sendCarousel.ts`.
 

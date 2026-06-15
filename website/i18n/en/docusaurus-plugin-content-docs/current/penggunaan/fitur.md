@@ -36,8 +36,24 @@ The bot **replies** to specific messages when responding, making it clear which 
 
 The bot automatically **detects when a new member** joins the group and can greet them if the prompt is configured to do so.
 
-## Prompt & Permission Settings
+## Response Mode (Auto vs Prefix)
 
-Admins can configure bot behavior using commands:
+The bot has **two configurable response modes**:
+
+- **`auto`** (default) — The bot analyzes the context of every message and responds automatically
+- **`prefix`** (token-saving) — The bot only responds when called: `@mention`, reply, or its name is mentioned
+
+The response mode is configured through the interactive **`/setting`** menu (replacing the old `/mode` command). Triggers for prefix mode are still set with `/trigger`:
+```
+/setting            # Open the menu, then choose the response mode
+/trigger reply on   # Configure response triggers (prefix mode)
+```
+
+## Prompt, Mode, & Permission Settings
+
+Admins and the bot owner can configure bot behavior:
 - `/prompt <text>` — Set custom instructions for the bot in this chat
-- `/permission <0-3>` — Set moderation permission level (delete/kick)
+- `/permission <0-3>` — Set moderation permission level (delete/mute/kick)
+- `/setting` — Change the response mode & other per-chat settings
+- `/trigger <type>` — Configure triggers in prefix mode
+- `/dashboard` — View usage statistics

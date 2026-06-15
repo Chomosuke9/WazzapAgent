@@ -56,8 +56,8 @@ process-global socket/DB/cache is shared across accounts.
 - Incoming message parse + media normalization (`wa/domain/messageParser.ts`,
   `mediaHandler.ts`), assigning `contextMsgId` + `senderRef`
   (`wa/domain/identifiers.ts`).
-- Slash command handling (`wa/commands/CommandRegistry.ts` + per-command modules
-  in `wa/command/`).
+- Slash command handling (`wa/command/CommandRegistry.ts` + per-command modules
+  in `wa/commands/`).
 - Action execution received from Python (`account/actionDispatcher.ts` →
   `wa/*`): `send_message`, `delete_message`, `kick_member`, `run_command`, …
 - Per-tenant SQLite via `db/Database.ts` (owns one tenant's settings/stats/
@@ -99,7 +99,7 @@ reaches the configured range the bot responds anyway with
 4. Node assigns `contextMsgId` + `senderRef` (`wa/domain/identifiers.ts`) on the
    tenant's `AccountContext`.
 5. Slash commands are dispatched/executed in Node first
-   (`wa/commands/CommandRegistry.ts`); handled commands are not forwarded (the
+   (`wa/command/CommandRegistry.ts`); handled commands are not forwarded (the
    `incoming_message` carries `commandHandled: true`).
 6. Node forwards a normalized `incoming_message` to that tenant's bound Python
    client (best-effort via the registry; dropped if the client is not OPEN).
@@ -153,11 +153,11 @@ non-loopback `WS_BIND_HOST` only together with a token.
 ## Command design
 Slash commands are split across both sides:
 
-- **Node-side** (most commands, `wa/commands/CommandRegistry.ts` +
-  `wa/command/*`): `/help`, `/info`, `/debug`, `/join`, `/sticker`, `/broadcast`,
-  `/mode`, `/trigger`, `/setting`, `/model`, `/modelcfg`, `/group-status`,
+- **Node-side** (most commands, `wa/command/CommandRegistry.ts` +
+  `wa/commands/*`): `/help`, `/info`, `/debug`, `/join`, `/sticker`, `/broadcast`,
+  `/trigger`, `/setting`, `/modelcfg`,
   `/catch`, `/dashboard`, `/permission`, … Aliases are declared on each handler
-  (single source of truth; parsing in `wa/command/parseCommand.ts`).
+  (single source of truth; parsing in `wa/commands/parseCommand.ts`).
 - **Python-side** (commands that need full LLM state / PIL): `/reset`, `/dump`,
   and Python's PIL sticker path. After certain Node commands run, Node emits the
   matching control event (`clear_history`, `invalidate_chat_settings`,

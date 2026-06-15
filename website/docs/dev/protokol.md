@@ -157,7 +157,7 @@ Saat aksi gagal, gateway juga mengirim pesan `error`:
 }
 ```
 
-**Error codes:** `not_found`, `not_group`, `permission_denied`, `invalid_target`, `send_failed`.
+**Error codes:** `not_found`, `not_group`, `permission_denied`, `invalid_target`, `send_failed`, `timeout`.
 
 ## Bridge → Gateway
 

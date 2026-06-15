@@ -7,7 +7,7 @@ sidebar_position: 9
 ## Mengapa bot tidak merespons pesan saya?
 
 Kemungkinan penyebab:
-- **Mode prefix aktif** — Bot hanya merespons saat @mention, reply, atau nama disebut. Cek dengan `/mode` dan ubah dengan `/mode auto` jika perlu.
+- **Mode prefix aktif** — Bot hanya merespons saat @mention, reply, atau nama disebut. Cek dan ubah mode lewat menu `/setting`.
 - Di grup, bot tidak selalu merespons setiap pesan. Coba **mention atau reply** langsung ke bot.
 - Bot sedang memproses pesan lain (terlihat dari indikator mengetik).
 - Pesanmu sudah terlalu lama (bot hanya melihat beberapa pesan terakhir).

@@ -31,7 +31,7 @@ Setelah bot masuk grup, lakukan ini secara berurutan:
 
 ## Cara Bot Merespons di Grup
 
-Bot memiliki dua **mode respons** yang bisa dikonfigurasi dengan `/mode`:
+Bot memiliki dua **mode respons** yang diatur lewat menu interaktif `/setting`:
 
 ### Mode `auto` (default)
 - Bot **menganalisis konteks** setiap pesan dengan AI
@@ -51,9 +51,10 @@ Bot memiliki dua **mode respons** yang bisa dikonfigurasi dengan `/mode`:
 Di **chat pribadi**, bot selalu merespons setiap pesan **tanpa memandang mode**.
 
 :::tip
-Untuk grup ramai, gunakan **`/mode prefix`** agar bot tidak terlalu berisik dan token lebih hemat. Pemilik bot bisa mengatur dengan:
+Untuk grup ramai, gunakan **mode prefix** agar bot tidak terlalu berisik dan token lebih hemat. Buka `/setting` untuk memilih mode, lalu atur pemicunya:
 ```
-/mode prefix                    # Aktifkan mode prefix
-/trigger tag,reply,name         # Bot respons saat tag/reply/mention
+/setting                        # Pilih mode respons (auto/prefix)
+/trigger reply on               # Bot respons saat direply
+/trigger tag on                 # Bot respons saat di-tag
 ```
 :::

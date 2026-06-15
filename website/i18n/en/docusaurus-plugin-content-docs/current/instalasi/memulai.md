@@ -31,11 +31,30 @@ After the bot joins the group, follow these steps in order:
 
 ## How the Bot Responds in Groups
 
-In busy groups, the bot **doesn't respond to every message**. The bot will respond if:
+The bot has two **response modes**, configured through the interactive `/setting` menu:
 
-- The message **mentions the bot** explicitly (e.g., `@Vivy`)
-- The message is a **reply** to the bot's previous message
-- The bot determines there's important context that needs a response
-- There's an **important event** like a new member joining
+### `auto` mode (default)
+- The bot **analyzes the context** of every message with AI
+- Responds automatically when there's an important topic
+- Suitable for groups that genuinely need an active bot
+- **Uses more API tokens**
 
-In **private chats**, the bot always responds to every message.
+### `prefix` mode (optimal for busy groups)
+- The bot **only responds when explicitly called:**
+  - `@mention` the bot (e.g., `@Vivy hello`)
+  - Reply to the bot's previous message
+  - Mention the bot's name in text (e.g., "Vivy, help me")
+  - A new member joins (configurable)
+- **More token-efficient**, faster responses
+- Configure triggers with `/trigger`
+
+In **private chats**, the bot always responds to every message **regardless of mode**.
+
+:::tip
+For busy groups, use **prefix mode** so the bot isn't too noisy and saves tokens. Open `/setting` to choose the mode, then configure its triggers:
+```
+/setting                        # Choose the response mode (auto/prefix)
+/trigger reply on               # Respond when replied to
+/trigger tag on                 # Respond when tagged
+```
+:::

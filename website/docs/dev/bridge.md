@@ -18,9 +18,9 @@ Dokumentasi internal untuk Python LLM Bridge (`python/bridge/`). Bridge menerima
 
 ## Entry Point (`main.py`)
 
-### WebSocket Server
+### WaSocket Client
 
-Bridge berjalan sebagai WebSocket server yang menerima koneksi dari gateway. Saat menerima pesan `incoming_message`, bridge:
+Bridge berjalan sebagai **WaSocket client** yang men-_dial_ gateway Node di `NODE_URL` (gateway-lah yang menjadi WebSocket server). `main.py` memuat daftar akun (`accounts.py`) dan menjalankan satu `AgentSession` (`session.py`) per akun (`folder_path`). Setiap `AgentSession` adalah composition root yang merangkai collaborator di package `agent/` (mis. `batch_processor.py`, `llm1_router.py`, `llm2_responder.py`, `subagent_coordinator.py`, `mute_gate.py`, `reply_dedup.py`, `idle_trigger.py`, `ack_hydrator.py`, `event_router.py`). Saat menerima pesan `incoming_message`, bridge:
 
 1. Mengakumulasi pesan dalam **burst window**.
 2. Setelah debounce, memproses batch secara keseluruhan.
@@ -66,7 +66,7 @@ class PendingChat:
     lock: asyncio.Lock           # Concurrency guard
 ```
 
-## LLM1 — Gating (`llm1.py`)
+## LLM1 — Gating (`llm/llm1.py`)
 
 LLM1 adalah tahap pertama yang memutuskan apakah bot harus merespons.
 
@@ -97,7 +97,7 @@ class LLM1Decision:
 - **History truncation** — History di-limit `LLM1_HISTORY_LIMIT` pesan, setiap pesan max `LLM1_MESSAGE_MAX_CHARS` karakter.
 - **Fallback:** Jika LLM1 gagal, default ke "respond" agar bot tidak diam.
 
-## LLM2 — Responder (`llm2.py`)
+## LLM2 — Responder (`llm/llm2.py`)
 
 LLM2 adalah tahap kedua yang menghasilkan respons lengkap.
 
@@ -160,36 +160,15 @@ Primary provider → gagal → retry (jika timeout, max LLM2_RETRY_MAX kali)
 
 Caller bisa memberikan `result_validator` function. Jika validasi gagal, result dianggap unusable dan fallback provider dicoba.
 
-## Slash Commands (`commands.py`)
+## Slash Commands
 
-### Command yang Ditangani Bridge
+Slash command (mis. `/prompt`, `/reset`, `/permission`, `/broadcast`) **tidak lagi ditangani oleh bridge**. Seluruh dispatch perintah kini berada di sisi Node gateway (`src/wa/command/` untuk infrastruktur `CommandRegistry`/`CommandContext` dan `src/wa/commands/` untuk handler per-perintah). Tidak ada lagi modul `commands.py` di sisi Python.
 
-| Command | Akses | Deskripsi |
-|---------|-------|-----------|
-| `/prompt <teks>` | Admin (grup), semua (private) | Set prompt kustom per chat |
-| `/prompt` | Admin (grup), semua (private) | Lihat prompt saat ini |
-| `/prompt clear` | Admin (grup), semua (private) | Hapus prompt kustom |
-| `/reset` | Admin (grup), semua (private) | Reset memori percakapan |
-| `/permission <0-3>` | Admin (grup saja) | Set level permission |
-| `/permission` | Admin (grup saja) | Lihat level saat ini |
+Bridge hanya menerima sinkronisasi state setelah perintah dieksekusi gateway, melalui control event (`clear_history`, `invalidate_chat_settings`, `set_llm2_model`, `set_subagent_enabled`, dll.). Lihat [Protokol WebSocket](./protokol) untuk detailnya.
 
-### Command yang Ditangani Gateway
+## Database (`db/`)
 
-| Command | Akses | Deskripsi |
-|---------|-------|-----------|
-| `/broadcast <teks>` | Bot owner saja | Broadcast ke semua chat |
-
-### Alur Pemrosesan
-
-```
-1. Gateway deteksi slash command di pesan
-2. Kirim ke bridge dengan field `slashCommand: { command, args }`
-3. Bridge parse dan eksekusi command
-4. Jika `skip_llm: true` → kirim respons langsung, skip LLM pipeline
-5. Jika command tidak dikenal → teruskan ke pipeline LLM normal
-```
-
-## Database (`db.py`)
+State per-tenant disimpan di package `db/`: repository per-domain (`settings_repository.py`, `models_repository.py`, `moderation_repository.py`, `stats_repository.py`, `activation_repository.py`) di atas core per-tenant (`core.py`). Tidak ada lagi modul `db.py` monolitik.
 
 ### Schema
 
@@ -252,9 +231,9 @@ class WhatsAppMessage:
 
 Format: `<contextMsgId>[HH:MM][Admin?]NamaSender (senderRef):Teks`
 
-## Media Processing (`media.py`)
+## Media Processing (`media/`)
 
-Modul `media.py` memproses attachment visual untuk input multimodal ke LLM:
+Package `media/` memproses attachment visual untuk input multimodal ke LLM (`resolver.py` me-resolve path media dari `context_msg_id`, `visual.py` memproses attachment visual):
 
 - Membaca file dari path lokal.
 - Encode ke base64 untuk API multimodal.

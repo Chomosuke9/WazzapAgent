@@ -157,7 +157,7 @@ When an action fails, the gateway also sends an `error` message:
 }
 ```
 
-**Error codes:** `not_found`, `not_group`, `permission_denied`, `invalid_target`, `send_failed`.
+**Error codes:** `not_found`, `not_group`, `permission_denied`, `invalid_target`, `send_failed`, `timeout`.
 
 ## Bridge → Gateway
 

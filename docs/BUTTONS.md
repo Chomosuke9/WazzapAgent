@@ -302,7 +302,7 @@ async function handleButtonResponse(msg, chatId, senderId) {
 
   // Slash command buttons (/command)
   if (selectedId.startsWith("/")) {
-    const { handleCommandListener } = await import("./commands/CommandRegistry.ts");
+    const { dispatchCommand } = await import("../command/CommandRegistry.js");
     const slashCommand = parseSlashCommand(selectedId);
     if (slashCommand) {
       const fakeMsg = {
@@ -319,7 +319,7 @@ async function handleButtonResponse(msg, chatId, senderId) {
         botIsSuperAdmin: group?.botIsSuperAdmin || false,
         contextMsgId: null, text: selectedId, group, msg: fakeMsg,
       };
-      await handleCommandListener(fakeMsg, context);
+      await dispatchCommand(fakeMsg, context);
     }
     return true;
   }

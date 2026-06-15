@@ -18,9 +18,9 @@ Internal documentation for the Python LLM Bridge (`python/bridge/`). The bridge 
 
 ## Entry Point (`main.py`)
 
-### WebSocket Server
+### WaSocket Client
 
-The bridge runs as a WebSocket server that accepts connections from the gateway. When receiving an `incoming_message`, the bridge:
+The bridge runs as a **WaSocket client** that dials the Node gateway at `NODE_URL` (the gateway is the WebSocket server). `main.py` loads the accounts list (`accounts.py`) and runs one `AgentSession` (`session.py`) per account (`folder_path`). Each `AgentSession` is a composition root that wires the collaborators in the `agent/` package (e.g. `batch_processor.py`, `llm1_router.py`, `llm2_responder.py`, `subagent_coordinator.py`, `mute_gate.py`, `reply_dedup.py`, `idle_trigger.py`, `ack_hydrator.py`, `event_router.py`). When receiving an `incoming_message`, the bridge:
 
 1. Accumulates messages in a **burst window**.
 2. After debounce, processes the batch as a whole.
@@ -66,7 +66,7 @@ class PendingChat:
     lock: asyncio.Lock           # Concurrency guard
 ```
 
-## LLM1 — Gating (`llm1.py`)
+## LLM1 — Gating (`llm/llm1.py`)
 
 LLM1 is the first stage that decides whether the bot should respond.
 
@@ -97,7 +97,7 @@ class LLM1Decision:
 - **History truncation** — History limited to `LLM1_HISTORY_LIMIT` messages, each message max `LLM1_MESSAGE_MAX_CHARS` characters.
 - **Fallback:** If LLM1 fails, defaults to "respond" so the bot doesn't go silent.
 
-## LLM2 — Responder (`llm2.py`)
+## LLM2 — Responder (`llm/llm2.py`)
 
 LLM2 is the second stage that generates complete responses.
 
@@ -160,36 +160,15 @@ Primary provider → fails → retry (if timeout, max LLM2_RETRY_MAX times)
 
 Callers can provide a `result_validator` function. If validation fails, the result is treated as unusable and the fallback provider is tried.
 
-## Slash Commands (`commands.py`)
+## Slash Commands
 
-### Commands Handled by Bridge
+Slash commands (e.g. `/prompt`, `/reset`, `/permission`, `/broadcast`) are **no longer handled by the bridge**. All command dispatch now lives on the Node gateway side (`src/wa/command/` for the `CommandRegistry`/`CommandContext` infrastructure and `src/wa/commands/` for the per-command handlers). There is no longer a `commands.py` module on the Python side.
 
-| Command | Access | Description |
-|---------|--------|-------------|
-| `/prompt <text>` | Admin (group), anyone (private) | Set custom prompt per chat |
-| `/prompt` | Admin (group), anyone (private) | View current prompt |
-| `/prompt clear` | Admin (group), anyone (private) | Clear custom prompt |
-| `/reset` | Admin (group), anyone (private) | Reset conversation memory |
-| `/permission <0-3>` | Admin (group only) | Set permission level |
-| `/permission` | Admin (group only) | View current level |
+The bridge only receives state synchronization after the gateway executes a command, via control events (`clear_history`, `invalidate_chat_settings`, `set_llm2_model`, `set_subagent_enabled`, etc.). See [WebSocket Protocol](./protokol) for details.
 
-### Commands Handled by Gateway
+## Database (`db/`)
 
-| Command | Access | Description |
-|---------|--------|-------------|
-| `/broadcast <text>` | Bot owner only | Broadcast to all chats |
-
-### Processing Flow
-
-```
-1. Gateway detects slash command in message
-2. Sends to bridge with `slashCommand: { command, args }` field
-3. Bridge parses and executes command
-4. If `skip_llm: true` → send response directly, skip LLM pipeline
-5. If command not recognized → forward to normal LLM pipeline
-```
-
-## Database (`db.py`)
+Per-tenant state is stored in the `db/` package: per-domain repositories (`settings_repository.py`, `models_repository.py`, `moderation_repository.py`, `stats_repository.py`, `activation_repository.py`) over the per-tenant core (`core.py`). There is no longer a monolithic `db.py` module.
 
 ### Schema
 
@@ -252,9 +231,9 @@ class WhatsAppMessage:
 
 Format: `<contextMsgId>[HH:MM][Admin?]SenderName (senderRef):Text`
 
-## Media Processing (`media.py`)
+## Media Processing (`media/`)
 
-The `media.py` module processes visual attachments for multimodal LLM input:
+The `media/` package processes visual attachments for multimodal LLM input (`resolver.py` resolves media paths from a `context_msg_id`, `visual.py` processes the visual attachments):
 
 - Reads files from local paths.
 - Encodes to base64 for multimodal APIs.

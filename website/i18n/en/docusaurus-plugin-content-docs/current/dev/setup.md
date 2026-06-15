@@ -80,7 +80,7 @@ pnpm dev
 
 **Terminal 2 — Python Bridge (WS client):**
 ```bash
-python -m python.bridge.main
+PYTHONPATH=python python -m bridge.main
 ```
 
 On first run, the gateway will display a QR code in the terminal. Scan it with WhatsApp to pair.
@@ -218,8 +218,8 @@ WazzapAgents/
 │       ├── sendQueue.ts        # Per-JID send queue
 │       ├── events.ts           # Synthetic events
 │       ├── utils.ts            # Concurrency helpers
-│       ├── commands/           # CommandRegistry + CommandContext
-│       ├── command/            # Per-command handlers
+│       ├── command/            # CommandRegistry + CommandContext
+│       ├── commands/           # Per-command handlers
 │       └── interactive/        # NativeFlow messages
 ├── python/
 │   ├── wasocket/                # make_wa_socket SDK (WS CLIENT)

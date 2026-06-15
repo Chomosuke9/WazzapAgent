@@ -40,7 +40,7 @@ accounts** (tenants), one per `folder_path`, each fully isolated (CONTRACT.md §
 │  │             Database + repositories, no module globals) │
 │  ├─ db/       Database + schema/ + repositories/           │
 │  ├─ wa/       domain/ + inbound/outbound/actions/          │
-│  │            moderation + commands/ (CommandRegistry)     │
+│  │            moderation + command/ (CommandRegistry)      │
 │  └─ protocol/ types.ts + ports.ts (wire types, CONTRACT §5)│
 └──────────────────────────────────────────────────────────┘
         ▲  hello / hello_ack (§1.1)        ▲
@@ -130,10 +130,10 @@ src/                          Node.js gateway runtime (WS SERVER, TypeScript)
     presence.ts               Mark read, typing indicator
     events.ts                 Synthetic context events (action log, group join, role change)
     utils.ts                  Concurrency helpers: semaphore, withRetry, escapeRegex
-    commands/                 Typed command dispatch (no switch, no alias drift)
+    command/                  Typed command dispatch (no switch, no alias drift)
       CommandRegistry.ts      Map<name, CommandHandler>; aliases declared on each handler
       CommandContext.ts       Strict typed context threaded to handlers (sock, account, repos, …)
-    command/                  Per-command handler modules (one CommandHandler each)
+    commands/                 Per-command handler modules (one CommandHandler each)
       index.ts                Barrel re-export of all handlers + parseSlashCommand
       parseCommand.ts         Raw command text → {command, args} parsing
       activate.ts             /activate <code> — Activate chat with activation code
@@ -144,13 +144,10 @@ src/                          Node.js gateway runtime (WS SERVER, TypeScript)
       dashboard.ts            /dashboard — Show chat statistics
       debug.ts                /debug — Show debug info
       generate.ts             /generate <prompt> — Generate image (owner only)
-      groupStatus.ts          /group-status — Show/edit group description
-      groupStatusHelpers.ts   Pure helper functions (no side effects)
       help.ts                 /help — Show command list
       idle.ts                 /idle <min-max> — Configure idle trigger range
       info.ts                 /info — Show bot info
       join.ts                 /join <link> — Join group via invite link
-      mode.ts                 /mode <auto|prefix|hybrid> — Set chat response mode
       modelcfg.ts             /modelcfg — Configure default model config
       botConfig.ts (../)      Owner bot-wide config helpers (activation msg, require-activation)
       bot-conf.ts             /bot-conf — Owner-only bot-wide config (activation-msg, prompt-override, require-activation)
@@ -216,6 +213,7 @@ python/                       Python bridge + WaSocket SDK (WS CLIENTS)
       client.py               LLM client factory, fallback targets
       metadata.py             Context metadata: bot mention, reply signals, window stats
       tool_utils.py           Cross-provider tool-call extraction
+      error_utils.py          LLM error classification / handling helpers
     messaging/                Message processing pipeline
       processing.py           Burst building, payload normalization, dedup, code block extraction
       filtering.py            Trigger check, prefix/trigger mode, echo filtering
@@ -239,7 +237,7 @@ tests/                        Node tests (*.test.ts) — node/ unit + e2e/ end-t
 website/                      Docusaurus documentation site (Indonesian + English)
 docs/llm-architecture/        Architecture docs for LLM/agent developers
   00-overview.md → 05-state-data-and-db.md
-CONTRACT.md  README.md  AGENTS.md  REFACTOR_PLAN.md  steps/
+CONTRACT.md  README.md  AGENTS.md
 ```
 
 ---
@@ -500,12 +498,14 @@ single-account fallback.
 `WS_RECONNECT_JITTER_RATIO` (+/- jitter fraction 0..1, default 0.2),
 `WS_HEARTBEAT_INTERVAL_MS` (ping cadence and detection granularity when connected, default 20000),
 `GROUP_METADATA_TIMEOUT_MS`, `DOWNLOAD_TIMEOUT_MS`, `SEND_TIMEOUT_MS`,
-`UPSERT_CONCURRENCY`, `PERF_LOG_ENABLED`, `PERF_LOG_THRESHOLD_MS`
+`UPSERT_CONCURRENCY`, `PERF_LOG_ENABLED`, `PERF_LOG_THRESHOLD_MS`,
+`STALE_MESSAGE_MAX_AGE_MS` (drop messages older than this on reconnect, default 5000ms; `0` disables)
 
 **Sticker creation (Node):**
 `STICKER_MAX_DURATION_SEC` (default 6), `STICKER_MAX_SIZE_KB` (default 1024),
 `STICKER_FPS` (default 15), `STICKER_QUALITY` (default 75),
-`STICKER_PACK_NAME` (default "WazzapAgents"), `STICKER_EMOJI` (default "🤖")
+`STICKER_PACK_NAME` (default "WazzapAgents"), `STICKER_EMOJI` (default "🤖"),
+`STICKER_UPLOAD_DIR` (user-uploaded sticker staging dir, default `<DATA_DIR>/stickers_user`)
 
 **Python Bridge:**
 `HISTORY_LIMIT` (default 20), `INCOMING_DEBOUNCE_SECONDS` (default 5),
@@ -536,6 +536,7 @@ true = interactive card via sendRichMessage, mobile only),
 
 **SQLite DB paths (defaults under DATA_DIR):**
 `SETTINGS_DB_PATH`, `STATS_DB_PATH`, `MODERATION_DB_PATH`,
+`SUBAGENT_DB_PATH`, `STICKERS_DB_PATH`,
 `BOT_SETTINGS_DB_PATH`, `BOT_STATS_DB_PATH`, `BOT_MODERATION_DB_PATH`
 
 **SubAgent:**
@@ -700,7 +701,7 @@ Messages from muted users are completely invisible to LLM1/LLM2.
 - When `REQUIRE_ACTIVATION=true`, all chats must be activated via
   `/activate <code>` before the bot responds. Only `/info` and `/activate`
   commands are exempt. The gate is enforced at two levels:
-  1. **Node.js** (`src/wa/commands/CommandRegistry.ts`, `dispatchCommand`):
+  1. **Node.js** (`src/wa/command/CommandRegistry.ts`, `dispatchCommand`):
      Blocks non-exempt commands before dispatch.
   2. **Python bridge** (main.py): Drops incoming_message payloads from
      unactivated chats before they enter the debounce/batch pipeline.

@@ -43,17 +43,17 @@ Bot memiliki **dua mode respons** yang bisa dikonfigurasi:
 - **`auto`** (default) — Bot menganalisis konteks setiap pesan dan merespons secara otomatis
 - **`prefix`** (hemat token) — Bot hanya merespons saat dipanggil: `@mention`, reply, atau nama disebut
 
-Gunakan `/mode` untuk melihat atau mengubah mode. Pemilik bot bisa mengatur dengan:
+Mode respons diatur lewat menu interaktif **`/setting`** (menggantikan perintah lama `/mode`). Pemicu respons dalam mode prefix tetap diatur dengan `/trigger`:
 ```
-/mode prefix        # Aktifkan mode hemat
-/trigger tag,reply  # Atur trigger respons
+/setting            # Buka menu, lalu pilih mode respons
+/trigger reply on   # Atur trigger respons (mode prefix)
 ```
 
 ## Pengaturan Prompt, Mode, & Permission
 
 Admin & pemilik bot bisa mengatur perilaku bot:
 - `/prompt <teks>` — Atur instruksi kustom untuk bot di chat ini
-- `/permission <0-3>` — Atur level permission moderasi (delete/kick)
-- `/mode <auto|prefix>` — Ubah mode respons (pemilik bot saja)
-- `/trigger <triggers>` — Atur pemicu dalam mode prefix (pemilik bot saja)
+- `/permission <0-3>` — Atur level permission moderasi (delete/mute/kick)
+- `/setting` — Ubah mode respons & pengaturan per-chat lainnya
+- `/trigger <jenis>` — Atur pemicu dalam mode prefix
 - `/dashboard` — Lihat statistik penggunaan

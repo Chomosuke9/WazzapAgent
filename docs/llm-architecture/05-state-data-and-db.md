@@ -10,12 +10,9 @@
 | **Message ID / contextMsgId index** | Two `Map`s (12k + 24k) | Two-map architecture: `messageKeyIndex` (12k keys, contextMsgId → message key) and `messageIdToContextId` (24k keys, messageId → contextMsgId). Used for reply targeting and action resolution. |
 | **senderRef registry** | `Map[chatId → Map]` | Per-chat bidirectional mapping between JIDs and short senderRef tokens derived from `SHA1(chatId|senderId|attempt)`. Rebuilt from incoming messages on reconnect. |
 | **Quiz message IDs** | `Set` (bounded 2,000) | Tracks WhatsApp message IDs of sent quiz interactive messages (`quizMessageIds`). Used by `src/wa/inbound.ts` to distinguish quiz replies (forward to LLM) from settings menu replies (handle locally). |
-| **Sticker catalog cache** | Module-level dict | Cached file listing of `STICKERS_DIR` (`data/stickers/`). Scanned at startup by Python's `stickers.py`; updated by Node's `src/wa/command/addsticker.ts` writing to `sticker_db`. |
+| **Sticker catalog cache** | Module-level dict | Cached file listing of `STICKERS_DIR` (`data/stickers/`). Scanned at startup by Python's `stickers.py`; updated by Node's `src/wa/commands/addsticker.ts` writing to `sticker_db`. |
 | **Perf logging buffers** | None (ad-hoc) | When `PERF_LOG_ENABLED` is set, slow operations log structured metrics via `logger.info`: inbound message parsing (`src/wa/inbound.ts`), message upsert batches (`src/wa/connection.ts`). Threshold controlled by `PERF_LOG_THRESHOLD_MS` (default 400ms). |
 | **Reliable WS queue** | `Array` (bounded 1,000) | Per-account in-memory array of queued Node→Python control events (`sendReliableToClient()` on `src/server/accountRegistry.ts`). Flushed when that account's client reconnects. Oldest dropped when queue exceeds `MAX_RELIABLE_QUEUE`. |
-| **Pending send request chat** | `OrderedDict[str, str]` (max 4,096) | Maps `request_id → chat_id` for in-flight `send_message` actions awaiting `action_ack`. Used to hydrate provisional history entries with real contextMsgIds. LRU-evicted. |
-| **Pending subagent attachments** | `OrderedDict[str, tuple[str, list[dict]]]` (max 4,096) | Staged sub-agent output files awaiting `action_ack`. Keyed by `request_id` (e.g. `subagent_attach-1715097600000-000042`). On ack, stores file paths into `media_paths_by_chat` under the real contextMsgId. LRU-evicted. |
-| **Pending run command chat** | `OrderedDict[str, tuple[str, str]]` (max 4,096) | Tracks `run_command` actions awaiting `action_ack`. Keyed by `request_id`; value is `(chat_id, command_text)`. On ack, appends synthetic "Command executed" entry to per-chat history. LRU-evicted. |
 
 ### Python side
 
@@ -66,12 +63,12 @@ Per-chat configuration — one row per chat plus a `__global__` defaults row:
 | `updated_at` | `TEXT` | ISO-8601 timestamp, auto-set via `datetime('now')` |
 
 #### `llm_models` (in `settings.db`)
-Model catalog — available LLM2 models selectable via `/model`:
+Model catalog — available LLM2 models selectable via the `/setting` menu:
 
 | Column | Type | Description |
 |--------|------|-------------|
 | `model_id` | `TEXT PK` | Unique model identifier |
-| `display_name` | `TEXT` | Human-friendly name shown in `/model` and `/modelcfg` |
+| `display_name` | `TEXT` | Human-friendly name shown in the `/setting` menu and `/modelcfg` |
 | `description` | `TEXT` | Optional description (shown in `/modelcfg`) |
 | `is_active` | `INTEGER` | 0/1 — whether model is available for selection |
 | `sort_order` | `INTEGER` | Lowest = default model for new chats |
@@ -243,7 +240,7 @@ If a chat has any user-added stickers in `stickers.db`:
 
 ### Catalog sources
 - **Python side**: `stickers.py` (`_catalog` module-level dict) + `sticker_db.py` (SQLite queries).
-- **Node side**: `src/wa/command/addsticker.ts` writes to `stickers.db`; removal is handled by `src/wa/command/removesticker.ts` (dispatched via `src/wa/commands/CommandRegistry.ts`).
+- **Node side**: `src/wa/commands/addsticker.ts` writes to `stickers.db`; removal is handled by `src/wa/commands/removesticker.ts` (dispatched via `src/wa/command/CommandRegistry.ts`).
 
 ## Auth state
 

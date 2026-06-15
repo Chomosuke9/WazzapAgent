@@ -124,8 +124,8 @@ src/
     ├── presence.ts        ← Mark read & typing indicator
     ├── events.ts          ← Synthetic context events
     ├── sendQueue.ts       ← Per-JID send queue (message ordering)
-    ├── commands/          ← Typed command dispatch (CommandRegistry)
-    ├── command/           ← Per-command handler modules
+    ├── command/           ← Typed command dispatch (CommandRegistry + CommandContext)
+    ├── commands/          ← Per-command handler modules
     └── interactive/       ← NativeFlow interactive messages
 ```
 
