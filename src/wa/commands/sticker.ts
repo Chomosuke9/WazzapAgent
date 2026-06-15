@@ -100,7 +100,58 @@ async function addStickerExif(webpPath: string, { packName, emoji }: { packName:
 // Static image sticker (sharp)
 // ---------------------------------------------------------------------------
 
-async function createStickerFile(mediaPath: string, _upperText: string | null = null, _lowerText: string | null = null, mediaDir: string = config.mediaDir): Promise<string> {
+/**
+ * Compute font size so the text fits within `maxWidth`.
+ * Uses Impact's approximate char width ratio (0.55 × fontSize).
+ * Clamped between minSize and maxSize (both relative to sticker size).
+ */
+function fitFontSize(text: string, maxWidth: number, size: number): number {
+  const MIN = Math.round(size * 0.05);  // ≈ 26px at 512
+  const MAX = Math.round(size * 0.14);  // ≈ 72px at 512
+  if (!text.length) return MAX;
+  // charWidth ≈ 0.55 * fontSize  →  fontSize = maxWidth / (chars * 0.55)
+  const ideal = Math.floor(maxWidth / (text.length * 0.55));
+  return Math.min(MAX, Math.max(MIN, ideal));
+}
+
+/**
+ * Build an SVG overlay with meme-style text (white fill, black stroke).
+ * Font size scales with text length: short text gets a large font, long text
+ * gets a smaller font, always fitting within the sticker width.
+ */
+function buildTextOverlaySvg(
+  size: number,
+  upperText: string | null,
+  lowerText: string | null,
+): Buffer | null {
+  if (!upperText && !lowerText) return null;
+
+  const padding = Math.round(size * 0.04);
+  const escapeXml = (s: string) =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+  const maxWidth = size - padding * 2;
+  const textElements: string[] = [];
+
+  function addText(text: string, position: 'top' | 'bottom') {
+    const upper = text.toUpperCase();
+    const fontSize = fitFontSize(upper, maxWidth, size);
+    const strokeWidth = Math.max(2, Math.round(fontSize * 0.08));
+    const attrs = `font-family="Impact, Arial Black, sans-serif" font-size="${fontSize}" font-weight="bold" text-anchor="middle" fill="white" stroke="black" stroke-width="${strokeWidth}" paint-order="stroke" letter-spacing="1"`;
+    const y = position === 'top'
+      ? padding + fontSize
+      : size - padding;
+    textElements.push(`<text x="${size / 2}" y="${y}" ${attrs}>${escapeXml(upper)}</text>`);
+  }
+
+  if (upperText) addText(upperText, 'top');
+  if (lowerText) addText(lowerText, 'bottom');
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">${textElements.join('')}</svg>`;
+  return Buffer.from(svg);
+}
+
+async function createStickerFile(mediaPath: string, upperText: string | null = null, lowerText: string | null = null, mediaDir: string = config.mediaDir): Promise<string> {
   const ext = path.extname(mediaPath).toLowerCase();
 
   if (!SUPPORTED_IMAGE_EXT.has(ext)) {
@@ -111,19 +162,18 @@ async function createStickerFile(mediaPath: string, _upperText: string | null = 
   const shortId = randomUUID().slice(0, 8);
   const outPath = path.join(mediaDir, `sticker_${shortId}.webp`);
 
-  const img = sharp(mediaPath).resize(STICKER_SIZE, STICKER_SIZE, {
+  let img = sharp(mediaPath).resize(STICKER_SIZE, STICKER_SIZE, {
     fit: 'contain',
     withoutEnlargement: false,
     background: { r: 0, g: 0, b: 0, alpha: 0 },
   });
 
+  const overlaysvg = buildTextOverlaySvg(STICKER_SIZE, upperText, lowerText);
+  if (overlaysvg) {
+    img = img.composite([{ input: overlaysvg, blend: 'over' }]);
+  }
+
   await img.webp({ quality: 95 }).toFile(outPath);
-
-  // NOTE: `upperText`/`lowerText` (parsed from `/sticker upper#lower`) are
-  // accepted but intentionally not drawn here. Static stickers ship as the
-  // resized image only; meme-text overlay is a deferred enhancement and would
-  // be implemented with sharp's SVG composite. Behavior is unchanged.
-
   await addStickerExif(outPath, { packName: STICKER_PACK_NAME, emoji: STICKER_EMOJI });
 
   return outPath;
@@ -272,6 +322,7 @@ async function handleSticker({ chatId, chatType: _chatType, senderIsAdmin: _send
   let mediaPath: string | null = null;
   let isAnimated = false;
 
+  // Case 1: message IS the media (e.g. image sent with caption "/sticker")
   if (contentType === 'imageMessage') {
     mediaPath = await downloadMediaContent(innerMessage![contentType], contentType, msg!.key.id, mediaDir);
   } else if (contentType === 'videoMessage') {
@@ -279,15 +330,20 @@ async function handleSticker({ chatId, chatType: _chatType, senderIsAdmin: _send
     isAnimated = true;
   }
 
-  if (!mediaPath && innerMessage?.extendedTextMessage?.contextInfo) {
-    const ctx = innerMessage.extendedTextMessage.contextInfo;
-    if (ctx.quotedMessage) {
-      const { contentType: qType, message: qMsg } = unwrapMessage(ctx.quotedMessage) || {};
-      const qContent = qType ? qMsg?.[qType] : null;
+  // Case 2: message is a text reply to a media message (extendedTextMessage with contextInfo)
+  if (!mediaPath) {
+    // contextInfo can be on extendedTextMessage OR directly on imageMessage/videoMessage
+    const contextInfo =
+      innerMessage?.extendedTextMessage?.contextInfo ??
+      (contentType ? (innerMessage?.[contentType] as any)?.contextInfo : undefined);
+
+    if (contextInfo?.quotedMessage) {
+      const { contentType: qType, message: qMsg } = unwrapMessage(contextInfo.quotedMessage) || {};
+      const qContent = qType ? qMsg?.[qType as keyof typeof qMsg] : null;
       if (qType === 'imageMessage') {
-        mediaPath = await downloadMediaContent(qContent, qType, ctx.stanzaId, mediaDir);
+        mediaPath = await downloadMediaContent(qContent, qType, contextInfo.stanzaId, mediaDir);
       } else if (qType === 'videoMessage') {
-        mediaPath = await downloadMediaContent(qContent, qType, ctx.stanzaId, mediaDir);
+        mediaPath = await downloadMediaContent(qContent, qType, contextInfo.stanzaId, mediaDir);
         isAnimated = true;
       }
     }
@@ -333,7 +389,7 @@ export { handleSticker };
 
 export const stickerCommand: CommandHandler = {
   commands: ["sticker", "stickers"],
-  description: "Buat stiker WhatsApp dari gambar atau video yang kamu balas. Untuk stiker meme, tambahkan teks atas dan bawah dipisah tanda #. Contoh: /sticker teks atas#teks bawah.",
+  description: "Buat stiker WhatsApp dari gambar atau video. Kirim gambar dengan caption `/sticker` atau reply gambar/video dengan `/sticker`. Tambahkan teks meme dengan format `/sticker teks_bawah#teks_atas`. Contoh: `/sticker gue banget#ketika senin tiba`.",
   permission: "public",
   run: (_sock, _message, ctx) => handleSticker(ctx),
 };
