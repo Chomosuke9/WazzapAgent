@@ -21,7 +21,7 @@ function byCanonical(a: CommandHandler, b: CommandHandler): number {
 }
 
 function formatLine(handler: CommandHandler): string {
-  return `- */${handler.commands[0]}*\n*Permission* : ${handler.permission}\n*Deskripsi* :\n${handler.description}`;
+  return `- */\`${handler.commands[0]}\`*\n*Permission* : ${handler.permission}\n*Deskripsi* : ${handler.description}`;
 }
 
 /** Build the `/help` body from the current registry. */

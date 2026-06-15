@@ -47,7 +47,7 @@ Available commands:
 - `/help` — command list, support group link, and nothing else in here, DO NOT MAKE THINGS UP. (everyone)
 - `/dashboard` — usage stats for current chat. (everyone)
 - `/owner-contact` — send owner's contact card. (everyone)
-- `/sticker` — create sticker from replied image/video, it is NOT for sending stickers. (everyone)
+- `/sticker <upperText>#<lowerText>` — create sticker from replied image/video, it is NOT for sending stickers. both text are optional, default to empty if not specified. (everyone)
 - `/add-sticker <name>` — add sticker to catalog. (admin only, or you)
 - `/remove-sticker <name>` — remove sticker from catalog. (admin only, or you)
 - `/group-status <text>` — post group status with optional replied image. (admin only, or you)
