@@ -35,10 +35,10 @@ export interface SendMessagePayload {
 }
 export interface ReactMessagePayload { requestId: string; chatId: string; contextMsgId: string; emoji: string; }
 export interface DeleteMessagePayload { requestId: string; chatId: string; contextMsgId: string; }
-export interface KickTarget { senderRef: string; anchorContextMsgId: string; }
+export interface KickTarget { senderRef: string; }
 export interface KickMemberPayload {
   requestId: string; chatId: string; targets: KickTarget[];
-  mode: "partial_success" | "all_or_nothing"; autoReplyAnchor: boolean;
+  mode: "partial_success" | "all_or_nothing";
 }
 export interface MarkReadPayload { chatId: string; messageId: string; participant?: string; }
 export interface SendPresencePayload { chatId: string; type: "composing" | "paused"; }
@@ -179,7 +179,9 @@ export type OutboundFrame =
   | { type: "invalidate_llm2_model"; folderPath: string; chatId: string }
   | { type: "invalidate_default_model"; folderPath: string }
   | { type: "invalidate_chat_settings"; folderPath: string; chatId: string }
-  | { type: "set_subagent_enabled"; folderPath: string; chatId: string; enabled: boolean };
+  | { type: "set_subagent_enabled"; folderPath: string; chatId: string; enabled: boolean }
+  // feature 5: schedule a one-shot task that re-invokes LLM2 after a delay
+  | { type: "schedule_task"; folderPath: string; chatId: string; taskId: string; fireAtMs: number; prompt: string };
 
 // ---- registry & factory ----
 

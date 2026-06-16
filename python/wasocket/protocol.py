@@ -76,7 +76,6 @@ class KickMemberAction:
     chat_id: str
     targets: tuple[dict, ...]
     mode: str = "partial_success"
-    auto_reply_anchor: bool = False
 
 
 @dataclass(frozen=True)
@@ -199,6 +198,15 @@ class SetSubagentEnabledEvent:
     enabled: bool
 
 
+@dataclass(frozen=True)
+class ScheduleTaskEvent:
+    folder_path: str
+    chat_id: str
+    task_id: str
+    fire_at_ms: int
+    prompt: str
+
+
 # (incoming_message is parsed into WhatsAppMessage — CONTRACT.md §7, in
 #  wasocket/events.py; NOT bridge.history.WhatsAppMessage.)
 
@@ -261,6 +269,7 @@ _FRAME_TABLE: tuple[tuple[type, str, bool], ...] = (
     (InvalidateDefaultModelEvent, "invalidate_default_model", True),
     (InvalidateChatSettingsEvent, "invalidate_chat_settings", True),
     (SetSubagentEnabledEvent, "set_subagent_enabled", True),
+    (ScheduleTaskEvent, "schedule_task", True),
 )
 
 _TYPE_BY_CLASS: dict[type, str] = {cls: t for cls, t, _ in _FRAME_TABLE}
@@ -393,6 +402,7 @@ __all__ = [
     "InvalidateDefaultModelEvent",
     "InvalidateChatSettingsEvent",
     "SetSubagentEnabledEvent",
+    "ScheduleTaskEvent",
     # ack / error
     "AckResult",
     "ErrorResult",

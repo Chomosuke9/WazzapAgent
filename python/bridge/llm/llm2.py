@@ -196,6 +196,7 @@ async def generate_reply(
     allow_subagent: bool = False,
     subagent_context: str | None = None,
     subagent_result_block: str | None = None,
+    scheduled_task_block: str | None = None,
 ):
     targets = _llm2_targets()
     payload = current_payload if isinstance(current_payload, dict) else {}
@@ -315,6 +316,11 @@ async def generate_reply(
     # repeating "oke aku cek dulu" when it should be delivering the report.
     if subagent_result_block:
         msgs.append(HumanMessage(content=subagent_result_block))
+    # ``scheduled_task_block`` (feature 5): a dedicated high-priority slot used
+    # by the scheduled-task cold fire so the model gets a clear "carry out this
+    # scheduled task now" signal, analogous to ``subagent_result_block``.
+    if scheduled_task_block:
+        msgs.append(HumanMessage(content=scheduled_task_block))
     msgs.append(HumanMessage(content=messages_content))
     if env_flag("BRIDGE_LOG_PROMPT_FULL"):
         first_target = targets[0]
@@ -327,6 +333,8 @@ async def generate_reply(
             logged_messages.append({"role": "user", "content": subagent_block})
         if subagent_result_block:
             logged_messages.append({"role": "user", "content": subagent_result_block})
+        if scheduled_task_block:
+            logged_messages.append({"role": "user", "content": scheduled_task_block})
         logged_messages.append(
             {"role": "user", "content": redact_multimodal_content(messages_content)}
         )
@@ -513,6 +521,8 @@ async def generate_reply(
                     fallback_msgs.append(HumanMessage(content=subagent_block))
                 if subagent_result_block:
                     fallback_msgs.append(HumanMessage(content=subagent_result_block))
+                if scheduled_task_block:
+                    fallback_msgs.append(HumanMessage(content=scheduled_task_block))
                 fallback_msgs.append(HumanMessage(content=messages_content_text))
 
                 result, _ = await _invoke_with_retry(

@@ -55,9 +55,8 @@ const deleteMessagePayload: DeleteMessagePayload = {
 const kickMemberPayload: KickMemberPayload = {
   requestId: 'kick-1715097600000-000004',
   chatId: '12345@g.us',
-  targets: [{ senderRef: 'u8k2d1', anchorContextMsgId: '000125' }],
+  targets: [{ senderRef: 'u8k2d1' }],
   mode: 'partial_success',
-  autoReplyAnchor: true,
 };
 const markReadPayload: MarkReadPayload = {
   chatId: '12345@g.us', messageId: 'wamid-abc', participant: '98765@s.whatsapp.net',

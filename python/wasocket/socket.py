@@ -78,6 +78,7 @@ _CONTROL_TYPES = frozenset(
         events.INVALIDATE_DEFAULT_MODEL,
         events.INVALIDATE_CHAT_SETTINGS,
         events.SET_SUBAGENT_ENABLED,
+        events.SCHEDULE_TASK,
     }
 )
 
@@ -312,10 +313,9 @@ class WaSocket:
         members: List[dict],
         *,
         mode: str = "partial_success",
-        auto_reply_anchor: bool = False,
         request_id: Optional[str] = None,
     ) -> dict:
-        """Remove ``members`` (``[{senderRef, anchorContextMsgId}, ...]``) from a
+        """Remove ``members`` (``[{senderRef}, ...]``) from a
         group. Raises ``NotGroupError``, ``PermissionDeniedError``,
         ``InvalidTargetError``, ``SendFailedError`` or ``TimeoutError``."""
         rid = request_id if request_id is not None else make_request_id("kick")
@@ -324,7 +324,6 @@ class WaSocket:
             chat_id=group_id,
             targets=tuple(members),
             mode=mode,
-            auto_reply_anchor=auto_reply_anchor,
         )
         return await self._dispatch_action(
             frame, rid, caller_supplied=request_id is not None

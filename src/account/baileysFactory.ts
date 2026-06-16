@@ -65,11 +65,9 @@ import type { GroupContextValue } from "../wa/domain/caches.js";
 import { dispatchCommand } from "../wa/command/CommandRegistry.js";
 import {
   handleButtonResponse,
-  parseModelReply,
-  getPendingForm,
-  clearPendingForm,
   printQrInTerminal,
 } from "../wa/connection.js";
+import { handlePendingModelForm } from "../wa/commands/modelcfg.js";
 import {
   handleIncomingMessage,
   handleGroupParticipantsUpdate,
@@ -392,72 +390,6 @@ function attachGroupListeners(sock: WASocket, account: AccountContext): void {
       );
     }
   });
-}
-
-/**
- * Handle an in-flight `/modelcfg` form reply from the chat's pending form owner.
- * Returns `true` when the message was consumed by the form (caller should skip
- * normal processing), `false` when it should fall through to slash-command
- * parsing (no pending form, a different sender, or a non-matching reply).
- */
-async function handlePendingModelForm(
-  account: AccountContext,
-  sock: WASocket,
-  folderPath: string,
-  chatId: string,
-  senderId: string,
-  text: string | null | undefined,
-): Promise<boolean> {
-  const pending = getPendingForm(account, chatId);
-  if (!pending || senderId !== pending.senderId) return false;
-
-  const normalizedText = text?.trim().toLowerCase();
-  if (normalizedText === "cancel" || normalizedText === "batal") {
-    clearPendingForm(account, chatId);
-    await sock.sendMessage(chatId, { text: "Operasi dibatalkan." });
-    return true;
-  }
-
-  const result = parseModelReply(account, chatId, text as string);
-  if (!result) return false;
-
-  if (result.action === "edit_model") {
-    if (result.success) {
-      registry.sendReliableToClient(folderPath, {
-        type: "invalidate_default_model",
-        folderPath,
-      });
-    }
-    await sock.sendMessage(chatId, {
-      text: result.success
-        ? `Model "${result.modelId}" diupdate.`
-        : `Model "${result.modelId}" tidak ditemukan.`,
-    });
-  } else if (result.action === "add_model") {
-    if (result.error) {
-      await sock.sendMessage(chatId, { text: result.error });
-    } else {
-      const success = account.repos!.model.addModel(
-        result.modelId!,
-        result.displayName!,
-        result.description,
-        null,
-        result.visionSupport,
-      );
-      if (success) {
-        registry.sendReliableToClient(folderPath, {
-          type: "invalidate_default_model",
-          folderPath,
-        });
-      }
-      await sock.sendMessage(chatId, {
-        text: success
-          ? `Model "${result.displayName}" ditambahkan.${result.visionSupport ? " (Vision enabled)" : ""}`
-          : `Model "${result.modelId}" sudah ada.`,
-      });
-    }
-  }
-  return true;
 }
 
 /**

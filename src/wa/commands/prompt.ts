@@ -1,9 +1,73 @@
+import type { WAMessage } from "baileys";
 import config from "../../config.js";
 import * as registry from "../../server/accountRegistry.js";
 import { parseConfigScope, scopeSuffix } from "./configScope.js";
+import {
+  normalizeJid,
+  mentionHandleForJid,
+  rememberSenderRef,
+} from "../domain/identifiers.js";
+import { unwrapMessage, extractMentionedJids } from "../domain/messageParser.js";
+import { resolveParticipantLabel } from "../events.js";
+import { escapeRegex } from "../utils.js";
+import type { AccountContext } from "../../account/accountContext.js";
 import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 
 const PROMPT_MAX_CHARS = 4000;
+
+/**
+ * Rewrite raw WhatsApp `@<localpart>` mention tokens in a `/prompt` body into
+ * the canonical `@Name (senderRef)` form that the outbound renderer
+ * (`renderOutboundMentions`) understands.
+ *
+ * WhatsApp never puts display names in the message text — a mention shows up in
+ * the body as `@<localpart>` (the numeric local part of the mentioned JID:
+ * phone number for `@s.whatsapp.net`, or LID number for `@lid`). The real full
+ * JIDs live only in `contextInfo.mentionedJid`. Storing the raw text verbatim
+ * therefore persists a useless `@<number>`; rewriting to `@Name (senderRef)`
+ * makes it round-trip-correct on send.
+ *
+ * Best-effort: if extraction/resolution fails for a token it is left untouched.
+ * Returns `text` unchanged when there are no mentions.
+ */
+async function rewritePromptMentions(
+  ctx: AccountContext,
+  chatId: string,
+  text: string,
+  msg: WAMessage,
+): Promise<string> {
+  if (!text) return text;
+
+  let mentionedJids: string[] | null = null;
+  try {
+    const { message: inner } = unwrapMessage(msg?.message);
+    mentionedJids = extractMentionedJids(inner);
+  } catch {
+    return text;
+  }
+  if (!mentionedJids || mentionedJids.length === 0) return text;
+
+  let result = text;
+  for (const jid of mentionedJids) {
+    try {
+      const normalized = normalizeJid(jid) || jid;
+      if (!normalized) continue;
+      const handle = mentionHandleForJid(normalized);
+      if (!handle) continue;
+      const senderRef = rememberSenderRef(ctx, chatId, normalized, normalized);
+      if (!senderRef) continue;
+      const name = await resolveParticipantLabel(ctx, chatId, normalized);
+      const display = name || handle.slice(1);
+      // Whole-token match only: the handle must not be a prefix of a longer
+      // mention token (e.g. `@628123` must not match inside `@6281234`).
+      const pattern = new RegExp(`${escapeRegex(handle)}(?![0-9A-Za-z._-])`, "g");
+      result = result.replace(pattern, `@${display} (${senderRef})`);
+    } catch (err) {
+      // best-effort: leave this token as-is and continue
+    }
+  }
+  return result;
+}
 
 async function handlePrompt({
   chatId,
@@ -12,6 +76,8 @@ async function handlePrompt({
   folderPath = config.dataDir,
   sock,
   repos,
+  account,
+  msg,
 }: CommandContext): Promise<void> {
   if (!args) {
     const current = repos!.settings.getPrompt(chatId);
@@ -36,7 +102,7 @@ async function handlePrompt({
   const parts = args.trim().split(/\s+/);
   const scope = parseConfigScope(parts[0].toLowerCase());
   const isScoped = scope !== "chat";
-  const newArgs = isScoped ? args.trim().replace(/^\S+\s*/, "").trim() : args.trim();
+  let newArgs = isScoped ? args.trim().replace(/^\S+\s*/, "").trim() : args.trim();
 
   if (isScoped && !senderIsOwner) {
     try {
@@ -91,6 +157,18 @@ async function handlePrompt({
     return;
   }
 
+  // Rewrite raw `@<localpart>` mention tokens into the canonical
+  // `@Name (senderRef)` form BEFORE length-check/storage, so the stored prompt
+  // is what the outbound renderer can resolve back to a real mention. Skipped
+  // for the clear/reset/`-` sentinels handled above. Best-effort — never throws.
+  if (account) {
+    try {
+      newArgs = await rewritePromptMentions(account, chatId, newArgs, msg);
+    } catch (err) {
+      /* ignore — keep raw newArgs */
+    }
+  }
+
   if (newArgs.length > PROMPT_MAX_CHARS) {
     try {
       await sock.sendMessage(chatId, {
@@ -115,7 +193,7 @@ async function handlePrompt({
   }
 }
 
-export { handlePrompt };
+export { handlePrompt, rewritePromptMentions };
 
 export const promptCommand: CommandHandler = {
   commands: ["prompt", "prompts"],

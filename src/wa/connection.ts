@@ -1,259 +1,37 @@
 /**
- * connection.ts — shared WhatsApp account helpers (Step 17).
+ * connection.ts — shared WhatsApp account helpers.
  *
- * Step 17 extracted Baileys socket creation and ALL event-listener wiring into
- * `account/baileysFactory.ts` so one Node process can drive N accounts, each
- * bound to its own {@link AccountContext}. What remains here are the shared,
- * account-parameterized helpers the factory (and the rest of the gateway) reuse:
+ * After the button-registry refactor this module holds only the account-
+ * parameterized helpers the factory reuses that are NOT command/button
+ * descriptors:
  *
- *   - `printQrInTerminal`        — render a pairing QR in the terminal
- *   - `handleButtonResponse`     — interactive button / list / form responses
- *     (Step 07: decomposed into one small handler per reply-type — slash /
- *     model-select / settings / modelcfg — dispatched from a thin router)
- *   - `parseModelReply`          — parse a `/modelcfg` form reply
- *   - model form helpers         — show edit/add/default model menus & forms
+ *   - `printQrInTerminal`      — render a pairing QR in the terminal
+ *   - `extractButtonSelection` — pure extraction of the tapped `selectedId`
+ *     from a Baileys button / list / native-flow / template reply
+ *   - `handleButtonResponse`   — thin router: extract the selection and, only
+ *     when a registered handler owns it, build the once-derived
+ *     {@link ButtonContext} and delegate to the auto-discovered
+ *     {@link import('./command/ButtonRegistry.js').dispatchButton}
  *
- * Step 07 layering: this module imports only `protocol/` + sibling `wa/*`
- * (e.g. `commands/CommandRegistry`, `interactive/`) statically; it no longer
- * reaches back into `account/` at runtime (the former `startWhatsApp` shim that
- * lazy-imported `account/baileysFactory` moved into the factory itself), so
- * there is no `account/ ↔ wa/` import cycle and no lazy-import workaround.
+ * The per-prefix button handlers themselves now live beside the commands that
+ * render their menus (`commands/setting.ts` for settings / mode / model selects,
+ * `commands/modelcfg.ts` for the modelcfg admin menu + its form machinery,
+ * `commands/slashButton.ts` for `/`-prefixed taps) and are auto-discovered by
+ * `ButtonRegistry`, mirroring how slash commands are discovered by
+ * `CommandRegistry`. The shared activation + owner/admin gate is now declared
+ * per handler and enforced centrally in `dispatchButton`.
  */
 import { spawn } from "child_process";
 import type { WASocket, WAMessage } from "baileys";
 import logger from "../logger.js";
-import config from "../config.js";
-import { parseSlashCommand } from "./commands/index.js";
-import { isOwnerJid } from "./domain/participants.js";
-import { roleFlagsForJid } from "./domain/participants.js";
+import { isOwnerJid, roleFlagsForJid } from "./domain/participants.js";
 import {
   getCachedGroupMetadata,
   defaultGroupContext,
 } from "./domain/groupContext.js";
-import { sendNativeFlow } from "./interactive/index.js";
-import { dispatchCommand } from "./command/CommandRegistry.js";
-import type { AccountContext, PendingForm } from "../account/accountContext.js";
-import type { GroupContextValue, ParticipantRoleFlags } from "./domain/caches.js";
-import * as registry from "../server/accountRegistry.js";
-
-// In-flight model-config form per chat lives on the AccountContext
-// (`ctx.pendingForms`) so each account keeps independent `/modelcfg` form
-// state. `PendingForm` is imported from `account/accountContext.js`.
-
-// Result of parsing a model-config form reply. Fields beyond `action` are
-// populated depending on the form type / validity (mirrors the original
-// runtime object).
-interface ModelReplyResult {
-  action: "edit_model" | "add_model";
-  modelId?: string;
-  success?: boolean;
-  updates?: {
-    displayName?: string;
-    description?: string;
-    isActive?: boolean;
-    sortOrder?: number;
-    visionSupport?: boolean;
-  };
-  error?: string;
-  displayName?: string;
-  description?: string;
-  visionSupport?: boolean;
-}
-
-function clearPendingForm(ctx: AccountContext, chatId: string): void {
-  ctx.pendingForms.delete(chatId);
-}
-
-function getPendingForm(ctx: AccountContext, chatId: string): PendingForm | undefined {
-  return ctx.pendingForms.get(chatId);
-}
-
-function parseModelReply(ctx: AccountContext, chatId: string, text: string): ModelReplyResult | null {
-  const form = ctx.pendingForms.get(chatId);
-  if (!form) return null;
-
-  const fields = text
-    .split("|")
-    .map((f) => f.trim())
-    .filter(Boolean);
-
-  if (form.type === "edit_model") {
-    const modelId = form.modelId;
-    clearPendingForm(ctx, chatId);
-
-    const updates: ModelReplyResult["updates"] = {};
-
-    for (const field of fields) {
-      const eqIdx = field.indexOf("=");
-      if (eqIdx < 1) continue;
-      const k = field.slice(0, eqIdx).trim().toLowerCase();
-      const v = field.slice(eqIdx + 1).trim();
-
-      if (k === "name") updates.displayName = v;
-      else if (k === "desc") updates.description = v;
-      else if (k === "active")
-        updates.isActive = v === "1" || v === "true" || v === "yes";
-      else if (k === "order") {
-        const n = parseInt(v, 10);
-        if (!isNaN(n)) updates.sortOrder = n;
-      } else if (k === "vision")
-        updates.visionSupport = v === "true" || v === "1" || v === "yes";
-    }
-
-    const success = ctx.repos!.model.updateModel(modelId, updates);
-    return { action: "edit_model", modelId, success, updates };
-  }
-
-  if (form.type === "add_model") {
-    clearPendingForm(ctx, chatId);
-    if (fields.length < 2) {
-      return {
-        action: "add_model",
-        error: "Format: model_id|display_name|[description]|[vision=true]",
-      };
-    }
-    const modelId = fields[0];
-    const displayName = fields[1];
-
-    // Parse remaining fields: key=value pairs and bare true/false as metadata,
-    // everything else as description text
-    let visionSupport = false;
-    const descParts: string[] = [];
-    for (let i = 2; i < fields.length; i++) {
-      const field = fields[i];
-      const lowerField = field.toLowerCase();
-      // Check for key=value pairs (e.g. vision=true)
-      const eqIdx = field.indexOf("=");
-      if (eqIdx > 0) {
-        const k = field.slice(0, eqIdx).trim().toLowerCase();
-        const v = field
-          .slice(eqIdx + 1)
-          .trim()
-          .toLowerCase();
-        if (k === "vision") {
-          visionSupport = v === "true" || v === "1" || v === "yes";
-          continue;
-        }
-      }
-      // Check for bare true/false as standalone vision flag
-      if (lowerField === "true" || lowerField === "false") {
-        visionSupport = lowerField === "true";
-        continue;
-      }
-      // Otherwise it's description text
-      descParts.push(field);
-    }
-    const description = descParts.join(" ");
-    return {
-      action: "add_model",
-      modelId,
-      displayName,
-      description,
-      visionSupport,
-    };
-  }
-
-  return null;
-}
-
-async function showModelSelectionForEdit(sock: WASocket, ctx: AccountContext, chatId: string): Promise<void> {
-  const models = ctx.repos!.model.getAllModels();
-  if (models.length === 0) {
-    await sock.sendMessage(chatId, { text: "No models to edit." });
-    return;
-  }
-  const sections = [
-    {
-      title: "Select Model to Edit",
-      rows: models.map((m) => ({
-        id: `/modelcfg edit ${m.modelId}`,
-        title:
-          m.displayName +
-          (m.isActive ? "" : " (inactive)") +
-          (m.visionSupport ? " 👁" : ""),
-        description: m.description || `ID: ${m.modelId}`,
-      })),
-    },
-  ];
-  await sendNativeFlow(
-    sock,
-    chatId,
-    "Edit Model",
-    [
-      {
-        name: "single_select",
-        buttonParamsJson: JSON.stringify({ title: "Select Model", sections }),
-      },
-    ],
-    { footer: "Select a model to edit" },
-  );
-}
-
-async function showModelAddForm(sock: WASocket, ctx: AccountContext, chatId: string, senderId: string): Promise<void> {
-  ctx.pendingForms.set(chatId, { type: "add_model", senderId });
-
-  const helpText = `Add New Model
-
-Send using | as separator:
-model_id|display_name|description|vision=true
-
-Examples:
-gpt-4o|GPT-4 Omni|Fast and capable model|vision=true
-kimi-k2.6|Kimi|vision=true
-my-model|My Custom Model
-
-Or send "cancel" to cancel.`;
-
-  await sock.sendMessage(chatId, { text: helpText });
-}
-
-async function showModelSelectionForDefault(sock: WASocket, ctx: AccountContext, chatId: string): Promise<void> {
-  const models = ctx.repos!.model.getAllModels().filter((m) => m.isActive);
-  if (models.length === 0) {
-    await sock.sendMessage(chatId, {
-      text: "No active models to set as default.",
-    });
-    return;
-  }
-  const sections = [
-    {
-      title: "Select Default Model",
-      rows: models.map((m) => ({
-        id: `/modelcfg default ${m.modelId}`,
-        title: m.displayName + (m.visionSupport ? " 👁" : ""),
-        description: m.description || `ID: ${m.modelId}`,
-      })),
-    },
-  ];
-  await sendNativeFlow(
-    sock,
-    chatId,
-    "Set Default Model",
-    [
-      {
-        name: "single_select",
-        buttonParamsJson: JSON.stringify({ title: "Select Default", sections }),
-      },
-    ],
-    { footer: "Model with smallest order will be used as default" },
-  );
-}
-
-async function setDefaultModel(sock: WASocket, ctx: AccountContext, folderPath: string, chatId: string, modelId: string): Promise<void> {
-  const models = ctx.repos!.model.getAllModels();
-  const model = models.find((m) => m.modelId === modelId);
-  if (!model) {
-    await sock.sendMessage(chatId, { text: `Model "${modelId}" not found.` });
-    return;
-  }
-  const allModels = ctx.repos!.model.getAllModels();
-  const minOrder = Math.min(...allModels.map((m) => m.sortOrder));
-  ctx.repos!.model.updateModel(modelId, { sortOrder: minOrder - 1 });
-  registry.sendReliableToClient(folderPath, { type: "invalidate_default_model", folderPath });
-  await sock.sendMessage(chatId, {
-    text: `Model "${model.displayName}" set as default.`,
-  });
-}
+import { findButtonHandler, dispatchButton } from "./command/ButtonRegistry.js";
+import type { ButtonContext } from "./command/ButtonContext.js";
+import type { AccountContext } from "../account/accountContext.js";
 
 function printQrInTerminal(qr: string): void {
   try {
@@ -275,291 +53,12 @@ function printQrInTerminal(qr: string): void {
 }
 
 /**
- * Common, once-derived context shared by the per-reply-type button handlers
- * (Step 07). `handleButtonResponse` computes this once, then delegates to the
- * matching handler so each reply type is a small, single-purpose unit.
+ * Pure extraction of the tapped button id from a Baileys message. Reads the
+ * buttonsResponse / listResponse / interactive native-flow / templateButtonReply
+ * shapes and returns the `selectedId`, or `null` when the message is not a
+ * button / list / interactive reply.
  */
-interface ButtonContext {
-  sock: WASocket;
-  account: AccountContext;
-  chatId: string;
-  senderId: string;
-  isGroup: boolean;
-  group: GroupContextValue | null;
-  senderRole: ParticipantRoleFlags;
-  senderIsAdmin: boolean;
-  senderIsOwner: boolean;
-}
-
-/**
- * `/`-prefixed button id → dispatch it as a slash command through the registry
- * (e.g. a tapped `/help` quick-reply). Always reports the tap as handled.
- */
-async function handleSlashButton(
-  bc: ButtonContext,
-  msg: WAMessage,
-  selectedId: string,
-): Promise<boolean> {
-  const { sock, account, chatId, senderId, isGroup, group, senderRole, senderIsAdmin, senderIsOwner } = bc;
-  logger.info(
-    { selectedId, chatId, senderId },
-    "button click -> slash command",
-  );
-  const slashCommand = parseSlashCommand(selectedId);
-  if (slashCommand) {
-    const fakeMsg = {
-      key: { ...msg.key, id: `btn_${Date.now()}` },
-      message: { conversation: selectedId },
-      pushName: msg.pushName,
-    };
-    const context = {
-      slashCommand,
-      chatId,
-      chatType: isGroup ? "group" : "private",
-      senderId,
-      senderIsAdmin,
-      senderIsOwner,
-      senderRole,
-      senderDisplay: msg.pushName || "",
-      botIsAdmin: group?.botIsAdmin || false,
-      botIsSuperAdmin: group?.botIsSuperAdmin || false,
-      contextMsgId: null,
-      text: selectedId,
-      group,
-      msg: fakeMsg,
-      account,
-      sock,
-      repos: account.repos,
-    };
-    await dispatchCommand(fakeMsg, context);
-  }
-  return true;
-}
-
-/** `model_select:<id>` → set the chat's LLM2 model (admin/owner gated). */
-async function handleModelSelectButton(bc: ButtonContext, selectedId: string): Promise<boolean> {
-  const { sock, account, chatId, isGroup, senderIsAdmin, senderIsOwner } = bc;
-  if (config.requireActivation && !senderIsOwner && !account.repos!.activation.isChatActivated(chatId)) {
-    return true;
-  }
-  const modelId = selectedId.replace("model_select:", "");
-  const canUse = senderIsOwner || (isGroup && senderIsAdmin);
-  if (!canUse) {
-    await sock.sendMessage(chatId, {
-      text: "Only group admins or bot owner can change the model.",
-    });
-    return true;
-  }
-  account.repos!.model.setLlm2Model(chatId, modelId);
-  registry.sendReliableToClient(account.folderPath, {
-    type: "set_llm2_model",
-    folderPath: account.folderPath,
-    chatId,
-    modelId,
-  });
-  registry.sendReliableToClient(account.folderPath, {
-    type: "invalidate_llm2_model",
-    folderPath: account.folderPath,
-    chatId,
-  });
-  const models = account.repos!.model.getAllActiveModels();
-  const model = models.find((m) => m.modelId === modelId);
-  const displayName = model?.displayName || modelId;
-  const visionNote = model?.visionSupport ? " (Vision)" : "";
-  await sock.sendMessage(chatId, {
-    text: `Model diubah ke: ${displayName}${visionNote}`,
-  });
-  return true;
-}
-
-/** `settings:<action>` → the settings menu (model picker / prompt / permission hints). */
-async function handleSettingsButton(bc: ButtonContext, selectedId: string): Promise<boolean> {
-  const { sock, account, chatId, isGroup, senderIsAdmin, senderIsOwner } = bc;
-  if (config.requireActivation && !senderIsOwner && !account.repos!.activation.isChatActivated(chatId)) {
-    return true;
-  }
-  const action = selectedId.replace("settings:", "");
-  const canUse = senderIsOwner || (isGroup && senderIsAdmin);
-  if (!canUse) {
-    await sock.sendMessage(chatId, {
-      text: "Only group admins or bot owner can access settings.",
-    });
-    return true;
-  }
-  if (action === "model") {
-    const models = account.repos!.model.getAllActiveModels();
-    if (models.length === 0) {
-      await sock.sendMessage(chatId, { text: "No models available." });
-      return true;
-    }
-    const currentModelId = account.repos!.model.getLlm2Model(chatId);
-    const defaultModel = account.repos!.model.getDefaultLlm2Model();
-    const activeModelId = currentModelId || defaultModel?.modelId || null;
-    const sections = models.map((m) => ({
-      title: m.displayName + (m.visionSupport ? " 👁" : ""),
-      rows: [
-        {
-          title:
-            m.displayName + (m.modelId === activeModelId ? " ✓" : ""),
-          description:
-            m.description || (m.visionSupport ? "Vision support" : ""),
-          id: `model_select:${m.modelId}`,
-        },
-      ],
-    }));
-    await sendNativeFlow(
-      sock,
-      chatId,
-      "Pilih Model LLM",
-      [
-        {
-          name: "single_select",
-          buttonParamsJson: JSON.stringify({
-            title: "Pilih Model",
-            sections,
-          }),
-        },
-      ],
-      { footer: "Model saat ini: " + (activeModelId || "default") },
-    );
-    return true;
-  }
-  if (action === "prompt") {
-    await sock.sendMessage(chatId, {
-      text: "Gunakan `/prompt` <teks> untuk mengubah prompt.",
-    });
-    return true;
-  }
-  if (action === "permission") {
-    await sock.sendMessage(chatId, {
-      text: "Gunakan `/permission` <0-3> untuk mengubah level.",
-    });
-    return true;
-  }
-  return true;
-}
-
-/** `modelcfg:`/`modelcfg_` admin menu → list/add/edit/default/remove models (owner only). */
-async function handleModelcfgButton(bc: ButtonContext, selectedId: string): Promise<boolean> {
-  const { sock, account, chatId, senderId } = bc;
-  if (!isOwnerJid(senderId)) {
-    await sock.sendMessage(chatId, {
-      text: "Only bot owner can manage models.",
-    });
-    return true;
-  }
-
-  const subcommand = selectedId
-    .replace("modelcfg:", "")
-    .replace("modelcfg_", "");
-  const colonIdx = subcommand.indexOf(":");
-  const action =
-    colonIdx >= 0 ? subcommand.slice(0, colonIdx) : subcommand;
-  const modelId = colonIdx >= 0 ? subcommand.slice(colonIdx + 1) : "";
-
-  if (action === "list") {
-    const models = account.repos!.model.getAllModels();
-    if (models.length === 0) {
-      await sock.sendMessage(chatId, { text: "No models configured." });
-      return true;
-    }
-    const lines = ["*Daftar Model:*"];
-    const defaultModel = account.repos!.model.getDefaultLlm2Model();
-    for (const m of models) {
-      const isDefault = defaultModel?.modelId === m.modelId;
-      const vision = m.visionSupport ? " 👁" : "";
-      lines.push(
-        `${isDefault ? "✓" : "○"} ${m.displayName} (${m.modelId})${isDefault ? " [DEFAULT]" : ""}${vision}`,
-      );
-      if (m.description) lines.push(`   ${m.description}`);
-    }
-    await sock.sendMessage(chatId, { text: lines.join("\n") });
-    return true;
-  }
-
-  if (action === "add") {
-    await showModelAddForm(sock, account, chatId, senderId);
-    return true;
-  }
-
-  if (action === "edit") {
-    await showModelSelectionForEdit(sock, account, chatId);
-    return true;
-  }
-
-  if (action === "default") {
-    if (modelId) {
-      await setDefaultModel(sock, account, account.folderPath, chatId, modelId);
-    } else {
-      await showModelSelectionForDefault(sock, account, chatId);
-    }
-    return true;
-  }
-
-  if (action === "remove") {
-    if (modelId) {
-      const result = account.repos!.model.deleteModel(modelId);
-      if (result.success) {
-        registry.sendReliableToClient(account.folderPath, {
-          type: "invalidate_default_model",
-          folderPath: account.folderPath,
-        });
-        for (const affectedChatId of result.affectedChatIds) {
-          registry.sendReliableToClient(account.folderPath, {
-            type: "set_llm2_model",
-            folderPath: account.folderPath,
-            chatId: affectedChatId,
-            modelId: null,
-          });
-          registry.sendReliableToClient(account.folderPath, {
-            type: "clear_history",
-            folderPath: account.folderPath,
-            chatId: affectedChatId,
-          });
-          registry.sendReliableToClient(account.folderPath, {
-            type: "invalidate_llm2_model",
-            folderPath: account.folderPath,
-            chatId: affectedChatId,
-          });
-        }
-      }
-      const models = account.repos!.model.getAllModels();
-      const model = models.find((m) => m.modelId === modelId);
-      const displayName = model?.displayName || modelId;
-      await sock.sendMessage(chatId, {
-        text: result.success
-          ? `Model "${displayName}" removed.`
-          : `Model "${modelId}" not found.`,
-      });
-    } else {
-      await sock.sendMessage(chatId, {
-        text: "Usage: `/modelcfg` remove <model_id>",
-      });
-    }
-    return true;
-  }
-
-  return true;
-}
-
-/**
- * Interactive button / list / native-flow response handler (Step 17: lifted to
- * module scope and account-parameterized — `sock` and `account` are passed in
- * rather than captured from a module global).
- *
- * Handles model-selection menus, settings menus, and `/modelcfg` admin menus.
- * Quiz (`qz:`) replies are intentionally NOT handled here — they fall through
- * to the chatbot path so LLM2 can evaluate the answer.
- *
- * @returns true if the response was fully handled (caller should `continue`).
- */
-async function handleButtonResponse(
-  sock: WASocket,
-  account: AccountContext,
-  msg: WAMessage,
-  chatId: string,
-  senderId: string,
-): Promise<boolean> {
+function extractButtonSelection(msg: WAMessage): string | null {
   const buttonsResponse = msg?.message?.buttonsResponseMessage;
   const listResponse = msg?.message?.listResponseMessage;
   const interactiveResponse = msg?.message?.interactiveResponseMessage;
@@ -579,13 +78,37 @@ async function handleButtonResponse(
     nativeFlowParams?.id ||
     tmplResponse?.selectedId;
 
-  if (!selectedId) return false;
-  logger.info({ selectedId, chatId }, "button selected");
+  return selectedId ?? null;
+}
 
-  // Quiz button replies (qz: prefix) are forwarded to Python as plain
-  // incoming messages so LLM2 can evaluate the answer. Do NOT handle
-  // them here — let them fall through to handleIncomingMessage().
-  if (selectedId.startsWith("qz:")) return false;
+/**
+ * Interactive button / list / native-flow response router (Step 17: lifted to
+ * module scope and account-parameterized — `sock` and `account` are passed in
+ * rather than captured from a module global).
+ *
+ * Extracts the tapped `selectedId`, and — only when a registered handler owns
+ * it — builds the once-derived {@link ButtonContext} and delegates to
+ * {@link dispatchButton}, which applies the declarative activation + permission
+ * gates centrally. Unmatched ids (e.g. `qz:` quiz replies) fall through
+ * (`return false`) BEFORE any group-metadata work, so the chatbot path can
+ * forward them to LLM2.
+ *
+ * @returns true if the response was fully handled (caller should `continue`).
+ */
+async function handleButtonResponse(
+  sock: WASocket,
+  account: AccountContext,
+  msg: WAMessage,
+  chatId: string,
+  senderId: string,
+): Promise<boolean> {
+  const selectedId = extractButtonSelection(msg);
+  if (!selectedId) return false;
+
+  // Fast path: nothing owns this id (e.g. `qz:` quiz answers, which LLM2 must
+  // evaluate) → fall through WITHOUT doing any group-metadata work.
+  if (!findButtonHandler(selectedId)) return false;
+  logger.info({ selectedId, chatId }, "button selected");
 
   const isGroup = chatId.endsWith("@g.us");
   const group = isGroup
@@ -600,6 +123,7 @@ async function handleButtonResponse(
   const bc: ButtonContext = {
     sock,
     account,
+    msg,
     chatId,
     senderId,
     isGroup,
@@ -609,32 +133,7 @@ async function handleButtonResponse(
     senderIsOwner,
   };
 
-  try {
-    if (selectedId.startsWith("/")) {
-      return await handleSlashButton(bc, msg, selectedId);
-    }
-    if (selectedId.startsWith("model_select:")) {
-      return await handleModelSelectButton(bc, selectedId);
-    }
-    if (selectedId.startsWith("settings:")) {
-      return await handleSettingsButton(bc, selectedId);
-    }
-    if (
-      selectedId.startsWith("modelcfg:") ||
-      selectedId.startsWith("modelcfg_")
-    ) {
-      return await handleModelcfgButton(bc, selectedId);
-    }
-  } catch (err) {
-    logger.error({ err }, "button response handler error");
-  }
-  return false;
+  return await dispatchButton(bc, selectedId);
 }
 
-export {
-  printQrInTerminal,
-  handleButtonResponse,
-  parseModelReply,
-  getPendingForm,
-  clearPendingForm,
-};
+export { printQrInTerminal, handleButtonResponse, extractButtonSelection };

@@ -2,7 +2,10 @@ import logger from '../../logger.js';
 import { sendNativeFlow } from '../interactive/index.js';
 import config from '../../config.js';
 import * as registry from '../../server/accountRegistry.js';
+import type { WASocket } from 'baileys';
 import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
+import type { ButtonHandler } from '../command/ButtonContext.js';
+import type { AccountContext } from '../../account/accountContext.js';
 
 async function handleModelcfg({ chatId, senderId: _senderId, args, folderPath = config.dataDir, sock, repos }: CommandContext): Promise<void> {
   // If args contains |, use | as field separator; otherwise fall back to whitespace
@@ -271,3 +274,399 @@ export const modelcfgCommand: CommandHandler = {
   permission: "isOwner",
   run: (_sock, _message, ctx) => handleModelcfg(ctx),
 };
+
+// ---------------------------------------------------------------------------
+// Co-located button handler + model-config form machinery
+// ---------------------------------------------------------------------------
+//
+// The `/modelcfg` interactive menu (rendered by `handleModelcfg` above) and its
+// follow-up form replies used to live in `wa/connection.ts`. They are now
+// co-located here: the button handler is auto-discovered by `ButtonRegistry`
+// and the owner gate is declarative (`permission: "owner"`) — enforced centrally
+// by `dispatchButton` rather than the old inline `isOwnerJid` check. The pending
+// `/modelcfg` form lives on the per-account `ctx.pendingForms` so each account
+// keeps independent form state.
+
+// Result of parsing a model-config form reply. Fields beyond `action` are
+// populated depending on the form type / validity (mirrors the original
+// runtime object).
+interface ModelReplyResult {
+  action: "edit_model" | "add_model";
+  modelId?: string;
+  success?: boolean;
+  updates?: {
+    displayName?: string;
+    description?: string;
+    isActive?: boolean;
+    sortOrder?: number;
+    visionSupport?: boolean;
+  };
+  error?: string;
+  displayName?: string;
+  description?: string;
+  visionSupport?: boolean;
+}
+
+function clearPendingForm(ctx: AccountContext, chatId: string): void {
+  ctx.pendingForms.delete(chatId);
+}
+
+function getPendingForm(ctx: AccountContext, chatId: string) {
+  return ctx.pendingForms.get(chatId);
+}
+
+function parseModelReply(ctx: AccountContext, chatId: string, text: string): ModelReplyResult | null {
+  const form = ctx.pendingForms.get(chatId);
+  if (!form) return null;
+
+  const fields = text
+    .split("|")
+    .map((f) => f.trim())
+    .filter(Boolean);
+
+  if (form.type === "edit_model") {
+    const modelId = form.modelId;
+    clearPendingForm(ctx, chatId);
+
+    const updates: ModelReplyResult["updates"] = {};
+
+    for (const field of fields) {
+      const eqIdx = field.indexOf("=");
+      if (eqIdx < 1) continue;
+      const k = field.slice(0, eqIdx).trim().toLowerCase();
+      const v = field.slice(eqIdx + 1).trim();
+
+      if (k === "name") updates.displayName = v;
+      else if (k === "desc") updates.description = v;
+      else if (k === "active")
+        updates.isActive = v === "1" || v === "true" || v === "yes";
+      else if (k === "order") {
+        const n = parseInt(v, 10);
+        if (!isNaN(n)) updates.sortOrder = n;
+      } else if (k === "vision")
+        updates.visionSupport = v === "true" || v === "1" || v === "yes";
+    }
+
+    const success = ctx.repos!.model.updateModel(modelId, updates);
+    return { action: "edit_model", modelId, success, updates };
+  }
+
+  if (form.type === "add_model") {
+    clearPendingForm(ctx, chatId);
+    if (fields.length < 2) {
+      return {
+        action: "add_model",
+        error: "Format: model_id|display_name|[description]|[vision=true]",
+      };
+    }
+    const modelId = fields[0];
+    const displayName = fields[1];
+
+    // Parse remaining fields: key=value pairs and bare true/false as metadata,
+    // everything else as description text
+    let visionSupport = false;
+    const descParts: string[] = [];
+    for (let i = 2; i < fields.length; i++) {
+      const field = fields[i];
+      const lowerField = field.toLowerCase();
+      // Check for key=value pairs (e.g. vision=true)
+      const eqIdx = field.indexOf("=");
+      if (eqIdx > 0) {
+        const k = field.slice(0, eqIdx).trim().toLowerCase();
+        const v = field
+          .slice(eqIdx + 1)
+          .trim()
+          .toLowerCase();
+        if (k === "vision") {
+          visionSupport = v === "true" || v === "1" || v === "yes";
+          continue;
+        }
+      }
+      // Check for bare true/false as standalone vision flag
+      if (lowerField === "true" || lowerField === "false") {
+        visionSupport = lowerField === "true";
+        continue;
+      }
+      // Otherwise it's description text
+      descParts.push(field);
+    }
+    const description = descParts.join(" ");
+    return {
+      action: "add_model",
+      modelId,
+      displayName,
+      description,
+      visionSupport,
+    };
+  }
+
+  return null;
+}
+
+async function showModelSelectionForEdit(sock: WASocket, ctx: AccountContext, chatId: string): Promise<void> {
+  const models = ctx.repos!.model.getAllModels();
+  if (models.length === 0) {
+    await sock.sendMessage(chatId, { text: "No models to edit." });
+    return;
+  }
+  const sections = [
+    {
+      title: "Select Model to Edit",
+      rows: models.map((m) => ({
+        id: `/modelcfg edit ${m.modelId}`,
+        title:
+          m.displayName +
+          (m.isActive ? "" : " (inactive)") +
+          (m.visionSupport ? " 👁" : ""),
+        description: m.description || `ID: ${m.modelId}`,
+      })),
+    },
+  ];
+  await sendNativeFlow(
+    sock,
+    chatId,
+    "Edit Model",
+    [
+      {
+        name: "single_select",
+        buttonParamsJson: JSON.stringify({ title: "Select Model", sections }),
+      },
+    ],
+    { footer: "Select a model to edit" },
+  );
+}
+
+async function showModelAddForm(sock: WASocket, ctx: AccountContext, chatId: string, senderId: string): Promise<void> {
+  ctx.pendingForms.set(chatId, { type: "add_model", senderId });
+
+  const helpText = `Add New Model
+
+Send using | as separator:
+model_id|display_name|description|vision=true
+
+Examples:
+gpt-4o|GPT-4 Omni|Fast and capable model|vision=true
+kimi-k2.6|Kimi|vision=true
+my-model|My Custom Model
+
+Or send "cancel" to cancel.`;
+
+  await sock.sendMessage(chatId, { text: helpText });
+}
+
+async function showModelSelectionForDefault(sock: WASocket, ctx: AccountContext, chatId: string): Promise<void> {
+  const models = ctx.repos!.model.getAllModels().filter((m) => m.isActive);
+  if (models.length === 0) {
+    await sock.sendMessage(chatId, {
+      text: "No active models to set as default.",
+    });
+    return;
+  }
+  const sections = [
+    {
+      title: "Select Default Model",
+      rows: models.map((m) => ({
+        id: `/modelcfg default ${m.modelId}`,
+        title: m.displayName + (m.visionSupport ? " 👁" : ""),
+        description: m.description || `ID: ${m.modelId}`,
+      })),
+    },
+  ];
+  await sendNativeFlow(
+    sock,
+    chatId,
+    "Set Default Model",
+    [
+      {
+        name: "single_select",
+        buttonParamsJson: JSON.stringify({ title: "Select Default", sections }),
+      },
+    ],
+    { footer: "Model with smallest order will be used as default" },
+  );
+}
+
+async function setDefaultModel(sock: WASocket, ctx: AccountContext, folderPath: string, chatId: string, modelId: string): Promise<void> {
+  const models = ctx.repos!.model.getAllModels();
+  const model = models.find((m) => m.modelId === modelId);
+  if (!model) {
+    await sock.sendMessage(chatId, { text: `Model "${modelId}" not found.` });
+    return;
+  }
+  const allModels = ctx.repos!.model.getAllModels();
+  const minOrder = Math.min(...allModels.map((m) => m.sortOrder));
+  ctx.repos!.model.updateModel(modelId, { sortOrder: minOrder - 1 });
+  registry.sendReliableToClient(folderPath, { type: "invalidate_default_model", folderPath });
+  await sock.sendMessage(chatId, {
+    text: `Model "${model.displayName}" set as default.`,
+  });
+}
+
+/** `modelcfg:`/`modelcfg_` admin menu → list/add/edit/default/remove models.
+ * Owner-only via the declarative `permission: "owner"` (the old inline
+ * `isOwnerJid` check is gone — the registry enforces it centrally). */
+export const modelcfgButton: ButtonHandler = {
+  prefixes: ["modelcfg:", "modelcfg_"],
+  permission: "owner",
+  run: async (bc, payload) => {
+    const { sock, account, chatId, senderId } = bc;
+
+    // `payload` is the selectedId minus the matched prefix; for `modelcfg:` /
+    // `modelcfg_` both forms strip to the same `<action>[:<modelId>]` tail.
+    const subcommand = payload;
+    const colonIdx = subcommand.indexOf(":");
+    const action = colonIdx >= 0 ? subcommand.slice(0, colonIdx) : subcommand;
+    const modelId = colonIdx >= 0 ? subcommand.slice(colonIdx + 1) : "";
+
+    if (action === "list") {
+      const models = account.repos!.model.getAllModels();
+      if (models.length === 0) {
+        await sock.sendMessage(chatId, { text: "No models configured." });
+        return;
+      }
+      const lines = ["*Daftar Model:*"];
+      const defaultModel = account.repos!.model.getDefaultLlm2Model();
+      for (const m of models) {
+        const isDefault = defaultModel?.modelId === m.modelId;
+        const vision = m.visionSupport ? " 👁" : "";
+        lines.push(
+          `${isDefault ? "✓" : "○"} ${m.displayName} (${m.modelId})${isDefault ? " [DEFAULT]" : ""}${vision}`,
+        );
+        if (m.description) lines.push(`   ${m.description}`);
+      }
+      await sock.sendMessage(chatId, { text: lines.join("\n") });
+      return;
+    }
+
+    if (action === "add") {
+      await showModelAddForm(sock, account, chatId, senderId);
+      return;
+    }
+
+    if (action === "edit") {
+      await showModelSelectionForEdit(sock, account, chatId);
+      return;
+    }
+
+    if (action === "default") {
+      if (modelId) {
+        await setDefaultModel(sock, account, account.folderPath, chatId, modelId);
+      } else {
+        await showModelSelectionForDefault(sock, account, chatId);
+      }
+      return;
+    }
+
+    if (action === "remove") {
+      if (modelId) {
+        const result = account.repos!.model.deleteModel(modelId);
+        if (result.success) {
+          registry.sendReliableToClient(account.folderPath, {
+            type: "invalidate_default_model",
+            folderPath: account.folderPath,
+          });
+          for (const affectedChatId of result.affectedChatIds) {
+            registry.sendReliableToClient(account.folderPath, {
+              type: "set_llm2_model",
+              folderPath: account.folderPath,
+              chatId: affectedChatId,
+              modelId: null,
+            });
+            registry.sendReliableToClient(account.folderPath, {
+              type: "clear_history",
+              folderPath: account.folderPath,
+              chatId: affectedChatId,
+            });
+            registry.sendReliableToClient(account.folderPath, {
+              type: "invalidate_llm2_model",
+              folderPath: account.folderPath,
+              chatId: affectedChatId,
+            });
+          }
+        }
+        const models = account.repos!.model.getAllModels();
+        const model = models.find((m) => m.modelId === modelId);
+        const displayName = model?.displayName || modelId;
+        await sock.sendMessage(chatId, {
+          text: result.success
+            ? `Model "${displayName}" removed.`
+            : `Model "${modelId}" not found.`,
+        });
+      } else {
+        await sock.sendMessage(chatId, {
+          text: "Usage: `/modelcfg` remove <model_id>",
+        });
+      }
+      return;
+    }
+  },
+};
+
+/**
+ * Handle an in-flight `/modelcfg` form reply from the chat's pending form owner.
+ * Returns `true` when the message was consumed by the form (caller should skip
+ * normal processing), `false` when it should fall through to slash-command
+ * parsing (no pending form, a different sender, or a non-matching reply).
+ *
+ * Moved here from `baileysFactory.ts` (Step: button-registry refactor) so all
+ * `/modelcfg` form machinery is co-located with the command + button handler.
+ */
+export async function handlePendingModelForm(
+  account: AccountContext,
+  sock: WASocket,
+  folderPath: string,
+  chatId: string,
+  senderId: string,
+  text: string | null | undefined,
+): Promise<boolean> {
+  const pending = getPendingForm(account, chatId);
+  if (!pending || senderId !== pending.senderId) return false;
+
+  const normalizedText = text?.trim().toLowerCase();
+  if (normalizedText === "cancel" || normalizedText === "batal") {
+    clearPendingForm(account, chatId);
+    await sock.sendMessage(chatId, { text: "Operasi dibatalkan." });
+    return true;
+  }
+
+  const result = parseModelReply(account, chatId, text as string);
+  if (!result) return false;
+
+  if (result.action === "edit_model") {
+    if (result.success) {
+      registry.sendReliableToClient(folderPath, {
+        type: "invalidate_default_model",
+        folderPath,
+      });
+    }
+    await sock.sendMessage(chatId, {
+      text: result.success
+        ? `Model "${result.modelId}" diupdate.`
+        : `Model "${result.modelId}" tidak ditemukan.`,
+    });
+  } else if (result.action === "add_model") {
+    if (result.error) {
+      await sock.sendMessage(chatId, { text: result.error });
+    } else {
+      const success = account.repos!.model.addModel(
+        result.modelId!,
+        result.displayName!,
+        result.description,
+        null,
+        result.visionSupport,
+      );
+      if (success) {
+        registry.sendReliableToClient(folderPath, {
+          type: "invalidate_default_model",
+          folderPath,
+        });
+      }
+      await sock.sendMessage(chatId, {
+        text: success
+          ? `Model "${result.displayName}" ditambahkan.${result.visionSupport ? " (Vision enabled)" : ""}`
+          : `Model "${result.modelId}" sudah ada.`,
+      });
+    }
+  }
+  return true;
+}

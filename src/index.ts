@@ -22,6 +22,7 @@ import {
 } from './account/baileysFactory.js';
 import { startWsServer } from './server/wsServer.js';
 import { initCommandRegistry } from './wa/command/CommandRegistry.js';
+import { initButtonRegistry } from './wa/command/ButtonRegistry.js';
 import type { WebSocketServer } from 'ws';
 
 let wss: WebSocketServer | undefined;
@@ -50,6 +51,11 @@ async function bootstrap(): Promise<void> {
   // Auto-discover and register all slash command handlers before accepting any
   // client connection, so the registry is fully populated before dispatch.
   await initCommandRegistry();
+
+  // Auto-discover and register all interactive button handlers (co-located in
+  // the same `commands/` folder) right after, mirroring the command registry,
+  // so button taps can dispatch as soon as the WS server accepts a client.
+  await initButtonRegistry();
 
   // Start the inbound WS server. Each Python WaSocket client connects here and
   // is bound to its tenant account by the server's `hello` handshake; action

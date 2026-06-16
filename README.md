@@ -178,7 +178,7 @@ events and acks** go Node→Python.
 | `action_ack`, `send_ack`, `error` | Node → Python | best-effort |
 | `incoming_message` | Node → Python | best-effort |
 | `whatsapp_status` | Node → Python | **reliable** |
-| Control events (`clear_history`, `set_llm2_model`, `invalidate_*`, `set_subagent_enabled`) | Node → Python | **reliable** |
+| Control events (`clear_history`, `set_llm2_model`, `invalidate_*`, `set_subagent_enabled`, `schedule_task`) | Node → Python | **reliable** |
 
 The `WaSocket` SDK queues its reliable frames (`hello`) and flushes them on
 reconnect; Node queues its reliable Node→Python frames per account
@@ -356,19 +356,17 @@ Remove one or more members from a group.
     "requestId": "req-kick-001",
     "chatId": "12345@g.us",
     "targets": [
-      { "senderRef": "u8k2d1", "anchorContextMsgId": "000125" },
-      { "senderRef": "u1m9qa", "anchorContextMsgId": "000124" }
+      { "senderRef": "u8k2d1" },
+      { "senderRef": "u1m9qa" }
     ],
-    "mode": "partial_success",
-    "autoReplyAnchor": true
+    "mode": "partial_success"
   }
 }
 ```
 
 **Notes:**
-- Each target is resolved via `senderRef` (not JID), paired with an `anchorContextMsgId` for audit trail.
+- Each target is resolved via `senderRef` (not JID).
 - `mode`: `"partial_success"` allows some targets to succeed even if others fail; `"all_or_nothing"` rolls back on any failure.
-- `autoReplyAnchor`: When `true`, the gateway posts a synthetic action-log message after the kick completes.
 
 ---
 
@@ -705,8 +703,9 @@ can assert tenant ownership.
 | `set_llm2_model` | Node → Python | `{ folderPath, chatId \| "global", modelId }` (top-level) | After model selection via `/setting`. |
 | `invalidate_llm2_model` | Node → Python | `{ folderPath, chatId \| "global" }` (top-level) | After model config change. |
 | `invalidate_default_model` | Node → Python | `{ folderPath }` (top-level) | After `/modelcfg`. |
-| `invalidate_chat_settings` | Node → Python | `{ folderPath, chatId \| "global" }` (top-level) | After `/mode`, `/prompt`, `/permission`, `/trigger`, `/idle`, `/announcement`. |
+| `invalidate_chat_settings` | Node → Python | `{ folderPath, chatId \| "global" }` (top-level) | After `/setting` mode change, `/prompt`, `/permission`, `/trigger`, `/idle`, `/announcement`. |
 | `set_subagent_enabled` | Node → Python | `{ folderPath, chatId \| "global", enabled }` (top-level) | After `/subagent on\|off`. |
+| `schedule_task` | Node → Python | `{ folderPath, chatId, taskId, fireAtMs, prompt }` (top-level) | After `/schedule-task <nnHnnM> <prompt>` — bridge persists + re-arms the task; on fire it re-invokes LLM2 (always responds). |
 
 **Payload shape examples:**
 
@@ -729,6 +728,7 @@ can assert tenant ownership.
 { "type": "invalidate_default_model", "folderPath": "/tenants/acct-a" }
 { "type": "invalidate_chat_settings", "folderPath": "/tenants/acct-a", "chatId": "12345@g.us" }
 { "type": "set_subagent_enabled", "folderPath": "/tenants/acct-a", "chatId": "12345@g.us", "enabled": true }
+{ "type": "schedule_task", "folderPath": "/tenants/acct-a", "chatId": "12345@g.us", "taskId": "5f1c…", "fireAtMs": 1738560000000, "prompt": "Ingatkan @Budi (abc123) soal rapat" }
 ```
 
 **Notes:**
@@ -741,7 +741,7 @@ can assert tenant ownership.
 ## Notes
 - Attachment paths are local; if your LLM service runs elsewhere, you need a file-serving layer or shared volume.
 - `delete_message` runs in strict mode: unresolved `contextMsgId` fails without speculative fallback.
-- `kick_member` resolves targets via backend senderRef registry and validates each `senderRef` + `anchorContextMsgId` pair before removal.
+- `kick_member` resolves targets via backend senderRef registry and validates each `senderRef` before removal.
 - If a tenant's WhatsApp session logs out, delete that tenant's `<folder_path>/auth` and re-run to re-pair **that account only**.
 - Multi-account: run one process with several tenants (`FOLDER_PATHS` / `ACCOUNTS_JSON`), one Baileys socket + one `WaSocket` per `folder_path`. Each tenant is fully isolated under `<folder_path>/{auth,db,media,stickers}` (CONTRACT.md §8).
 - Baileys version pinned to `7.0.0-rc12` (package name `baileys`); ensure Node 18+ with ESM support. rc12 is the patched release for the message-spoofing advisory GHSA-qvv5-jq5g-4cgg (CVE-2026-48063) — do not downgrade below it.

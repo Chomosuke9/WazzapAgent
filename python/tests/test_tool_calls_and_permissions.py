@@ -232,7 +232,7 @@ class TestExtractActionsFromToolCalls:
 
   def test_kick_members(self):
     tc = [{"name": "kick_members", "args": {"targets": [
-      {"sender_ref": "u8k2d1", "anchor_context_msg_id": "000123"},
+      {"sender_ref": "u8k2d1"},
     ]}}]
     actions = _extract_actions_from_tool_calls(
       tc, fallback_reply_to=None, allowed_context_ids={"000123"},
@@ -240,11 +240,12 @@ class TestExtractActionsFromToolCalls:
     assert len(actions) == 1
     assert actions[0]["type"] == "kick_member"
     assert actions[0]["targets"][0]["senderRef"] == "u8k2d1"
+    assert "anchorContextMsgId" not in actions[0]["targets"][0]
+    assert "autoReplyAnchor" not in actions[0]
 
   def test_mute_member(self):
     tc = [{"name": "mute_member", "args": {
       "sender_ref": "u8k2d1",
-      "anchor_context_msg_id": "000123",
       "duration_minutes": 30,
     }}]
     actions = _extract_actions_from_tool_calls(
@@ -254,11 +255,11 @@ class TestExtractActionsFromToolCalls:
     assert actions[0]["type"] == "mute_member"
     assert actions[0]["senderRef"] == "u8k2d1"
     assert actions[0]["durationMinutes"] == 30
+    assert "anchorContextMsgId" not in actions[0]
 
   def test_mute_clamps_duration(self):
     tc = [{"name": "mute_member", "args": {
       "sender_ref": "u8k2d1",
-      "anchor_context_msg_id": "000123",
       "duration_minutes": 9999,
     }}]
     actions = _extract_actions_from_tool_calls(

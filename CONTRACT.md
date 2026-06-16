@@ -114,9 +114,8 @@ At least one of `text` / `attachments` must be non-empty.
   payload: {
     requestId: string
     chatId: string
-    targets: { senderRef: string, anchorContextMsgId: string }[]
+    targets: { senderRef: string }[]
     mode: "partial_success" | "all_or_nothing"
-    autoReplyAnchor: boolean
   } }
 ```
 
@@ -278,6 +277,7 @@ the top level so the SDK can assert ownership.
 { type: "invalidate_default_model", folderPath: string }
 { type: "invalidate_chat_settings", folderPath: string, chatId: string | "global" }
 { type: "set_subagent_enabled",     folderPath: string, chatId: string | "global", enabled: boolean }
+{ type: "schedule_task",            folderPath: string, chatId: string, taskId: string, fireAtMs: number, prompt: string }
 ```
 
 ### 1.6 Delivery guarantee summary
@@ -421,9 +421,8 @@ class WaSocket:
 
     async def kick(self, group_id: str, members: list[dict], *,
                    mode: str = "partial_success",
-                   auto_reply_anchor: bool = False,
                    request_id: str | None = None) -> dict: ...
-        # members: [{"senderRef": str, "anchorContextMsgId": str}, ...]
+        # members: [{"senderRef": str}, ...]
         # raises NotGroupError, PermissionDeniedError, InvalidTargetError,
         # SendFailedError, TimeoutError
 
@@ -506,10 +505,10 @@ export interface SendMessagePayload {
 }
 export interface ReactMessagePayload { requestId: string; chatId: string; contextMsgId: string; emoji: string; }
 export interface DeleteMessagePayload { requestId: string; chatId: string; contextMsgId: string; }
-export interface KickTarget { senderRef: string; anchorContextMsgId: string; }
+export interface KickTarget { senderRef: string; }
 export interface KickMemberPayload {
   requestId: string; chatId: string; targets: KickTarget[];
-  mode: "partial_success" | "all_or_nothing"; autoReplyAnchor: boolean;
+  mode: "partial_success" | "all_or_nothing";
 }
 export interface MarkReadPayload { chatId: string; messageId: string; participant?: string; }
 export interface SendPresencePayload { chatId: string; type: "composing" | "paused"; }
@@ -652,7 +651,6 @@ class KickMemberAction:
     request_id: str; chat_id: str
     targets: tuple[dict, ...]
     mode: str = "partial_success"
-    auto_reply_anchor: bool = False
 
 @dataclass(frozen=True)
 class MarkReadAction:

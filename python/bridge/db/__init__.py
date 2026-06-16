@@ -27,6 +27,7 @@ from . import models_repository
 from . import moderation_repository
 from . import stats_repository
 from . import activation_repository
+from . import scheduled_tasks_repository
 
 # Re-export every name (public and single-underscore private) from the shared
 # core and each per-domain repository, so the package namespace mirrors the
@@ -38,6 +39,7 @@ _submodules = (
     moderation_repository,
     stats_repository,
     activation_repository,
+    scheduled_tasks_repository,
 )
 for _mod in _submodules:
     for _name, _val in vars(_mod).items():

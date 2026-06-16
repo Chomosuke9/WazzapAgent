@@ -1208,7 +1208,6 @@ class BatchProcessor:
           action.get("targets") or [],
           request_id=_make_request_id("kick"),
           mode=action.get("mode") or "partial_success",
-          auto_reply_anchor=bool(action.get("autoReplyAnchor", False)),
         )
         action_counts[action_type] += 1
         continue
@@ -1356,20 +1355,11 @@ class BatchProcessor:
         continue
       if action_type == "mute_member":
         sender_ref = action.get("senderRef", "")
-        anchor_id = action.get("anchorContextMsgId")
         duration = action.get("durationMinutes", 30)
         if duration == 0:
           db_remove_mute(chat_id, sender_ref)
         else:
           db_add_mute(chat_id, sender_ref, duration)
-          # Delete the anchor message immediately
-          if anchor_id:
-            await send_delete_message(
-              ws,
-              chat_id,
-              anchor_id,
-              request_id=_make_request_id("mute_del"),
-            )
         action_counts[action_type] += 1
         continue
       if action_type == "execute_subtask":

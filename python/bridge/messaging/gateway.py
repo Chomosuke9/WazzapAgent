@@ -153,7 +153,6 @@ async def send_kick_member(
   *,
   request_id: str,
   mode: str = "partial_success",
-  auto_reply_anchor: bool = False,
 ):
   if not targets:
     return
@@ -165,14 +164,12 @@ async def send_kick_member(
       "request_id": request_id,
       "targets": targets,
       "mode": mode,
-      "auto_reply_anchor": auto_reply_anchor,
     },
   )
   await ws.kick(
     chat_id,
     targets,
     mode=mode,
-    auto_reply_anchor=auto_reply_anchor,
     request_id=request_id,
   )
 

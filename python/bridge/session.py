@@ -66,6 +66,8 @@ from .db import (
   checkpoint_all_dbs as db_checkpoint_all_dbs,
   clear_subagent_enabled_cache as db_clear_subagent_enabled_cache,
   get_idle_trigger as db_get_idle_trigger,
+  get_prompt as db_get_prompt,
+  ScheduledTasksRepository,
   set_tenant_db_dir as db_set_tenant_db_dir,
   reset_tenant_db_dir as db_reset_tenant_db_dir,
   tenant_db_context as db_tenant_db_context,
@@ -113,6 +115,7 @@ from .agent.batch_processor import BatchProcessor, PendingChat
 from .agent.event_router import EventRouter
 from .agent.ack_hydrator import AckHydrator
 from .agent.subagent_coordinator import SubAgentCoordinator
+from .agent.scheduled_task_runner import ScheduledTaskRunner
 
 
 def _compute_idle_trigger(min_val: int, max_val: int, msg_count: int) -> bool:
@@ -223,6 +226,20 @@ class AgentSession:
     )
     self._subagent = SubAgentCoordinator(self)
     self._batch = BatchProcessor(self)
+    # --- Feature 5: scheduled-task runner (one-shot timers + re-invoke) ---
+    # Persists `/schedule-task` rows in this tenant's settings.db and re-invokes
+    # LLM2 in the target chat when each fires. Dependencies are injected so the
+    # runner stays INSTANCE-scoped and unit-testable.
+    self._scheduled = ScheduledTaskRunner(
+      repository=ScheduledTasksRepository(),
+      ws=self.sock,
+      responder=self._llm2,
+      per_chat=self.per_chat,
+      per_chat_lock=self.per_chat_lock,
+      track_task=self._track_task,
+      get_prompt=db_get_prompt,
+      record_stat=self._dashboard.record_stat,
+    )
     # The webhook server's queue handler (was wired inside _register_handlers).
     self._queue_handler = self._subagent.queue_event
 
@@ -268,6 +285,11 @@ class AgentSession:
     self.tasks.add(dashboard_task)
 
     self.subagent_webhook.set_queue_handler(self._queue_handler)
+
+    # Feature 5: re-arm any scheduled tasks persisted before this boot. Runs
+    # under the tenant DB context bound above so it reads THIS account's
+    # settings.db; armed timers inherit the context for their own DB access.
+    self._scheduled.rearm_pending()
 
     try:
       await ws.connect(node_url)
@@ -370,6 +392,11 @@ def _register_handlers(session) -> None:
   @ws.on("invalidate_chat_settings")
   async def _on_invalidate_chat_settings(evt):
     await events.handle(evt)
+
+  @ws.on("schedule_task")
+  async def _on_schedule_task(evt):
+    # Feature 5: persist + arm a one-shot scheduled task (re-invokes LLM2 on fire).
+    await session._scheduled.schedule(evt)
 
   @ws.on("message")
   async def _on_message(msg):

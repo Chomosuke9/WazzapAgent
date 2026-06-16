@@ -120,7 +120,7 @@ src/                          Node.js gateway runtime (WS SERVER, TypeScript)
       participants.ts         Group role/name caching, owner detection
       groupContext.ts         Group metadata caching + invalidation
       messageParser.ts        Baileys message unwrapping (viewOnce, interactive, buttons)
-    connection.ts             Baileys v7 socket lifecycle, button/list response handler
+    connection.ts             Baileys v7 socket lifecycle, QR, button-selection extraction + thin router (delegates to command/ButtonRegistry)
     inbound.ts                Incoming WA → normalized incoming_message payload
     outbound.ts               Send text/media/mentions to WhatsApp
     actions.ts                React / delete message wrappers
@@ -130,10 +130,13 @@ src/                          Node.js gateway runtime (WS SERVER, TypeScript)
     presence.ts               Mark read, typing indicator
     events.ts                 Synthetic context events (action log, group join, role change)
     utils.ts                  Concurrency helpers: semaphore, withRetry, escapeRegex
-    command/                  Typed command dispatch (no switch, no alias drift)
-      CommandRegistry.ts      Map<name, CommandHandler>; aliases declared on each handler
-      CommandContext.ts       Strict typed context threaded to handlers (sock, account, repos, …)
-    commands/                 Per-command handler modules (one CommandHandler each)
+    command/                  Auto-discovered command + button dispatch (no switch, no alias drift)
+      CommandRegistry.ts      Map<token, CommandHandler>; auto-discovers commands/ descriptors
+      CommandContext.ts       Strict typed context threaded to command handlers (sock, account, repos, …)
+      ButtonRegistry.ts       Map<prefix, ButtonHandler>; auto-discovers button handlers from commands/ (longest-prefix match, central activation+permission gate)
+      ButtonContext.ts        ButtonHandler descriptor + per-tap context threaded to button handlers
+      permission.ts           Shared permission DSL (atoms, parser, validate, describe) used by both registries
+    commands/                 Per-command handler modules (a CommandHandler + optional co-located ButtonHandler(s) per file)
       index.ts                Barrel re-export of all handlers + parseSlashCommand
       parseCommand.ts         Raw command text → {command, args} parsing
       activate.ts             /activate <code> — Activate chat with activation code
@@ -381,15 +384,16 @@ Node→Python frame carries `folderPath` for tenant routing.
 | `set_llm2_model` | reliable | Authoritative model change sync: `{folderPath, chatId, modelId}` (top-level) |
 | `invalidate_llm2_model` | reliable | Invalidate cached model for `chatId` or `"global"` (top-level) |
 | `invalidate_default_model` | reliable | After `/modelcfg` changes: `{folderPath}` (top-level) |
-| `invalidate_chat_settings` | reliable | After `/mode`, `/prompt`, `/permission`, `/trigger`, `/idle`, `/announcement` (top-level) |
+| `invalidate_chat_settings` | reliable | After `/setting` mode change, `/prompt`, `/permission`, `/trigger`, `/idle`, `/announcement` (top-level) |
 | `set_subagent_enabled` | reliable | After `/subagent` toggle: `{folderPath, chatId, enabled}` (top-level) |
+| `schedule_task` | reliable | After `/schedule-task <nnHnnM> <prompt>`: `{folderPath, chatId, taskId, fireAtMs, prompt}` (top-level). Bridge persists + re-arms; on fire re-invokes LLM2 (always responds, no LLM1). |
 
 | Type | Description |
 |------|-------------|
 | `send_message` | Send text + optional attachments. `payload: {chatId, text, replyTo?, attachments?}` |
 | `react_message` | React with emoji: `{chatId, contextMsgId, emoji}` |
 | `delete_message` | Delete by contextMsgId: `{chatId, contextMsgId}` |
-| `kick_member` | Kick members: `{chatId, targets[], mode, autoReplyAnchor?}` |
+| `kick_member` | Kick members: `{chatId, targets[], mode}` |
 | `mark_read` | Send read receipt: `{chatId, messageId, participant?}` |
 | `send_presence` | Typing indicator: `{chatId, type: "composing"|"paused"}` |
 | `run_command` | Execute slash command silently (no WhatsApp echo): `{chatId, command, contextMsgId?}` |
@@ -430,7 +434,7 @@ Node→Python frame carries `folderPath` for tenant routing.
 | `send_quiz` | Always | Send multiple-choice quiz with tappable buttons (2-5 choices). Parameters: `context_msg_id`, `question`, `choices[{label, text}]`, `footer` (null allowed). |
 | `delete_messages` | Permission-gated | Delete one or more messages by contextMsgId. Requires `permission_allows_delete`. |
 | `mute_member` | Permission-gated | Mute/unmute a member. `duration_minutes` > 0 mutes, 0 unmutes. |
-| `kick_members` | Permission-gated | Remove members from group. Cannot kick admins or bot. Parameters: `targets: [{sender_ref, anchor_context_msg_id}]`. |
+| `kick_members` | Permission-gated | Remove members from group. Cannot kick admins or bot. Parameters: `targets: [{sender_ref}]`. |
 | `execute_subtask` | Sub-agent enabled | Delegate complex task to sub-agent. Supports correction re-dispatch (LLM2 can re-invoke with revised instruction). |
 
 ---
@@ -580,8 +584,8 @@ these for exact cost calculation.
 
 - **LLM1 is skipped in private chats** — all DMs get a response (confidence 100).
 - **Private chats skip debounce** — messages are processed immediately.
-- **Group chats** use prefix/hybrid/auto modes controlled by `/mode` and
-  `/trigger` commands.
+- **Group chats** use prefix/hybrid/auto modes set via the `/setting` menu (mode
+  section) and the `/trigger` command.
 - **Permission tools** (`delete_messages`, `mute_member`, `kick_members`) are
   only available if the bot is an admin in the group.
 - **Interactive messages** (`sendRichMessage`, `sendCarousel`, etc.) don't render

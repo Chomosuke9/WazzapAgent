@@ -96,7 +96,7 @@ function deriveKickFailure(result: any): { code: ErrorCode; detail: string } {
   const codes = failures
     .map((row: any) => (typeof row?.error === 'string' ? row.error : null))
     .filter(Boolean);
-  const priority = ['permission_denied', 'send_failed', 'not_found', 'invalid_target'];
+  const priority = ['permission_denied', 'send_failed', 'invalid_target'];
   const code = priority.find((candidate) => codes.includes(candidate)) || codes[0] || 'send_failed';
 
   const detail = failures.find((row: any) => typeof row?.detail === 'string' && row.detail.trim())?.detail

@@ -15,7 +15,7 @@ process.env.BOT_OWNER_JIDS = OWNER_JID;
 process.env.REQUIRE_ACTIVATION = 'false';
 process.env.LOG_LEVEL = 'silent';
 
-import test from 'node:test';
+import test, { before } from 'node:test';
 import assert from 'node:assert/strict';
 import type WebSocket from 'ws';
 
@@ -24,6 +24,16 @@ const { createRepositories } = await import('../../src/db/repositories/index.ts'
 const registry = await import('../../src/server/accountRegistry.ts');
 const { handleButtonResponse } = await import('../../src/wa/connection.ts');
 const { createAccountContext } = await import('../../src/account/accountContext.ts');
+
+// Button taps now dispatch through the auto-discovered ButtonRegistry (the old
+// inline `model_select:` branch moved into `commands/setting.ts`); populate it
+// once before exercising handleButtonResponse (mirrors the gateway bootstrap()).
+before(async () => {
+  const { initButtonRegistry } = await import(
+    '../../src/wa/command/ButtonRegistry.ts'
+  );
+  await initButtonRegistry();
+});
 
 // Step 05: each AccountContext carries its tenant's repositories. The button
 // handler's model_select path writes via `ctx.repos.model`, so attach a real

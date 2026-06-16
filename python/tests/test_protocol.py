@@ -76,11 +76,10 @@ ROUND_TRIP_INSTANCES = [
         request_id="kick-1-000003",
         chat_id="123@g.us",
         targets=(
-            {"senderRef": "u8k2d1", "anchorContextMsgId": "000125"},
-            {"senderRef": "u1m9qa", "anchorContextMsgId": "000124"},
+            {"senderRef": "u8k2d1"},
+            {"senderRef": "u1m9qa"},
         ),
         mode="partial_success",
-        auto_reply_anchor=True,
     ),
     MarkReadAction(chat_id="123@g.us", message_id="wamid-abc", participant="98765@s.whatsapp.net"),
     SendPresenceAction(chat_id="123@g.us", type="composing"),
@@ -233,13 +232,12 @@ GOLDEN_ACTIONS = [
             "payload": {
                 "requestId": "kick-1-000001",
                 "chatId": "123@g.us",
-                "targets": [{"senderRef": "u8k2d1", "anchorContextMsgId": "000125"}],
+                "targets": [{"senderRef": "u8k2d1"}],
                 "mode": "partial_success",
-                "autoReplyAnchor": True,
             },
         },
         KickMemberAction,
-        {"request_id": "kick-1-000001", "chat_id": "123@g.us", "mode": "partial_success", "auto_reply_anchor": True},
+        {"request_id": "kick-1-000001", "chat_id": "123@g.us", "mode": "partial_success"},
     ),
     # mark_read (no requestId)
     (
@@ -368,7 +366,7 @@ def test_golden_action_decodes_without_field_loss(raw_frame, cls, expected_subse
 def test_golden_action_preserves_collection_fields():
     """Targets/choices/attachments are not dropped during decode."""
     _, kick = decode(json.dumps(GOLDEN_ACTIONS[4][0]))
-    assert kick.targets == ({"senderRef": "u8k2d1", "anchorContextMsgId": "000125"},)
+    assert kick.targets == ({"senderRef": "u8k2d1"},)
 
     _, attach_msg = decode(json.dumps(GOLDEN_ACTIONS[1][0]))
     assert attach_msg.attachments == [
@@ -482,7 +480,7 @@ def test_send_message_reply_to_maps_to_reply_to_camel():
         ("request_id", "requestId"),
         ("reply_to", "replyTo"),
         ("context_msg_id", "contextMsgId"),
-        ("auto_reply_anchor", "autoReplyAnchor"),
+        ("duration_minutes", "durationMinutes"),
         ("protocol_version", "protocolVersion"),
         ("wa_status", "waStatus"),
         ("model_id", "modelId"),

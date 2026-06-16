@@ -649,6 +649,14 @@ def _ensure_settings_tables(conn: sqlite3.Connection) -> None:
       expires_at      TEXT DEFAULT NULL,
       expiry_notified INTEGER NOT NULL DEFAULT 0
     );
+
+    CREATE TABLE IF NOT EXISTS scheduled_tasks (
+      id            TEXT PRIMARY KEY,
+      chat_id       TEXT NOT NULL,
+      fire_at_ms    INTEGER NOT NULL,
+      prompt        TEXT NOT NULL,
+      created_at_ms INTEGER NOT NULL
+    );
     """
   )
 

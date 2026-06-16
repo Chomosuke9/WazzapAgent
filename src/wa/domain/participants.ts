@@ -4,7 +4,6 @@ import type { ParticipantRoleFlags } from './caches.js';
 import type { AccountContext } from '../../account/accountContext.js';
 import {
   normalizeJid,
-  normalizeContextMsgId,
   rememberSenderRef,
 } from './identifiers.js';
 
@@ -13,7 +12,6 @@ import {
  */
 interface NormalizedKickTarget {
   senderRef: string;
-  anchorContextMsgId: string | null;
 }
 
 function toJidCandidate(value: unknown): string | null {
@@ -247,10 +245,8 @@ function normalizeKickTargets(rawTargets: unknown): NormalizedKickTarget[] {
     const senderRef = typeof target?.senderRef === 'string'
       ? target.senderRef.trim().toLowerCase()
       : '';
-    const anchorContextMsgId = normalizeContextMsgId(target?.anchorContextMsgId);
     normalized.push({
       senderRef,
-      anchorContextMsgId,
     });
   }
   return normalized;

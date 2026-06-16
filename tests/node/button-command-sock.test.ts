@@ -38,6 +38,12 @@ before(async () => {
     '../../src/wa/command/CommandRegistry.ts'
   );
   await initCommandRegistry();
+  // The `/`-prefixed button is now dispatched via the auto-discovered
+  // ButtonRegistry (slashButton handler), so populate it too before tapping.
+  const { initButtonRegistry } = await import(
+    '../../src/wa/command/ButtonRegistry.ts'
+  );
+  await initButtonRegistry();
 });
 
 /** Minimal fake Baileys socket that records every sendMessage call. */

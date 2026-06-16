@@ -409,7 +409,6 @@ async def _deliver_subagent_result(
         reinvoke_action.get("targets") or [],
         request_id=_make_request_id("kick"),
         mode=reinvoke_action.get("mode") or "partial_success",
-        auto_reply_anchor=bool(reinvoke_action.get("autoReplyAnchor", False)),
       )
 
   # Collect execute_subtask actions from the re-invoke for the caller to

@@ -123,11 +123,10 @@ test('kick_member failure emits action_ack(ok:false) with priority code + matchi
         requestId: 'kick-1',
         chatId: '123@g.us',
         targets: [
-          { senderRef: 'u1', anchorContextMsgId: '000125' },
-          { senderRef: 'u2', anchorContextMsgId: '000126' },
+          { senderRef: 'u1' },
+          { senderRef: 'u2' },
         ],
         mode: 'partial_success',
-        autoReplyAnchor: false,
       },
     },
     deps,

@@ -108,8 +108,19 @@ async function renderOutboundMentions(
       }
       replacement = '@all';
     } else if (normalizedValue === 'bot') {
-      // Bot mention — render as display name, no JID resolution needed
-      replacement = rawName ? `@${rawName}` : '@bot';
+      // @Name (bot) — a REAL clickable mention of the bot itself.
+      // Resolve the bot's own JID from the live socket and add it to the
+      // mention set (mirroring the senderRef branch) so WhatsApp delivers an
+      // actual mention notification. The replacement becomes the @<localpart>
+      // handle so it renders as a tap-able mention. If the bot JID can't be
+      // resolved (no socket yet / missing user.id), fall back to plain text.
+      const botJid = normalizeJid(ctx.sock?.user?.id);
+      if (botJid) {
+        mentionSet.add(botJid);
+        replacement = mentionHandleForJid(botJid) || replacement;
+      } else {
+        replacement = rawName ? `@${rawName}` : '@bot';
+      }
     } else if (normalizedValue === 'admin') {
       // @admin (admin) — tag all group admins using groupMentions trick.
       // WhatsApp renders a group JID mention as "@admin" when groupSubject = "admin".

@@ -46,6 +46,7 @@ INVALIDATE_LLM2_MODEL = "invalidate_llm2_model"
 INVALIDATE_DEFAULT_MODEL = "invalidate_default_model"
 INVALIDATE_CHAT_SETTINGS = "invalidate_chat_settings"
 SET_SUBAGENT_ENABLED = "set_subagent_enabled"
+SCHEDULE_TASK = "schedule_task"
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +163,7 @@ __all__ = [
     "INVALIDATE_DEFAULT_MODEL",
     "INVALIDATE_CHAT_SETTINGS",
     "SET_SUBAGENT_ENABLED",
+    "SCHEDULE_TASK",
     # model
     "WhatsAppMessage",
     # helpers

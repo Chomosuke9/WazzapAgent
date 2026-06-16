@@ -1,7 +1,10 @@
 import logger from '../../logger.js';
 import { sendNativeFlow } from '../interactive/index.js';
 import config from '../../config.js';
+import * as registry from '../../server/accountRegistry.js';
+import { VALID_MODES } from '../../db/repositories/SettingsRepository.js';
 import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
+import type { ButtonHandler } from '../command/ButtonContext.js';
 import type { AccountRepositories } from '../../db/repositories/index.js';
 
 function formatActivationInfo(repos: AccountRepositories, chatId: string): string {
@@ -35,6 +38,20 @@ async function handleSettings({ chatId, senderId: _senderId, args: _args, sock, 
   const permissionLabel = permissionLabels[currentPermission] || String(currentPermission);
 
   const buttons = [
+    {
+      name: 'single_select',
+      buttonParamsJson: JSON.stringify({
+        title: 'Change Mode',
+        sections: [{
+          title: 'Select Mode',
+          rows: [
+            { id: 'mode_select:auto', title: 'Auto', description: 'LLM decides when to respond' },
+            { id: 'mode_select:prefix', title: 'Prefix', description: 'Only responds when triggered' },
+            { id: 'mode_select:hybrid', title: 'Hybrid', description: 'Prefix first, fallback to auto' },
+          ],
+        }],
+      }),
+    },
     {
       name: 'single_select',
       buttonParamsJson: JSON.stringify({
@@ -96,4 +113,118 @@ export const settingCommand: CommandHandler = {
   description: "Buka menu pengaturan interaktif untuk chat ini. Dari sini kamu bisa mengubah mode respon, model LLM, system prompt, permission moderasi, dan pengaturan lainnya tanpa menghafal perintah.",
   permission: "isPrivate or isAdmin or isOwner",
   run: (_sock, _message, ctx) => handleSettings(ctx),
+};
+
+// ---------------------------------------------------------------------------
+// Co-located button handlers (auto-discovered by ButtonRegistry)
+// ---------------------------------------------------------------------------
+//
+// These render / act on the menus produced by `handleSettings` above. The
+// activation gate and the owner/admin gate are NO LONGER inlined here — they
+// are declared via `permission` / the registry default and enforced centrally
+// by `dispatchButton`. `payload` is the `selectedId` minus the matched prefix.
+
+/** `settings:<action>` → settings menu (model picker / prompt / permission hints). */
+export const settingsButton: ButtonHandler = {
+  prefixes: ['settings:'],
+  permission: 'owner or (isGroup and isAdmin)',
+  run: async (bc, action) => {
+    const { sock, account, chatId } = bc;
+    if (action === 'model') {
+      const models = account.repos!.model.getAllActiveModels();
+      if (models.length === 0) {
+        await sock.sendMessage(chatId, { text: 'No models available.' });
+        return;
+      }
+      const currentModelId = account.repos!.model.getLlm2Model(chatId);
+      const defaultModel = account.repos!.model.getDefaultLlm2Model();
+      const activeModelId = currentModelId || defaultModel?.modelId || null;
+      const sections = models.map((m) => ({
+        title: m.displayName + (m.visionSupport ? ' 👁' : ''),
+        rows: [
+          {
+            title: m.displayName + (m.modelId === activeModelId ? ' ✓' : ''),
+            description: m.description || (m.visionSupport ? 'Vision support' : ''),
+            id: `model_select:${m.modelId}`,
+          },
+        ],
+      }));
+      await sendNativeFlow(
+        sock,
+        chatId,
+        'Pilih Model LLM',
+        [
+          {
+            name: 'single_select',
+            buttonParamsJson: JSON.stringify({ title: 'Pilih Model', sections }),
+          },
+        ],
+        { footer: 'Model saat ini: ' + (activeModelId || 'default') },
+      );
+      return;
+    }
+    if (action === 'prompt') {
+      await sock.sendMessage(chatId, {
+        text: 'Gunakan `/prompt` <teks> untuk mengubah prompt.',
+      });
+      return;
+    }
+    if (action === 'permission') {
+      await sock.sendMessage(chatId, {
+        text: 'Gunakan `/permission` <0-3> untuk mengubah level.',
+      });
+      return;
+    }
+  },
+};
+
+/** `mode_select:<mode>` → set the chat's response mode (replaces the removed
+ * `/mode` command; the mode-setting section of `/setting` routes here). */
+export const modeSelectButton: ButtonHandler = {
+  prefixes: ['mode_select:'],
+  permission: 'owner or (isGroup and isAdmin)',
+  run: async (bc, mode) => {
+    const { sock, account, chatId } = bc;
+    if (!VALID_MODES.has(mode)) {
+      await sock.sendMessage(chatId, {
+        text: 'Invalid mode. Choose auto, prefix, or hybrid.',
+      });
+      return;
+    }
+    account.repos!.settings.setMode(chatId, mode);
+    registry.sendReliableToClient(account.folderPath, {
+      type: 'invalidate_chat_settings',
+      folderPath: account.folderPath,
+      chatId,
+    });
+    await sock.sendMessage(chatId, { text: `Mode diubah ke: *${mode}*` });
+  },
+};
+
+/** `model_select:<id>` → set the chat's LLM2 model. */
+export const modelSelectButton: ButtonHandler = {
+  prefixes: ['model_select:'],
+  permission: 'owner or (isGroup and isAdmin)',
+  run: async (bc, modelId) => {
+    const { sock, account, chatId } = bc;
+    account.repos!.model.setLlm2Model(chatId, modelId);
+    registry.sendReliableToClient(account.folderPath, {
+      type: 'set_llm2_model',
+      folderPath: account.folderPath,
+      chatId,
+      modelId,
+    });
+    registry.sendReliableToClient(account.folderPath, {
+      type: 'invalidate_llm2_model',
+      folderPath: account.folderPath,
+      chatId,
+    });
+    const models = account.repos!.model.getAllActiveModels();
+    const model = models.find((m) => m.modelId === modelId);
+    const displayName = model?.displayName || modelId;
+    const visionNote = model?.visionSupport ? ' (Vision)' : '';
+    await sock.sendMessage(chatId, {
+      text: `Model diubah ke: ${displayName}${visionNote}`,
+    });
+  },
 };

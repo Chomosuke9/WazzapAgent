@@ -111,44 +111,22 @@ def _parse_kick_targets(
     return []
 
   parsed_targets: list[dict[str, str]] = []
-  dedup: set[tuple[str, str]] = set()
+  dedup: set[str] = set()
   segments = [segment.strip() for segment in token_value.split(",")]
-  active_sender_ref: str | None = None
   for segment in segments:
     cleaned_segment = _unwrap_angle_group(segment)
     if not cleaned_segment:
       continue
 
-    if "@" in cleaned_segment:
-      sender_part, anchors_part = cleaned_segment.split("@", 1)
-      sender_ref = _unwrap_angle_group(sender_part).strip().lower()
-      if not SENDER_REF_RE.match(sender_ref):
-        active_sender_ref = None
-        continue
-      active_sender_ref = sender_ref
-      anchor_tokens = [anchors_part.strip()]
-    else:
-      if not active_sender_ref:
-        continue
-      sender_ref = active_sender_ref
-      anchor_tokens = [cleaned_segment]
-
-    for anchor_token in anchor_tokens:
-      anchor_context_msg_id = _normalize_context_msg_id(_unwrap_angle_group(anchor_token))
-      if not anchor_context_msg_id:
-        continue
-      if allowed_context_ids and anchor_context_msg_id not in allowed_context_ids:
-        continue
-      dedup_key = (sender_ref, anchor_context_msg_id)
-      if dedup_key in dedup:
-        continue
-      dedup.add(dedup_key)
-      parsed_targets.append(
-        {
-          "senderRef": sender_ref,
-          "anchorContextMsgId": anchor_context_msg_id,
-        }
-      )
+    # Anchor syntax (``senderRef@...``) is legacy; the anchor is ignored.
+    sender_part = cleaned_segment.split("@", 1)[0] if "@" in cleaned_segment else cleaned_segment
+    sender_ref = _unwrap_angle_group(sender_part).strip().lower()
+    if not SENDER_REF_RE.match(sender_ref):
+      continue
+    if sender_ref in dedup:
+      continue
+    dedup.add(sender_ref)
+    parsed_targets.append({"senderRef": sender_ref})
   return parsed_targets
 
 
@@ -301,7 +279,6 @@ def _extract_actions(
             "type": "kick_member",
             "targets": kick_targets,
             "mode": "partial_success",
-            "autoReplyAnchor": True,
           }
         )
       continue
@@ -481,44 +458,29 @@ def _extract_actions_from_tool_calls(
     elif name == "kick_members":
       raw_targets = args.get("targets") or []
       kick_targets: list[dict[str, str]] = []
-      dedup: set[tuple[str, str]] = set()
+      dedup: set[str] = set()
       for target in raw_targets:
         if not isinstance(target, dict):
           continue
         sender_ref = str(target.get("sender_ref") or "").strip().lower()
-        anchor = _normalize_context_msg_id(target.get("anchor_context_msg_id"))
-        if not sender_ref or not SENDER_REF_RE.match(sender_ref) or not anchor:
+        if not sender_ref or not SENDER_REF_RE.match(sender_ref):
           continue
-        if allowed_context_ids and anchor not in allowed_context_ids:
+        if sender_ref in dedup:
           continue
-        key = (sender_ref, anchor)
-        if key in dedup:
-          continue
-        dedup.add(key)
-        kick_targets.append({
-          "senderRef": sender_ref,
-          "anchorContextMsgId": anchor,
-        })
+        dedup.add(sender_ref)
+        kick_targets.append({"senderRef": sender_ref})
       if kick_targets:
         actions.append({
           "type": "kick_member",
           "targets": kick_targets,
           "mode": "partial_success",
-          "autoReplyAnchor": True,
         })
 
     elif name == "mute_member":
       sender_ref = str(args.get("sender_ref") or "").strip().lower()
-      anchor = _normalize_context_msg_id(args.get("anchor_context_msg_id"))
       duration = args.get("duration_minutes")
       if not sender_ref or not SENDER_REF_RE.match(sender_ref):
         logger.warning("mute ignored: invalid sender_ref %r", sender_ref)
-        continue
-      if not anchor:
-        logger.warning("mute ignored: invalid anchor_context_msg_id")
-        continue
-      if allowed_context_ids and anchor not in allowed_context_ids:
-        logger.warning("mute ignored: anchor %s not in allowed set", anchor)
         continue
       try:
         duration = int(duration)
@@ -528,7 +490,6 @@ def _extract_actions_from_tool_calls(
       actions.append({
         "type": "mute_member",
         "senderRef": sender_ref,
-        "anchorContextMsgId": anchor,
         "durationMinutes": duration,
       })
 
