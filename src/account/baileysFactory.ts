@@ -52,7 +52,12 @@ import {
   parseGroupJoinStub,
 } from "../wa/domain/groupContext.js";
 import { parseSlashCommand } from "../wa/commands/index.js";
-import { roleFlagsForJid, isOwnerJid } from "../wa/domain/participants.js";
+import {
+  roleFlagsForJid,
+  isOwnerJid,
+  registerOwnerLid,
+  resolveLidForPhone,
+} from "../wa/domain/participants.js";
 import {
   normalizeJid,
   ensureContextMsgId,
@@ -305,6 +310,77 @@ async function buildSocket(
 // ---------------------------------------------------------------------------
 
 /**
+ * Request an 8-char WhatsApp pairing code for `phoneNumber` (digits only, with
+ * country code) and surface it prominently on stdout + the structured log, so a
+ * headless deploy (e.g. Pterodactyl console) can pair WITHOUT a QR. WhatsApp
+ * formats the code as `XXXX-XXXX` in the Linked Devices UI.
+ *
+ * Best-effort: on failure it logs the error and falls back to printing the QR
+ * (when `fallbackQr` is provided), so a transient pairing-code failure never
+ * leaves the operator with no way to authenticate.
+ */
+function requestPairingCode(
+  sock: WASocket,
+  phoneNumber: string,
+  folderPath: string,
+  fallbackQr: string | null,
+): void {
+  sock
+    .requestPairingCode(phoneNumber)
+    .then((code) => {
+      const pretty =
+        typeof code === "string" && code.length === 8
+          ? `${code.slice(0, 4)}-${code.slice(4)}`
+          : code;
+      logger.info(
+        { folderPath, phoneNumber, code: pretty },
+        "WhatsApp pairing code generated",
+      );
+      // Loud stdout banner so it's unmissable in a deploy console.
+      console.log(
+        `\n================ WhatsApp Pairing Code ================\n` +
+          `  Number : ${phoneNumber}\n` +
+          `  Code   : ${pretty}\n` +
+          `  Steps  : WhatsApp > Linked Devices > Link a Device >\n` +
+          `           Link with phone number  →  enter the code above\n` +
+          `======================================================\n`,
+      );
+    })
+    .catch((err) => {
+      logger.error(
+        { err, folderPath, phoneNumber },
+        "failed to request pairing code; falling back to QR if available",
+      );
+      if (fallbackQr) printQrInTerminal(fallbackQr);
+    });
+}
+
+/**
+ * Resolve every configured owner *phone number* to its WhatsApp LID and register
+ * it for owner detection. WhatsApp addresses group senders by an opaque LID, so
+ * a phone-number-only BOT_OWNER_JIDS would otherwise never match in groups.
+ * Best-effort: failures are logged at debug and never block the connection.
+ */
+async function resolveOwnerLids(sock: WASocket): Promise<void> {
+  const numbers = new Set<string>();
+  for (const entry of config.botOwnerJids) {
+    if (entry.includes("@lid")) continue; // already a LID
+    const digits = entry.replace(/\D/g, "");
+    if (digits.length >= 5) numbers.add(digits);
+  }
+  for (const digits of numbers) {
+    try {
+      const lid = await resolveLidForPhone(sock, digits);
+      if (lid && registerOwnerLid(lid)) {
+        logger.info({ phone: digits, lid }, "resolved owner LID");
+      }
+    } catch (err) {
+      logger.debug({ err, digits }, "owner LID resolution failed");
+    }
+  }
+}
+
+/**
  * Connection-state listener: QR printing, normalized `whatsapp_status`
  * forwarding (exactly once), the `onStatusChange` side-hook, and the
  * reconnect/logged-out branch (which rebuilds only the socket via
@@ -318,11 +394,28 @@ function attachConnectionListener(
   printQr: boolean,
 ): void {
   const folderPath = entry.folderPath;
+  // Guard so the pairing code is requested at most once per socket build (the
+  // `qr` field re-emits every ~20s while unregistered, and each request would
+  // otherwise mint a NEW code, confusing the user).
+  let pairingRequested = false;
   sock.ev.on("connection.update", (update) => {
     const { connection, lastDisconnect, qr } = update;
-    if (qr && printQr) {
-      logger.info("Scan QR to authenticate (valid for 20 seconds)");
-      printQrInTerminal(qr);
+    if (qr) {
+      // Pairing-code flow (no QR): when WA_PAIRING_NUMBER is configured and this
+      // device isn't registered yet, request an 8-char pairing code instead of
+      // rendering a QR. The `qr` event is the signal that the socket is ready to
+      // issue a pairing code. Falls back to QR if the request fails.
+      const pairingNumber = config.pairingNumber;
+      const registered = Boolean((sock as any)?.authState?.creds?.registered);
+      if (pairingNumber && !registered) {
+        if (!pairingRequested) {
+          pairingRequested = true;
+          requestPairingCode(sock, pairingNumber, folderPath, printQr ? qr : null);
+        }
+      } else if (printQr) {
+        logger.info("Scan QR to authenticate (valid for 20 seconds)");
+        printQrInTerminal(qr);
+      }
     }
     if (!connection) return;
 
@@ -360,6 +453,11 @@ function attachConnectionListener(
       logger.info({ folderPath }, "WhatsApp socket connected");
       // Step 18: forward the normalized `whatsapp_status` exactly once.
       forwardStatus(entry, status);
+      // Resolve configured owner phone numbers to their WhatsApp LIDs so
+      // owner detection keeps working when group senders arrive as `@lid`.
+      resolveOwnerLids(sock).catch((err) =>
+        logger.debug({ err, folderPath }, "resolveOwnerLids failed"),
+      );
     }
     try {
       opts.onStatusChange?.(status);

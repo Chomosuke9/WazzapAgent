@@ -44,8 +44,12 @@ function nonNegativeInt(value: string | undefined, fallback: number): number {
 function normalizeOwnerJid(raw: string): string[] {
   const trimmed = raw.trim().toLowerCase();
   if (!trimmed) return [];
+  // Keep explicit JIDs as-is (e.g. a `…@lid` an operator pasted manually).
   if (trimmed.includes('@')) return [trimmed];
-  return [`${trimmed}@s.whatsapp.net`, `${trimmed}@lid`];
+  // A bare number maps to its phone JID. The matching LID is opaque (NOT the
+  // phone number), so it's resolved + registered at connect time by
+  // resolveLidForPhone/registerOwnerLid — see src/wa/domain/participants.ts.
+  return [`${trimmed}@s.whatsapp.net`];
 }
 
 function parseJidList(raw: string | undefined): string[] {
@@ -58,6 +62,7 @@ function parseJidList(raw: string | undefined): string[] {
 
 export interface Config {
   instanceId: string;
+  pairingNumber: string | null;
   wsListenPort: number;
   wsBindHost: string;
   wsMaxPayloadBytes: number;
@@ -96,6 +101,11 @@ export interface Config {
 
 const config: Config = {
   instanceId: process.env.INSTANCE_ID || 'default',
+  // Optional WhatsApp pairing-code flow (no QR). When set, the gateway requests
+  // an 8-char pairing code for this number instead of printing a QR. Must be
+  // digits only with country code (e.g. 6281234567890); we strip everything
+  // else so values like "+62 812-3456-7890" still work.
+  pairingNumber: (process.env.WA_PAIRING_NUMBER || '').replace(/\D/g, '') || null,
   wsListenPort: positiveInt(process.env.WS_LISTEN_PORT, 3000),
   // Secure default: bind the gateway WS server to loopback only. Cross-host
   // deployments (Python bridge on a different machine) must explicitly opt in

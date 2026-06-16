@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+# ptero-bootstrap.sh — run WazzapAgents on a FIXED node-only Pterodactyl image
+# (e.g. ghcr.io/parkervcp/yolks:nodejs_22) with NO custom image, NO custom egg,
+# and NO root.
+#
+# What it does (all into the persistent /home/container volume, cached):
+#   1. Provision a relocatable standalone CPython (python-build-standalone).
+#   2. pip install the bridge's Python requirements into that Python.
+#   3. Provision a static ffmpeg (best-effort; only needed for /sticker video).
+#   4. Ensure Node deps are present (incl. tsx).
+#   5. Run the Node gateway + the Python bridge together (loopback), and tie
+#      their lifecycles so Pterodactyl restarts the whole server cleanly.
+#
+# Config is read from env vars (set them via the egg's CUSTOM_ENVIRONMENT_VARIABLES
+# as KEY=value;KEY2=value2). Versions can be overridden with PBS_RELEASE /
+# PYTHON_VERSION / FFMPEG_STATIC_URL if the defaults ever rot.
+# ---------------------------------------------------------------------------
+set -uo pipefail
+cd /home/container || exit 1
+
+log() { echo "[bootstrap] $*"; }
+
+# --- Tunables (override via env if a pinned asset disappears) ---------------
+PYTHON_VERSION="${PYTHON_VERSION:-3.11.9}"
+PBS_RELEASE="${PBS_RELEASE:-20240415}"
+PY_DIR="/home/container/.python"
+PY_BIN="$PY_DIR/bin/python3"
+FFMPEG_DIR="/home/container/.ffmpeg"
+FFMPEG_BIN="$FFMPEG_DIR/ffmpeg"
+FFPROBE_BIN="$FFMPEG_DIR/ffprobe"
+
+# --- State + transport env (everything persists under /home/container) ------
+export DATA_DIR="${DATA_DIR:-/home/container/data}"
+export FOLDER_PATH="${FOLDER_PATH:-$DATA_DIR}"
+export MEDIA_DIR="${MEDIA_DIR:-$DATA_DIR/media}"
+export STICKERS_DIR="${STICKERS_DIR:-$DATA_DIR/stickers}"
+export WS_LISTEN_PORT="${WS_LISTEN_PORT:-${SERVER_PORT:-3000}}"
+export WS_BIND_HOST="${WS_BIND_HOST:-127.0.0.1}"
+export NODE_URL="${NODE_URL:-ws://127.0.0.1:${WS_LISTEN_PORT}}"
+export PYTHONPATH="/home/container/python"
+export PYTHONUNBUFFERED=1
+mkdir -p "$DATA_DIR"
+
+# --- Architecture mapping ---------------------------------------------------
+arch="$(uname -m)"
+case "$arch" in
+  x86_64|amd64)  PBS_ARCH="x86_64-unknown-linux-gnu";  FF_ARCH="amd64" ;;
+  aarch64|arm64) PBS_ARCH="aarch64-unknown-linux-gnu"; FF_ARCH="arm64" ;;
+  *) log "WARN: unknown arch '$arch'; assuming x86_64"; PBS_ARCH="x86_64-unknown-linux-gnu"; FF_ARCH="amd64" ;;
+esac
+
+# --- download <url> <dest> : curl -> wget -> node fetch fallback ------------
+download() {
+  local url="$1" dest="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$dest"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "$dest" "$url"
+  else
+    node -e 'const fs=require("fs");fetch(process.argv[1]).then(r=>{if(!r.ok)process.exit(1);return r.arrayBuffer();}).then(b=>fs.writeFileSync(process.argv[2],Buffer.from(b))).catch(()=>process.exit(1))' "$url" "$dest"
+  fi
+}
+
+# --- 1) Portable Python -----------------------------------------------------
+if [ ! -x "$PY_BIN" ]; then
+  log "provisioning portable Python ${PYTHON_VERSION} (${PBS_ARCH})..."
+  url="https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_RELEASE}/cpython-${PYTHON_VERSION}+${PBS_RELEASE}-${PBS_ARCH}-install_only.tar.gz"
+  tmp="/home/container/.python.tar.gz"
+  if download "$url" "$tmp"; then
+    # The archive extracts to a top-level "python/" dir, which would collide
+    # with our bridge source dir — extract to a temp dir then move.
+    rm -rf /home/container/.pytmp && mkdir -p /home/container/.pytmp
+    if tar -xzf "$tmp" -C /home/container/.pytmp; then
+      rm -rf "$PY_DIR"
+      mv /home/container/.pytmp/python "$PY_DIR"
+      log "portable Python ready at $PY_BIN"
+    else
+      log "WARN: failed to extract Python archive"
+    fi
+    rm -rf /home/container/.pytmp "$tmp"
+  else
+    log "WARN: failed to download portable Python from $url"
+  fi
+fi
+
+# --- 2) Python deps (cached by requirements.txt hash) -----------------------
+if [ -x "$PY_BIN" ]; then
+  req_hash="$( (sha1sum requirements.txt 2>/dev/null || shasum requirements.txt 2>/dev/null) | awk '{print $1}')"
+  marker="$PY_DIR/.deps-${req_hash}"
+  if [ ! -f "$marker" ]; then
+    log "installing Python dependencies (this runs once per requirements change)..."
+    "$PY_BIN" -m pip install --no-cache-dir --upgrade pip >/dev/null 2>&1 || true
+    if "$PY_BIN" -m pip install --no-cache-dir -r requirements.txt; then
+      : > "$marker"
+      log "Python dependencies installed"
+    else
+      log "WARN: Python deps install failed; the LLM bridge may not start"
+    fi
+  fi
+fi
+
+# --- 3) Static ffmpeg (best-effort; only used by /sticker video) ------------
+if [ ! -x "$FFMPEG_BIN" ]; then
+  log "provisioning static ffmpeg (best-effort)..."
+  url="${FFMPEG_STATIC_URL:-https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-${FF_ARCH}-static.tar.xz}"
+  tmp="/home/container/.ffmpeg.tar.xz"
+  if download "$url" "$tmp"; then
+    rm -rf /home/container/.fftmp && mkdir -p /home/container/.fftmp "$FFMPEG_DIR"
+    if tar -xJf "$tmp" -C /home/container/.fftmp 2>/dev/null; then
+      f="$(find /home/container/.fftmp -type f -name ffmpeg | head -n1)"
+      p="$(find /home/container/.fftmp -type f -name ffprobe | head -n1)"
+      [ -n "$f" ] && cp "$f" "$FFMPEG_BIN" && chmod +x "$FFMPEG_BIN"
+      [ -n "$p" ] && cp "$p" "$FFPROBE_BIN" && chmod +x "$FFPROBE_BIN"
+      log "ffmpeg ready at $FFMPEG_BIN"
+    else
+      log "WARN: could not extract ffmpeg (.xz tools missing); /sticker video disabled"
+    fi
+    rm -rf /home/container/.fftmp "$tmp"
+  else
+    log "WARN: ffmpeg download failed; /sticker video disabled"
+  fi
+fi
+if [ -x "$FFMPEG_BIN" ]; then
+  export FFMPEG_PATH="$FFMPEG_BIN"
+  [ -x "$FFPROBE_BIN" ] && export FFPROBE_PATH="$FFPROBE_BIN"
+  export PATH="$FFMPEG_DIR:$PATH"
+fi
+
+# --- 4) Node deps (the generic egg runs `npm install`, but ensure tsx too) --
+if [ ! -x "/home/container/node_modules/.bin/tsx" ]; then
+  log "installing Node dependencies (including dev for tsx)..."
+  npm install --include=dev || log "WARN: npm install failed"
+fi
+
+# --- 5) Run gateway + bridge, tie lifecycles --------------------------------
+NODE_PID=""
+PY_PID=""
+shutdown() {
+  trap - SIGINT SIGTERM
+  log "shutting down..."
+  [ -n "$PY_PID" ]   && kill -TERM "$PY_PID"   2>/dev/null
+  [ -n "$NODE_PID" ] && kill -TERM "$NODE_PID" 2>/dev/null
+  wait 2>/dev/null
+}
+trap shutdown SIGINT SIGTERM
+
+log "starting Node gateway on ${WS_BIND_HOST}:${WS_LISTEN_PORT} ..."
+node --import tsx src/index.ts &
+NODE_PID=$!
+
+sleep 3
+
+if [ -x "$PY_BIN" ]; then
+  log "starting Python bridge ..."
+  "$PY_BIN" -m bridge.main &
+  PY_PID=$!
+else
+  log "WARN: portable Python unavailable — running the gateway only (no LLM replies)."
+fi
+
+# Block until any child exits, then tear down the rest.
+if [ -n "$PY_PID" ]; then
+  wait -n "$NODE_PID" "$PY_PID"
+else
+  wait "$NODE_PID"
+fi
+EXIT_CODE=$?
+log "a child process exited (code ${EXIT_CODE}); stopping the rest."
+shutdown
+exit "$EXIT_CODE"

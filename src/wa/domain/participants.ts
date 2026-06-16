@@ -252,6 +252,50 @@ function normalizeKickTargets(rawTargets: unknown): NormalizedKickTarget[] {
   return normalized;
 }
 
+// ---------------------------------------------------------------------------
+// Owner LID resolution
+// ---------------------------------------------------------------------------
+// WhatsApp now addresses group senders by an opaque LID (e.g.
+// `123456789012345@lid`) instead of their phone number. A phone-number-only
+// BOT_OWNER_JIDS therefore can't match a LID sender. We resolve each configured
+// owner number to its real LID at connect time and register it here so owner
+// detection keeps working when you configure plain phone numbers.
+const runtimeOwnerLids = new Set<string>();
+
+/** Register a resolved owner LID so {@link isOwnerJid} matches it. Returns true
+ * if it was newly added. Only `@lid` JIDs are accepted. */
+function registerOwnerLid(lid: unknown): boolean {
+  if (typeof lid !== "string") return false;
+  const normalized = (normalizeJid(lid) || lid).trim().toLowerCase();
+  if (!normalized || !normalized.includes("@lid")) return false;
+  if (runtimeOwnerLids.has(normalized)) return false;
+  runtimeOwnerLids.add(normalized);
+  return true;
+}
+
+/**
+ * Resolve a phone number (any format — non-digits are stripped) to its WhatsApp
+ * LID using Baileys' PN→LID mapping store, which performs a USync network
+ * lookup on a cache miss. Returns the full `<lid>@lid` JID or `null`.
+ *
+ * `sock` is typed loosely because `signalRepository.lidMapping` is not part of
+ * the narrow `WaSocketLike` port; access is fully defensive so an older Baileys
+ * (or a not-yet-ready socket) just yields `null`.
+ */
+async function resolveLidForPhone(sock: any, phone: unknown): Promise<string | null> {
+  const digits = String(phone ?? "").replace(/\D/g, "");
+  if (digits.length < 5) return null;
+  try {
+    const mapping = sock?.signalRepository?.lidMapping;
+    const fn = mapping?.getLIDForPN;
+    if (typeof fn !== "function") return null;
+    const lid = await fn.call(mapping, `${digits}@s.whatsapp.net`);
+    return typeof lid === "string" && lid.includes("@lid") ? lid.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
 function isOwnerJid(senderId: unknown): boolean {
   if (!senderId) return false;
   const candidates = new Set<string>();
@@ -282,7 +326,8 @@ function isOwnerJid(senderId: unknown): boolean {
     }
   }
 
-  const match = config.botOwnerJids.some((ownerJid) => {
+  const ownerEntries = config.botOwnerJids.concat(Array.from(runtimeOwnerLids));
+  const match = ownerEntries.some((ownerJid) => {
     if (!ownerJid) return false;
     const ownerLocal = ownerJid.split('@')[0];
     const ownerDigits = ownerJid.replace(/\D/g, '');
@@ -315,4 +360,6 @@ export {
   fallbackParticipantLabel,
   normalizeKickTargets,
   isOwnerJid,
+  registerOwnerLid,
+  resolveLidForPhone,
 };
