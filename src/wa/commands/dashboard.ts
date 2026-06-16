@@ -130,6 +130,13 @@ async function handleDashboard(ctx: CommandContext): Promise<void> {
   const monthly = repos!.stats.getStats(chatId, "monthly", monthKey);
   // WhatsApp polls render up to ~12 options; show the top 10 chatters.
   const topUsers = repos!.stats.getTopUsers(chatId, "monthly", monthKey, 10);
+  // "Overall" baseline = sum of EVERY user's invocations this month (not just
+  // the displayed top 10), so it reconciles with the per-user leaderboard rows.
+  const totalUserInvokes = repos!.stats.getTotalUserInvokes(
+    chatId,
+    "monthly",
+    monthKey,
+  );
 
   // Serialize every send to this chat through the per-JID queue. Two un-queued
   // sends to the SAME jid race on Baileys' shared pending-ack map and WhatsApp
@@ -201,7 +208,7 @@ async function handleDashboard(ctx: CommandContext): Promise<void> {
   // why a single-active-user chat rendered nothing before). Then the top chatters
   // (<= 10), for at most 11 options total. Data is sanitized/guarded because any
   // empty/duplicate optionName or non-integer count also invalidates the poll.
-  const overallCount = Math.max(0, Math.trunc(Number(monthly.messages_processed) || 0));
+  const overallCount = Math.max(0, Math.trunc(Number(totalUserInvokes) || 0));
   const userVotes: Array<{ optionName: string; optionVoteCount: number }> = [
     { optionName: "Overall", optionVoteCount: overallCount },
   ];

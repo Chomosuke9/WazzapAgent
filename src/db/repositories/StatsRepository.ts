@@ -65,4 +65,27 @@ export class StatsRepository extends BaseRepository {
       invokeCount: row.invoke_count,
     }));
   }
+
+  /**
+   * Sum of `invoke_count` across ALL users for a period (not just the top N).
+   * Used as the dashboard "Overall" baseline so it reconciles with the
+   * per-user leaderboard rows (which are `invoke_count`), instead of the
+   * unrelated `messages_processed` volume counter.
+   */
+  getTotalUserInvokes(
+    chatId: string,
+    periodType: string,
+    periodKey: string,
+  ): number {
+    const row = this.getOneFromState<{ total: number }>(
+      this.db.statsState,
+      initStatsTables,
+      `SELECT COALESCE(SUM(invoke_count), 0) AS total FROM chat_user_stats
+     WHERE chat_id = ? AND period_type = ? AND period_key = ?`,
+      chatId,
+      periodType,
+      periodKey,
+    );
+    return Math.max(0, Math.trunc(Number(row?.total) || 0));
+  }
 }

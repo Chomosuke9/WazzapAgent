@@ -35,6 +35,8 @@ function makeCtx(captured: any, topUsers: TopUser[], opts: { failRelay?: boolean
         return { messages_processed: 10, responses_sent: 3 }; // daily
       },
       getTopUsers: () => topUsers,
+      getTotalUserInvokes: () =>
+        topUsers.reduce((s, u) => s + (Number(u.invokeCount) || 0), 0),
     },
   };
   return {
@@ -88,7 +90,7 @@ test('/dashboard sends the STATISTIC/period poll then the Top Monthly Users poll
   assert.match(top.name, /Top Monthly Users/);
   assert.equal(top.pollVotes.length, 3);
   assert.equal(top.pollVotes[0].optionName, 'Overall');
-  assert.equal(Number(top.pollVotes[0].optionVoteCount), 200); // monthly messages_processed
+  assert.equal(Number(top.pollVotes[0].optionVoteCount), 59); // sum of all user invokes (42 + 17)
   assert.equal(top.pollVotes[1].optionName, '1. Alice');
   assert.equal(Number(top.pollVotes[1].optionVoteCount), 42);
   assert.equal(top.pollVotes[2].optionName, '2. Bob');
@@ -104,7 +106,7 @@ test('/dashboard renders a valid poll (Overall + the single active user) when on
   const top = captured.relayed[1].pollResultSnapshotMessage;
   assert.equal(top.pollVotes.length, 2);
   assert.equal(top.pollVotes[0].optionName, 'Overall');
-  assert.equal(Number(top.pollVotes[0].optionVoteCount), 200);
+  assert.equal(Number(top.pollVotes[0].optionVoteCount), 6); // sum of all user invokes (single user)
   assert.equal(top.pollVotes[1].optionName, '1. Agus Kebab');
   assert.equal(Number(top.pollVotes[1].optionVoteCount), 6);
 });
@@ -149,7 +151,7 @@ test('/dashboard sends the period poll plus a text note when there are no active
   assert.equal(captured.relayed.length, 1, 'only the period poll');
   assert.equal(captured.textMessages.length, 1, 'a top-users note (only Overall — 1 option is invalid)');
   assert.match(captured.textMessages[0].text, /Top Monthly Users/);
-  assert.match(captured.textMessages[0].text, /Overall: 200/);
+  assert.match(captured.textMessages[0].text, /Overall: 0/);
   assert.match(captured.textMessages[0].text, /no active users/);
 });
 
