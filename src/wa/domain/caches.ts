@@ -87,6 +87,13 @@ const MAX_CACHE = 1000;
 const MAX_KEY_INDEX = 12_000;
 const GROUP_METADATA_TTL_MS = 60_000;
 const GROUP_JOIN_DEDUP_TTL_MS = 15_000;
+// Shorter window for cross-source coalescing of the SAME join reported by both
+// the `messages.upsert` system stub and the `group-participants.update` event.
+// Those two sources can address the joining member with different JID forms
+// (LID `@lid` vs phone `@s.whatsapp.net`), so the exact-participant key does not
+// match across them. They arrive ~simultaneously, so a short window collapses
+// the duplicate while still letting genuinely distinct joins (>5s apart) pass.
+const GROUP_JOIN_CROSS_SOURCE_DEDUP_TTL_MS = 5_000;
 // Maximum number of quiz message IDs tracked per account before the oldest is
 // evicted. The set itself lives on the AccountContext.
 const MAX_QUIZ_IDS = 2000;
@@ -118,6 +125,7 @@ export {
   MAX_KEY_INDEX,
   GROUP_METADATA_TTL_MS,
   GROUP_JOIN_DEDUP_TTL_MS,
+  GROUP_JOIN_CROSS_SOURCE_DEDUP_TTL_MS,
   MAX_QUIZ_IDS,
   GROUP_JOIN_STUB_TYPES,
   cacheSetBounded,

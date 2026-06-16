@@ -5,6 +5,7 @@ import config from '../../config.js';
 import {
   GROUP_METADATA_TTL_MS,
   GROUP_JOIN_DEDUP_TTL_MS,
+  GROUP_JOIN_CROSS_SOURCE_DEDUP_TTL_MS,
   GROUP_JOIN_STUB_TYPES,
   cacheSetBounded,
 } from './caches.js';
@@ -231,12 +232,33 @@ function dedupeGroupJoinEvent(
   const ts = Number(timestampMs) || Date.now();
   const normalizedAction = normalizeGroupJoinAction(action);
   const normalizedParticipants = compactParticipantJids(participants).sort();
-  const key = `${chatId}::${normalizedAction}::${normalizedParticipants.join(',')}`;
-  const lastSeen = ctx.groupJoinDedupCache.get(key);
-  if (lastSeen && ts - lastSeen < GROUP_JOIN_DEDUP_TTL_MS) {
+
+  // A single join is reported by TWO independent WhatsApp sources: the
+  // `messages.upsert` system stub and the `group-participants.update` event.
+  // They frequently address the joining member with DIFFERENT JID forms (LID
+  // `@lid` vs phone `@s.whatsapp.net`), and `normalizeJid` does not reconcile
+  // LID<->phone, so an exact-participant key does not match across the two and
+  // the bot triggers twice. Two complementary checks:
+  //   1. exact key (chatId+action+participants) over the full TTL — collapses
+  //      same-source replays (e.g. history sync) however far apart, and exact
+  //      cross-source matches when both sources happen to agree on the JID form.
+  //   2. coalescing key (chatId+action+participantCount) over a short window —
+  //      collapses the cross-source duplicate whose JID form differs. The two
+  //      sources arrive ~simultaneously, so the short window catches them while
+  //      still letting genuinely distinct joins (>window apart) through.
+  const exactKey = `${chatId}::${normalizedAction}::${normalizedParticipants.join(',')}`;
+  const coalesceKey = `${chatId}::${normalizedAction}::n${normalizedParticipants.length}`;
+
+  const exactSeen = ctx.groupJoinDedupCache.get(exactKey);
+  if (exactSeen && ts - exactSeen < GROUP_JOIN_DEDUP_TTL_MS) {
     return false;
   }
-  cacheSetBounded(ctx.groupJoinDedupCache, key, ts, 2000);
+  const coalesceSeen = ctx.groupJoinDedupCache.get(coalesceKey);
+  if (coalesceSeen && ts - coalesceSeen < GROUP_JOIN_CROSS_SOURCE_DEDUP_TTL_MS) {
+    return false;
+  }
+  cacheSetBounded(ctx.groupJoinDedupCache, exactKey, ts, 2000);
+  cacheSetBounded(ctx.groupJoinDedupCache, coalesceKey, ts, 2000);
   return true;
 }
 
