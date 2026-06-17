@@ -34,7 +34,7 @@ Ya! Bot bisa berkomunikasi dalam berbagai bahasa. Kamu bisa meminta bot berbahas
 ## Mengapa bot menghapus pesan saya?
 
 Bot menghapus pesan jika:
-- Permission level diset ke 1 atau 3
+- Permission level diset ke 1 atau lebih tinggi (level 1, 2, atau 3)
 - Promptnya memerintahkan bot untuk menghapus jenis pesan tersebut
 
 Hubungi admin grup untuk mengetahui aturan yang berlaku.

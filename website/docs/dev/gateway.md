@@ -71,7 +71,7 @@ Resolusi:    senderRef "u8k2d1" → JID "628123456789@s.whatsapp.net"
 Teks output: "Hai @628123456789, jangan spam ya" (dengan mention tag)
 ```
 
-Token `@everyone (everyone)` di-resolve menjadi mention semua anggota grup.
+Token `@all (all)` di-resolve menjadi mention semua anggota grup.
 
 ## Message Parser (`src/wa/domain/messageParser.ts`)
 

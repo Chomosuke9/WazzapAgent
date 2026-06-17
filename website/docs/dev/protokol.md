@@ -159,6 +159,23 @@ Saat aksi gagal, gateway juga mengirim pesan `error`:
 
 **Error codes:** `not_found`, `not_group`, `permission_denied`, `invalid_target`, `send_failed`, `timeout`.
 
+## Gateway → Bridge — Control Events
+
+Selain `incoming_message`, gateway mengirim **control event** untuk menyinkronkan state ke bridge. Semua control event bersifat **reliable** — di-queue per akun dan di-flush ulang setelah reconnect. Setiap frame membawa `folderPath` untuk routing tenant.
+
+Handshake awal `hello` (Python→Node, dengan `protocolVersion: "2.0"`) / `hello_ack` (Node→Python) didokumentasikan di [Koneksi](#Koneksi) — juga reliable.
+
+| Tipe | Deskripsi |
+|------|-----------|
+| `whatsapp_status` | Perubahan status koneksi WhatsApp: `{folderPath, status, reason?, instanceId}` |
+| `clear_history` | Hapus riwayat untuk `chatId` atau `"global"` (setelah `/reset`) |
+| `set_llm2_model` | Sinkron perubahan model yang otoritatif: `{chatId, modelId}` |
+| `invalidate_llm2_model` | Invalidasi cache model untuk `chatId` atau `"global"` |
+| `invalidate_default_model` | Invalidasi model default (setelah `/modelcfg`) |
+| `invalidate_chat_settings` | Invalidasi setelah perubahan mode/prompt/permission/trigger/idle/announcement |
+| `set_subagent_enabled` | Toggle sub-agent per chat: `{chatId, enabled}` |
+| `schedule_task` | Tugas terjadwal: `{chatId, taskId, fireAtMs, prompt}` — di-persist, dipicu sekali |
+
 ## Bridge → Gateway
 
 ### `send_message`
@@ -171,7 +188,7 @@ Kirim pesan ke chat WhatsApp.
   "payload": {
     "requestId": "req-send-001",
     "chatId": "12345@g.us",
-    "text": "Hai @whoami (u8k2d1), selamat datang! @everyone (everyone)",
+    "text": "Hai @whoami (u8k2d1), selamat datang! @all (all)",
     "replyTo": "000124",
     "attachments": [
       {
@@ -189,7 +206,7 @@ Kirim pesan ke chat WhatsApp.
 | Syntax | Deskripsi |
 |--------|-----------|
 | `@Name (senderRef)` | Mention satu user (resolve ke JID) |
-| `@everyone (everyone)` | Mention semua anggota grup |
+| `@all (all)` | Mention semua anggota grup |
 
 Token `@Name (senderRef)` yang invalid akan di-skip (pesan tetap terkirim).
 
@@ -292,6 +309,24 @@ Kirim typing indicator.
 
 `type`: `"composing"` (sedang mengetik) atau `"paused"` (berhenti mengetik). Default `"composing"`.
 
+### Aksi Lainnya
+
+Action berikut juga dikirim bridge→gateway (Python→Node). Masing-masing mengembalikan `action_ack`.
+
+| Tipe | Deskripsi | Payload |
+|------|-----------|---------|
+| `run_command` | Eksekusi slash command secara senyap (tanpa echo ke WhatsApp) | `{chatId, command, contextMsgId?}` |
+| `send_quiz` | Kirim kuis pilihan ganda dengan tombol | `{chatId, question, choices[], footer?, replyTo?}` |
+| `send_copy_code` | Tombol CTA salin kode | `{chatId, code, displayText?, quotedPreviewText?}` |
+| `relay_lottie_sticker` | Relay stiker Lottie dari payload JSON tersimpan | `{chatId, lottiePayload, replyTo?}` |
+| `send_buttons` | Tombol NativeFlow generik (legacy) | `{chatId, text, buttons[], footer?}` |
+| `send_carousel` | Kartu carousel yang bisa di-swipe | `{chatId, cards[], text?}` |
+| `download_media` | Ambil byte media lazy untuk pesan yang sudah diteruskan | `{chatId, contextMsgId? \| messageId?}` |
+
+:::note
+`download_media`: inbound hanya meneruskan metadata attachment (`path: null, pending: true`); bridge memanggil aksi ini saat benar-benar butuh byte-nya (vision / stiker / sub-agent). `action_ack.result` membawa `{path, mime, kind, fileName, ...}`, atau `code: not_found` jika proto sumber sudah dievakuasi dari cache.
+:::
+
 ## Legacy Compatibility
 
 | Event | Deskripsi |
@@ -305,8 +340,9 @@ Kirim typing indicator.
 
 Bridge menerapkan gating untuk aksi moderasi berdasarkan level permission yang diatur via perintah `/permission`:
 
-- `DELETE` hanya dieksekusi jika permission level mengizinkan (level 1 atau 3) **DAN** bot adalah admin.
-- `KICK` hanya dieksekusi jika permission level mengizinkan (level 2 atau 3) **DAN** bot adalah admin.
+- `DELETE` hanya dieksekusi jika permission level mengizinkan (level 1, 2, atau 3) **DAN** bot adalah admin.
+- `MUTE` hanya dieksekusi jika permission level mengizinkan (level 2 atau 3) **DAN** bot adalah admin.
+- `KICK` hanya dieksekusi jika permission level mengizinkan (level 3 saja) **DAN** bot adalah admin.
 
 Permission dikelola menggunakan perintah `/permission <0-3>` dan disimpan di database per-chat.
 

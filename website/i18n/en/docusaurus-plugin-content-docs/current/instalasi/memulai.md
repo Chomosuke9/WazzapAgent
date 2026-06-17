@@ -33,13 +33,13 @@ After the bot joins the group, follow these steps in order:
 
 The bot has two **response modes**, configured through the interactive `/setting` menu:
 
-### `auto` mode (default)
+### `auto` mode
 - The bot **analyzes the context** of every message with AI
 - Responds automatically when there's an important topic
 - Suitable for groups that genuinely need an active bot
 - **Uses more API tokens**
 
-### `prefix` mode (optimal for busy groups)
+### `prefix` mode (default, optimal for busy groups)
 - The bot **only responds when explicitly called:**
   - `@mention` the bot (e.g., `@Vivy hello`)
   - Reply to the bot's previous message

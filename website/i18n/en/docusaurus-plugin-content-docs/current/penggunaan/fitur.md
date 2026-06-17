@@ -40,8 +40,8 @@ The bot automatically **detects when a new member** joins the group and can gree
 
 The bot has **two configurable response modes**:
 
-- **`auto`** (default) — The bot analyzes the context of every message and responds automatically
-- **`prefix`** (token-saving) — The bot only responds when called: `@mention`, reply, or its name is mentioned
+- **`prefix`** (default, token-saving) — The bot only responds when called: `@mention`, reply, or its name is mentioned
+- **`auto`** (auto) — The bot analyzes the context of every message and responds automatically
 
 The response mode is configured through the interactive **`/setting`** menu (replacing the old `/mode` command). Triggers for prefix mode are still set with `/trigger`:
 ```

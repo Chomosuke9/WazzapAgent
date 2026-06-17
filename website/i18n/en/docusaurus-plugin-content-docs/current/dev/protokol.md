@@ -159,6 +159,23 @@ When an action fails, the gateway also sends an `error` message:
 
 **Error codes:** `not_found`, `not_group`, `permission_denied`, `invalid_target`, `send_failed`, `timeout`.
 
+## Gateway → Bridge — Control Events
+
+Beyond `incoming_message`, the gateway sends **control events** to sync state to the bridge. All control events are **reliable** — queued per account and re-flushed after reconnect. Every frame carries `folderPath` for tenant routing.
+
+The initial `hello` (Python→Node, with `protocolVersion: "2.0"`) / `hello_ack` (Node→Python) handshake is documented under [Connection](#Connection) — also reliable.
+
+| Type | Description |
+|------|-------------|
+| `whatsapp_status` | WhatsApp connection state changes: `{folderPath, status, reason?, instanceId}` |
+| `clear_history` | Clear history for `chatId` or `"global"` (after `/reset`) |
+| `set_llm2_model` | Authoritative model change sync: `{chatId, modelId}` |
+| `invalidate_llm2_model` | Invalidate model cache for `chatId` or `"global"` |
+| `invalidate_default_model` | Invalidate the default model (after `/modelcfg`) |
+| `invalidate_chat_settings` | Invalidate after a mode/prompt/permission/trigger/idle/announcement change |
+| `set_subagent_enabled` | Toggle the sub-agent per chat: `{chatId, enabled}` |
+| `schedule_task` | Scheduled task: `{chatId, taskId, fireAtMs, prompt}` — persisted, fires once |
+
 ## Bridge → Gateway
 
 ### `send_message`
@@ -171,7 +188,7 @@ Send a message to a WhatsApp chat.
   "payload": {
     "requestId": "req-send-001",
     "chatId": "12345@g.us",
-    "text": "Hey @whoami (u8k2d1), welcome! @everyone (everyone)",
+    "text": "Hey @whoami (u8k2d1), welcome! @all (all)",
     "replyTo": "000124",
     "attachments": [
       {
@@ -189,7 +206,7 @@ Send a message to a WhatsApp chat.
 | Syntax | Description |
 |--------|-------------|
 | `@Name (senderRef)` | Mention one user (resolves to JID) |
-| `@everyone (everyone)` | Mention all group members |
+| `@all (all)` | Mention all group members |
 
 Invalid `@Name (senderRef)` tokens are silently skipped (message still sends).
 
@@ -292,6 +309,24 @@ Send a typing indicator.
 
 `type`: `"composing"` (typing) or `"paused"` (stopped typing). Defaults to `"composing"`.
 
+### Other Actions
+
+The following actions are also sent bridge→gateway (Python→Node). Each returns an `action_ack`.
+
+| Type | Description | Payload |
+|------|-------------|---------|
+| `run_command` | Execute a slash command silently (no WhatsApp echo) | `{chatId, command, contextMsgId?}` |
+| `send_quiz` | Send a multiple-choice quiz with buttons | `{chatId, question, choices[], footer?, replyTo?}` |
+| `send_copy_code` | CTA copy-code button | `{chatId, code, displayText?, quotedPreviewText?}` |
+| `relay_lottie_sticker` | Relay a Lottie sticker from stored JSON payload | `{chatId, lottiePayload, replyTo?}` |
+| `send_buttons` | Generic NativeFlow buttons (legacy) | `{chatId, text, buttons[], footer?}` |
+| `send_carousel` | Swipeable carousel cards | `{chatId, cards[], text?}` |
+| `download_media` | Lazily fetch media bytes for a previously-forwarded message | `{chatId, contextMsgId? \| messageId?}` |
+
+:::note
+`download_media`: inbound only forwards attachment metadata (`path: null, pending: true`); the bridge calls this action when it actually needs the bytes (vision / sticker / sub-agent). `action_ack.result` carries `{path, mime, kind, fileName, ...}`, or `code: not_found` if the source proto was evicted from the cache.
+:::
+
 ## Legacy Compatibility
 
 | Event | Description |
@@ -305,8 +340,9 @@ Send a typing indicator.
 
 The bridge enforces gating for moderation actions based on the permission level set via the `/permission` command:
 
-- `DELETE` is only executed if the permission level allows it (level 1 or 3) **AND** bot is admin.
-- `KICK` is only executed if the permission level allows it (level 2 or 3) **AND** bot is admin.
+- `DELETE` is only executed if the permission level allows it (level 1, 2, or 3) **AND** bot is admin.
+- `MUTE` is only executed if the permission level allows it (level 2 or 3) **AND** bot is admin.
+- `KICK` is only executed if the permission level allows it (level 3 only) **AND** bot is admin.
 
 Permissions are managed using the `/permission <0-3>` command and stored in the per-chat database.
 

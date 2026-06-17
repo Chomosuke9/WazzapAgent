@@ -113,9 +113,6 @@ On first run, the gateway will display a QR code in the terminal. Scan it with W
 | `HISTORY_LIMIT` | `20` | History messages per chat |
 | `INCOMING_DEBOUNCE_SECONDS` | `5` | Debounce window for batching |
 | `INCOMING_BURST_MAX_SECONDS` | `20` | Maximum burst window duration |
-| `HISTORY_LIMIT` | `20` | History messages per chat |
-| `INCOMING_DEBOUNCE_SECONDS` | `5` | Debounce window for batching |
-| `INCOMING_BURST_MAX_SECONDS` | `20` | Maximum burst window duration |
 | `ASSISTANT_NAME` | `LLM` | Bot display name in context |
 | `CONTEXT_TIME_UTC_OFFSET_HOURS` | *(auto)* | UTC offset for timestamps |
 
@@ -163,14 +160,17 @@ On first run, the gateway will display a QR code in the terminal. Scan it with W
 
 ```bash
 # All Python tests
-python -m pytest python/tests/
+PYTHONPATH=python python -m pytest python/tests -q
 
-# Specific test
-python -m unittest python/tests/test_llm_context_serialization.py
+# Node.js gateway tests (Node's built-in test runner)
+pnpm test
 ```
 
 :::info
-No Node.js test framework is configured yet. If adding tests for the gateway, use **vitest**.
+The Node gateway uses Node's built-in test runner: `pnpm test` runs
+`node --test --import tsx 'tests/**/*.test.ts'`. Add new tests under `tests/`
+as `*.test.ts` files (`tests/node/` for unit tests, `tests/e2e/` for
+end-to-end tests).
 :::
 
 ## Building Documentation

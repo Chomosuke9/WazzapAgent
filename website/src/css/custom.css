@@ -1,12 +1,18 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
 :root {
-  --ifm-color-primary: #1db954;
-  --ifm-color-primary-dark: #1aa64c;
-  --ifm-color-primary-darker: #189d47;
-  --ifm-color-primary-darkest: #14813b;
+  --ifm-color-primary: #0c8a4d;
+  --ifm-color-primary-dark: #0a7a44;
+  --ifm-color-primary-darker: #097040;
+  --ifm-color-primary-darkest: #075E54;
   --ifm-color-primary-light: #21cc5d;
   --ifm-color-primary-lighter: #27dc67;
   --ifm-color-primary-lightest: #54e884;
   --ifm-code-font-size: 95%;
+  --ifm-font-family-base: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto,
+    Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+  --ifm-heading-font-weight: 700;
+  --ifm-line-height-base: 1.65;
   --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
   --wazzap-gradient: linear-gradient(135deg, #075E54 0%, #128C7E 45%, #25D366 100%);
   --wazzap-card-border: rgba(37, 211, 102, 0.18);
@@ -190,4 +196,120 @@
 
 .footer__link-item:hover {
   color: #25D366;
+}
+
+/* ---- M1: heading polish ---- */
+h1,
+h2,
+h3,
+h4 {
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+
+/* ---- M2: GitHub navbar icon ---- */
+.header-github-link {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  margin-left: 0.25rem;
+  border-radius: 50%;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+
+.header-github-link:hover {
+  opacity: 0.7;
+  background: var(--ifm-color-emphasis-200);
+}
+
+.header-github-link::before {
+  content: "";
+  display: block;
+  width: 24px;
+  height: 24px;
+  margin: 4px;
+  background-color: var(--ifm-navbar-link-color);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12'/%3E%3C/svg%3E");
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
+
+/* ---- M4: admonitions ---- */
+.theme-admonition {
+  border-radius: 14px;
+  border-width: 1px;
+  box-shadow: 0 6px 20px rgba(7, 94, 84, 0.06);
+}
+
+/* ---- M4: tables ---- */
+.markdown table {
+  display: table;
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.markdown table thead tr {
+  background: rgba(37, 211, 102, 0.1);
+}
+
+.markdown table thead th {
+  border: 0;
+}
+
+.markdown table tbody tr {
+  transition: background-color 0.12s ease;
+}
+
+.markdown table tbody tr:hover {
+  background: rgba(37, 211, 102, 0.06);
+}
+
+/* ---- M4: anchor offset for sticky navbar ---- */
+html {
+  scroll-padding-top: 4.5rem;
+}
+
+:target {
+  scroll-margin-top: 4.5rem;
+}
+
+/* ---- L2: focus-visible ---- */
+a:focus-visible,
+button:focus-visible,
+.button:focus-visible,
+.menu__link:focus-visible,
+.navbar__link:focus-visible,
+.header-github-link:focus-visible {
+  outline: 2px solid var(--ifm-color-primary);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* ---- L1: reduced motion ---- */
+@media (prefers-reduced-motion: reduce) {
+  .main-wrapper {
+    animation: none;
+  }
+
+  .feature-card,
+  .feature-card:hover,
+  .hero .button,
+  .hero .button:hover {
+    transform: none !important;
+    transition: none !important;
+  }
+
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

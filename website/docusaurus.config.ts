@@ -58,7 +58,27 @@ const config: Config = {
   ],
 
   themeConfig: {
-    image: "img/social-card.png",
+    image: "img/check_success.png",
+    metadata: [
+      {
+        name: "description",
+        content:
+          "Bot WhatsApp berbasis AI untuk mengobrol, moderasi grup, stiker, kuis, dan perintah slash. Open source dan mendukung banyak akun.",
+      },
+      {
+        name: "keywords",
+        content:
+          "whatsapp bot, ai, chatbot, baileys, llm, moderasi grup, open source, wazzapagents",
+      },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
+    ],
+    announcementBar: {
+      id: "star-on-github",
+      content:
+        '⭐ Suka WazzapAgents? Beri bintang di <a target="_blank" rel="noopener noreferrer" href="https://github.com/Chomosuke9/WazzapAgent">GitHub</a> untuk mendukung proyek ini!',
+      isCloseable: true,
+    },
     colorMode: {
       defaultMode: "light",
       disableSwitch: false,
@@ -83,8 +103,9 @@ const config: Config = {
         },
         {
           href: "https://github.com/Chomosuke9/WazzapAgent",
-          label: "GitHub",
           position: "right",
+          className: "header-github-link",
+          "aria-label": "GitHub repository",
         },
       ],
     },

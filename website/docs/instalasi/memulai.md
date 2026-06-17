@@ -33,13 +33,13 @@ Setelah bot masuk grup, lakukan ini secara berurutan:
 
 Bot memiliki dua **mode respons** yang diatur lewat menu interaktif `/setting`:
 
-### Mode `auto` (default)
+### Mode `auto`
 - Bot **menganalisis konteks** setiap pesan dengan AI
 - Merespons secara otomatis jika ada topik penting
 - Cocok untuk grup yang memang butuh bot aktif
 - **Menggunakan lebih banyak token API**
 
-### Mode `prefix` (optimal untuk grup ramai)
+### Mode `prefix` (default, optimal untuk grup ramai)
 - Bot **hanya merespons saat dipanggil eksplisit:**
   - `@mention` bot (contoh: `@Vivy halo`)
   - Reply ke pesan bot sebelumnya

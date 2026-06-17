@@ -8,12 +8,12 @@ Permissions control how much authority the bot has in managing the group.
 
 ## Permission Levels
 
-| Level | Delete Messages | Kick Members | Description |
-|-------|:--------------:|:------------:|-------------|
-| **0** | ❌ | ❌ | Default. Bot only chats. |
-| **1** | ✅ | ❌ | Bot can delete violating messages. |
-| **2** | ❌ | ✅ | Bot can kick troublesome members. |
-| **3** | ✅ | ✅ | Bot has full moderation authority. |
+| Level | Delete Messages | Mute Members | Kick Members | Description |
+|-------|:--------------:|:------------:|:------------:|-------------|
+| **0** | ❌ | ❌ | ❌ | Default. Bot only chats. |
+| **1** | ✅ | ❌ | ❌ | Bot can delete violating messages. |
+| **2** | ✅ | ✅ | ❌ | Bot can delete + mute members. |
+| **3** | ✅ | ✅ | ✅ | Bot has full moderation authority (delete + mute + kick). |
 
 ## How to Set
 
@@ -21,8 +21,8 @@ Permissions control how much authority the bot has in managing the group.
 /permission       ← check current level
 /permission 0     ← disable all moderation
 /permission 1     ← enable message deletion only
-/permission 2     ← enable kick only
-/permission 3     ← enable both
+/permission 2     ← enable delete + mute
+/permission 3     ← enable delete + mute + kick
 ```
 
 :::note
@@ -33,8 +33,8 @@ Can only be used in **groups**. Only **group admins** can change permissions.
 
 - **Level 0** — Bot is only used for chatting, no moderation needed
 - **Level 1** — Group has lots of spam links/toxic messages but you don't want anyone kicked
-- **Level 2** — There are scam bots/advertisers that need to be removed
-- **Level 3** — Group needs full moderation (delete + kick)
+- **Level 2** — You need to delete messages + mute disruptive members
+- **Level 3** — Group needs full moderation (delete + mute + kick)
 
 ## Recommended Workflow
 

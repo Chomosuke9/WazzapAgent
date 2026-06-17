@@ -18,11 +18,13 @@ Semua perintah diawali dengan `/` (garis miring). Di grup, sebagian besar perint
 | `/catch` | Tandai pesan agar diproses ulang bot | Siapa saja |
 | `/dashboard` | Tampilkan statistik penggunaan | Siapa saja |
 | `/debug` | Tampilkan info debug | Owner bot saja |
+| `/dump` | Bangun konteks LLM lengkap ke file .txt (debugging) | Siapa saja |
 | `/generate <prompt>` | Buat gambar dari prompt teks | Owner bot saja |
 | `/help` | Tampilkan daftar perintah | Siapa saja |
 | `/idle <n\|min-max\|off>` | Konfigurasi pemicu idle | Admin / Owner |
 | `/info` | Info pengguna & chat/grup | Siapa saja |
 | `/join <link>` | Perintahkan bot bergabung ke grup via link | Siapa saja |
+| `/lid <nomor>` | Ambil LID untuk sebuah nomor | Owner / nomor sendiri |
 | `/modelcfg` | Konfigurasi model default | Owner bot saja |
 | `/monitor` | Monitor dashboard semua chat | Owner bot saja |
 | `/owner-contact` | Kirim kartu kontak owner bot | Siapa saja |
@@ -31,6 +33,7 @@ Semua perintah diawali dengan `/` (garis miring). Di grup, sebagian besar perint
 | `/remove-sticker <nama>` | Hapus stiker dari katalog | Admin (grup), Siapa saja (pribadi) |
 | `/reset` | Reset memori bot | Admin (grup), Siapa saja (pribadi) |
 | `/revoke [n]` | Cabut link undangan grup | Owner bot saja |
+| `/schedule-task <nnHnnM> <prompt>` | Jadwalkan bot menjalankan prompt nanti | Siapa saja |
 | `/setting` | Lihat/ubah pengaturan per-chat (termasuk mode respons) | Admin (grup), Siapa saja (pribadi) |
 | `/sticker [bawah#atas]` | Buat stiker dari gambar/video | Siapa saja |
 | `/subagent <on\|off>` | Aktif/nonaktifkan sub-agent per chat | Owner bot saja |
@@ -147,6 +150,18 @@ Hanya **pemilik bot (owner)** yang bisa menggunakan perintah ini.
 
 ---
 
+## `/dump`
+
+Membangun **konteks LLM lengkap** — system prompt, deskripsi grup, state chat, riwayat, dan pesan saat ini — ke dalam sebuah file `.txt` lalu mengirimkannya sebagai dokumen. Ditangani di sisi Python. Berguna untuk men-debug konteks yang dilihat bot.
+
+```
+/dump
+```
+
+**Bisa digunakan oleh siapa saja**, tidak perlu admin.
+
+---
+
 ## `/generate`
 
 Membuat **gambar** dari prompt teks.
@@ -207,6 +222,20 @@ Memerintahkan bot untuk **bergabung ke grup** WhatsApp menggunakan link undangan
 ```
 /join https://chat.whatsapp.com/AbCdEfGhIjK
 ```
+
+---
+
+## `/lid`
+
+Mengambil **LID** (identifier internal WhatsApp) untuk sebuah nomor. Berguna untuk mengisi `BOT_OWNER_JIDS`. Lihat [Cara mendapatkan LID](../instalasi/cara-mendapatkan-lid.md) untuk panduan lengkap.
+
+```
+/lid 628123456789
+```
+
+:::warning
+Hanya bisa digunakan oleh **owner bot** atau dari **nomor sendiri**.
+:::
 
 ---
 
@@ -342,6 +371,18 @@ Mencabut **link undangan grup** saat ini dan membuat link baru yang fresh. Bergu
 :::warning
 Hanya **pemilik bot (owner)** yang bisa menggunakan perintah ini.
 :::
+
+---
+
+## `/schedule-task`
+
+Menjadwalkan bot untuk **menjalankan sebuah prompt nanti**. Format waktu `nnHnnM` (mis. `2H30M` = 2 jam 30 menit). Jadwal **bertahan meski bot direstart** dan dipicu **sekali** saat waktunya tiba.
+
+```
+/schedule-task 2H30M Ingatkan grup soal rapat
+```
+
+**Bisa digunakan oleh siapa saja**, tidak perlu admin.
 
 ---
 

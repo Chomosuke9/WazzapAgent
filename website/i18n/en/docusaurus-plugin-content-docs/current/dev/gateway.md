@@ -71,7 +71,7 @@ Resolution:  senderRef "u8k2d1" → JID "628123456789@s.whatsapp.net"
 Output text: "Hey @628123456789, stop spamming" (with mention tag)
 ```
 
-The `@everyone (everyone)` token resolves to mentioning all group members.
+The `@all (all)` token resolves to mentioning all group members.
 
 ## Message Parser (`src/wa/domain/messageParser.ts`)
 

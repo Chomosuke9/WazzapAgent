@@ -18,11 +18,13 @@ All commands start with `/` (forward slash). In groups, most commands can only b
 | `/catch` | Mark a message for reprocessing by the bot | Everyone |
 | `/dashboard` | Show usage statistics | Everyone |
 | `/debug` | Show debug info | Bot owner only |
+| `/dump` | Build the full LLM context into a .txt file (debugging) | Everyone |
 | `/generate <prompt>` | Generate an image from a text prompt | Bot owner only |
 | `/help` | Show the command list | Everyone |
 | `/idle <n\|min-max\|off>` | Configure the idle trigger | Admin / Owner |
 | `/info` | User & chat/group info | Everyone |
 | `/join <link>` | Tell the bot to join a group via invite link | Everyone |
+| `/lid <number>` | Fetch the LID for a number | Owner / own phone |
 | `/modelcfg` | Configure the default model | Bot owner only |
 | `/monitor` | Monitor dashboard across all chats | Bot owner only |
 | `/owner-contact` | Send the bot owner contact card | Everyone |
@@ -31,6 +33,7 @@ All commands start with `/` (forward slash). In groups, most commands can only b
 | `/remove-sticker <name>` | Remove a sticker from the catalog | Admin (group), Anyone (private) |
 | `/reset` | Reset bot memory | Admin (group), Anyone (private) |
 | `/revoke [n]` | Revoke the group invite link | Bot owner only |
+| `/schedule-task <nnHnnM> <prompt>` | Schedule the bot to run a prompt later | Everyone |
 | `/setting` | View/edit per-chat settings (incl. response mode) | Admin (group), Anyone (private) |
 | `/sticker [bottom#top]` | Create a sticker from an image/video | Everyone |
 | `/subagent <on\|off>` | Enable/disable the sub-agent per chat | Bot owner only |
@@ -147,6 +150,18 @@ Can only be used by the **bot owner**.
 
 ---
 
+## `/dump`
+
+Builds the **full LLM context** — system prompt, group description, chat state, history, and the current message — into a `.txt` file and sends it as a document. Handled on the Python side. Useful for debugging the context the bot sees.
+
+```
+/dump
+```
+
+**Can be used by everyone**, no admin required.
+
+---
+
 ## `/generate`
 
 Generates an **image** from a text prompt.
@@ -207,6 +222,20 @@ Tells the bot to **join a group** via an invite link. The bot joins under its ow
 ```
 /join https://chat.whatsapp.com/AbCdEfGhIjK
 ```
+
+---
+
+## `/lid`
+
+Fetches the **LID** (WhatsApp's internal identifier) for a number. Useful for populating `BOT_OWNER_JIDS`. See [How to get a LID](../instalasi/cara-mendapatkan-lid.md) for the full guide.
+
+```
+/lid 628123456789
+```
+
+:::warning
+Can only be used by the **bot owner** or from your **own phone**.
+:::
 
 ---
 
@@ -344,6 +373,18 @@ Revokes the current **group invite link** and creates a fresh one. Useful when t
 :::warning
 Can only be used by the **bot owner**.
 :::
+
+---
+
+## `/schedule-task`
+
+Schedules the bot to **run a prompt later**. Time format `nnHnnM` (e.g. `2H30M` = 2 hours 30 minutes). The schedule **persists across restarts** and fires **once** when the time arrives.
+
+```
+/schedule-task 2H30M Remind the group about the meeting
+```
+
+**Can be used by everyone**, no admin required.
 
 ---
 

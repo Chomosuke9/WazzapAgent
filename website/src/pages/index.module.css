@@ -1,6 +1,5 @@
 .heroBanner {
   padding: 5rem 0;
-  text-align: center;
   position: relative;
   overflow: hidden;
 }
@@ -21,14 +20,212 @@
 @media screen and (max-width: 996px) {
   .heroBanner {
     padding: 3rem 1.25rem;
+    text-align: center;
   }
+}
+
+/* Two-column hero layout */
+.heroRow {
+  display: flex;
+  align-items: center;
+  gap: 3rem;
+}
+
+.heroText {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.heroImage {
+  flex: 0 1 42%;
+  display: flex;
+  justify-content: center;
+}
+
+.heroImage img {
+  width: 100%;
+  max-width: 360px;
+  border-radius: 20px;
+  border: 4px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 24px 60px rgba(7, 94, 84, 0.4);
+}
+
+@media screen and (max-width: 996px) {
+  .heroRow {
+    flex-direction: column;
+    gap: 2rem;
+  }
+
+  .heroImage img {
+    max-width: 280px;
+  }
+}
+
+/* Badge pills */
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 1.25rem;
+}
+
+@media screen and (max-width: 996px) {
+  .badges {
+    justify-content: center;
+  }
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.3rem 0.85rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 999px;
+  backdrop-filter: blur(4px);
 }
 
 .buttons {
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 1rem;
   margin-top: 1.5rem;
   flex-wrap: wrap;
+}
+
+@media screen and (max-width: 996px) {
+  .buttons {
+    justify-content: center;
+  }
+}
+
+.heroOutlineButton {
+  color: #fff;
+  border-color: #fff;
+}
+
+.heroOutlineButton:hover {
+  color: #075e54;
+  background: #fff;
+  border-color: #fff;
+}
+
+/* Section headings */
+.sectionHeading {
+  text-align: center;
+  margin-bottom: 0.75rem;
+}
+
+.sectionSubheading {
+  text-align: center;
+  margin-bottom: 2.5rem;
+  opacity: 0.8;
+}
+
+.featuresSection {
+  padding: 4rem 0;
+}
+
+.featuresSection .sectionHeading {
+  margin-bottom: 2.5rem;
+}
+
+/* Feature cards */
+.featureCard {
+  text-align: center;
+}
+
+.featureIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  margin-bottom: 1rem;
+  font-size: 2rem;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(37, 211, 102, 0.18), rgba(18, 140, 126, 0.18));
+  border: 1px solid var(--wazzap-card-border);
+}
+
+/* Showcase grid */
+.showcase {
+  padding: 4rem 0;
+}
+
+.showcaseGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.75rem;
+}
+
+@media screen and (max-width: 996px) {
+  .showcaseGrid {
+    grid-template-columns: 1fr;
+    max-width: 360px;
+    margin-inline: auto;
+  }
+}
+
+.showcaseItem {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--ifm-card-background-color, #fff);
+  border: 1px solid var(--wazzap-card-border);
+  border-radius: 18px;
+  padding: 1rem;
+  box-shadow: var(--wazzap-soft-shadow);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.showcaseItem:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 22px 52px rgba(7, 94, 84, 0.18);
+}
+
+[data-theme='dark'] .showcaseItem {
+  background: linear-gradient(180deg, rgba(37, 211, 102, 0.05), rgba(18, 28, 34, 0.9));
+}
+
+.showcaseItem img {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid var(--wazzap-card-border);
+}
+
+.showcaseItem figcaption {
+  margin-top: 0.9rem;
+  font-size: 0.92rem;
+  text-align: center;
+  opacity: 0.85;
+}
+
+/* Final CTA band */
+.ctaBand {
+  background: var(--wazzap-gradient);
+  color: #fff;
+  padding: 4rem 0;
+  text-align: center;
+}
+
+.ctaTitle {
+  color: #fff;
+  margin-bottom: 0.75rem;
+}
+
+.ctaSubtitle {
+  max-width: 620px;
+  margin: 0 auto 1.75rem;
+  opacity: 0.95;
+}
+
+.ctaBand .button--secondary {
+  color: #075e54;
+  font-weight: 700;
+  border: 0;
 }

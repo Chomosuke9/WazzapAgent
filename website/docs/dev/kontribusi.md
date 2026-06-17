@@ -69,17 +69,17 @@ PR harus menyertakan:
 
 ```bash
 # Semua tests Python
-python -m pytest python/tests/
+PYTHONPATH=python python -m pytest python/tests -q
 
-# Test spesifik
-python -m unittest python/tests/test_llm_context_serialization.py
+# Tests gateway Node.js (test runner bawaan Node)
+pnpm test
 ```
 
 ### Menulis Tests
 
 - Tests Python ada di `python/tests/`.
-- Gunakan `pytest` atau `unittest`.
-- Untuk gateway, gunakan `vitest` jika menambahkan tests baru.
+- Gunakan `pytest`.
+- Gateway memakai **test runner bawaan Node**: `pnpm test` menjalankan `node --test --import tsx 'tests/**/*.test.ts'`. Tambahkan tests baru di `tests/` sebagai file `*.test.ts` (`tests/node/` untuk unit, `tests/e2e/` untuk end-to-end).
 
 ## Keamanan
 

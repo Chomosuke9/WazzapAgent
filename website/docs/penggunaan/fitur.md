@@ -40,8 +40,8 @@ Bot secara otomatis **mendeteksi ketika ada anggota baru** bergabung ke grup dan
 
 Bot memiliki **dua mode respons** yang bisa dikonfigurasi:
 
-- **`auto`** (default) — Bot menganalisis konteks setiap pesan dan merespons secara otomatis
-- **`prefix`** (hemat token) — Bot hanya merespons saat dipanggil: `@mention`, reply, atau nama disebut
+- **`prefix`** (default, hemat token) — Bot hanya merespons saat dipanggil: `@mention`, reply, atau nama disebut
+- **`auto`** (auto) — Bot menganalisis konteks setiap pesan dan merespons secara otomatis
 
 Mode respons diatur lewat menu interaktif **`/setting`** (menggantikan perintah lama `/mode`). Pemicu respons dalam mode prefix tetap diatur dengan `/trigger`:
 ```

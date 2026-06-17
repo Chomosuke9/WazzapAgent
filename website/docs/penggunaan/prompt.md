@@ -46,7 +46,7 @@ Selain prompt, admin juga bisa mengatur permission moderasi bot menggunakan peri
 
 - `/permission 0` — Default, moderasi dinonaktifkan
 - `/permission 1` — Hanya delete pesan
-- `/permission 2` — Hanya kick member
-- `/permission 3` — Moderasi penuh (delete dan kick)
+- `/permission 2` — Delete + mute member
+- `/permission 3` — Moderasi penuh (delete, mute, dan kick)
 
 Lihat halaman [Permission](./permission.md) untuk detail lengkap.

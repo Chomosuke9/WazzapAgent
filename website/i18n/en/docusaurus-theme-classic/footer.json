@@ -1,43 +1,43 @@
 {
   "link.title.Panduan": {
     "message": "Guide",
-    "description": "The title of the footer links column with title=Panduan"
+    "description": "The title of the footer links column with title=Panduan in the footer"
   },
   "link.title.Lainnya": {
     "message": "More",
-    "description": "The title of the footer links column with title=Lainnya"
+    "description": "The title of the footer links column with title=Lainnya in the footer"
   },
   "link.item.label.Mulai di Sini": {
     "message": "Get Started",
-    "description": "The label of footer link with label=Mulai di Sini"
+    "description": "The label of footer link with label=Mulai di Sini linking to /pengantar"
   },
   "link.item.label.Semua Perintah": {
     "message": "All Commands",
-    "description": "The label of footer link with label=Semua Perintah"
+    "description": "The label of footer link with label=Semua Perintah linking to /penggunaan/perintah"
   },
   "link.item.label.Contoh Prompt": {
     "message": "Prompt Examples",
-    "description": "The label of footer link with label=Contoh Prompt"
+    "description": "The label of footer link with label=Contoh Prompt linking to /penggunaan/contoh-prompt"
   },
   "link.title.Developer": {
     "message": "Developer",
-    "description": "The title of the footer links column with title=Developer"
+    "description": "The title of the footer links column with title=Developer in the footer"
   },
   "link.item.label.Arsitektur": {
     "message": "Architecture",
-    "description": "The label of footer link with label=Arsitektur"
+    "description": "The label of footer link with label=Arsitektur linking to /dev/arsitektur"
   },
   "link.item.label.Instalasi": {
     "message": "Installation",
-    "description": "The label of footer link with label=Instalasi"
+    "description": "The label of footer link with label=Instalasi linking to /instalasi"
   },
   "link.item.label.Protokol WebSocket": {
     "message": "WebSocket Protocol",
-    "description": "The label of footer link with label=Protokol WebSocket"
+    "description": "The label of footer link with label=Protokol WebSocket linking to /dev/protokol"
   },
   "link.item.label.GitHub": {
     "message": "GitHub",
-    "description": "The label of footer link with label=GitHub"
+    "description": "The label of footer link with label=GitHub linking to https://github.com/Chomosuke9/WazzapAgent"
   },
   "copyright": {
     "message": "Copyright © 2026 WazzapAgents.",

@@ -8,12 +8,12 @@ Permission mengontrol seberapa besar otoritas bot dalam mengelola grup.
 
 ## Level Permission
 
-| Level | Hapus Pesan | Kick Anggota | Keterangan |
-|-------|:-----------:|:------------:|------------|
-| **0** | ❌ | ❌ | Default. Bot hanya mengobrol. |
-| **1** | ✅ | ❌ | Bot bisa hapus pesan melanggar. |
-| **2** | ❌ | ✅ | Bot bisa kick anggota nakal. |
-| **3** | ✅ | ✅ | Bot punya otoritas moderasi penuh. |
+| Level | Hapus Pesan | Mute Anggota | Kick Anggota | Keterangan |
+|-------|:-----------:|:------------:|:------------:|------------|
+| **0** | ❌ | ❌ | ❌ | Default. Bot hanya mengobrol. |
+| **1** | ✅ | ❌ | ❌ | Bot bisa hapus pesan melanggar. |
+| **2** | ✅ | ✅ | ❌ | Bot bisa hapus + mute anggota. |
+| **3** | ✅ | ✅ | ✅ | Bot punya otoritas moderasi penuh (hapus + mute + kick). |
 
 ## Cara Mengatur
 
@@ -21,8 +21,8 @@ Permission mengontrol seberapa besar otoritas bot dalam mengelola grup.
 /permission       ← cek level saat ini
 /permission 0     ← nonaktifkan semua moderasi
 /permission 1     ← aktifkan hapus pesan saja
-/permission 2     ← aktifkan kick saja
-/permission 3     ← aktifkan keduanya
+/permission 2     ← aktifkan hapus + mute
+/permission 3     ← aktifkan hapus + mute + kick
 ```
 
 :::note
@@ -33,8 +33,8 @@ Hanya bisa digunakan di **grup**. Hanya **admin grup** yang bisa mengubah permis
 
 - **Level 0** — Bot hanya dipakai untuk ngobrol, tidak perlu moderasi
 - **Level 1** — Grup banyak spam link/pesan toksik tapi tidak ingin ada yang di-kick
-- **Level 2** — Ada masalah bot scam/pengiklan yang perlu dikeluarkan
-- **Level 3** — Grup butuh moderasi penuh (hapus + kick)
+- **Level 2** — Perlu hapus pesan + mute anggota yang mengganggu
+- **Level 3** — Grup butuh moderasi penuh (hapus + mute + kick)
 
 ## Alur yang Disarankan
 

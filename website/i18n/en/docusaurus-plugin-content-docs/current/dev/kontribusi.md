@@ -69,17 +69,17 @@ PRs should include:
 
 ```bash
 # All Python tests
-python -m pytest python/tests/
+PYTHONPATH=python python -m pytest python/tests -q
 
-# Specific test
-python -m unittest python/tests/test_llm_context_serialization.py
+# Node.js gateway tests (Node's built-in test runner)
+pnpm test
 ```
 
 ### Writing Tests
 
 - Python tests live in `python/tests/`.
-- Use `pytest` or `unittest`.
-- For the gateway, use `vitest` if adding new tests.
+- Use `pytest`.
+- The gateway uses **Node's built-in test runner**: `pnpm test` runs `node --test --import tsx 'tests/**/*.test.ts'`. Add new tests under `tests/` as `*.test.ts` files (`tests/node/` for unit, `tests/e2e/` for end-to-end).
 
 ## Security
 

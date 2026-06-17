@@ -46,7 +46,7 @@ In addition to prompts, admins can also configure bot moderation permissions usi
 
 - `/permission 0` — Default, moderation disabled
 - `/permission 1` — Delete messages only
-- `/permission 2` — Kick members only
-- `/permission 3` — Full moderation (delete and kick)
+- `/permission 2` — Delete + mute members
+- `/permission 3` — Full moderation (delete, mute, kick)
 
 See the [Permission](./permission.md) page for full details.

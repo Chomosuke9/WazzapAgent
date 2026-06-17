@@ -141,7 +141,7 @@ Ketik `/setting` untuk membuka menu seperti ini
 
 ![slash setting](/img/slash_setting.jpg)
 
-kemudian pencet bagian `Change model`, jika kamu melakukan [langkah tadi](/instalasi#5-menambahkan-model) dengan benar, maka akan keluar hasil seperti ini
+kemudian pencet bagian `Change model`, jika kamu melakukan [langkah tadi](/instalasi#5-Menambahkan-model) dengan benar, maka akan keluar hasil seperti ini
 
 ![slash setting model](/img/gpt_model.jpg)
 

@@ -34,7 +34,7 @@ Yes! The bot can communicate in various languages. You can ask the bot to speak 
 ## Why did the bot delete my message?
 
 The bot deletes messages if:
-- Permission level is set to 1 or 3
+- Permission level is set to 1 or higher (level 1, 2, or 3)
 - The prompt instructs the bot to delete that type of message
 
 Contact the group admin to find out the applicable rules.
