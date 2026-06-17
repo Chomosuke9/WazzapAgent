@@ -9,10 +9,10 @@ const config: Config = {
   favicon: "img/favicon.ico",
 
   url: "https://chomosuke9.github.io",
-  baseUrl: "/WazzapAgents/",
+  baseUrl: "/WazzapAgent/",
 
   organizationName: "Chomosuke9",
-  projectName: "WazzapAgents",
+  projectName: "WazzapAgent",
   trailingSlash: false,
 
   onBrokenLinks: "throw",
@@ -82,7 +82,7 @@ const config: Config = {
           position: "right",
         },
         {
-          href: "https://github.com/Chomosuke9/WazzapAgents",
+          href: "https://github.com/Chomosuke9/WazzapAgent",
           label: "GitHub",
           position: "right",
         },
@@ -112,7 +112,7 @@ const config: Config = {
           items: [
             {
               label: "GitHub",
-              href: "https://github.com/Chomosuke9/WazzapAgents",
+              href: "https://github.com/Chomosuke9/WazzapAgent",
             },
           ],
         },
