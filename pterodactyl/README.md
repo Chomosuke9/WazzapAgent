@@ -6,14 +6,15 @@ prebuilt **"NodeJS Generic"** egg — i.e. a typical locked-down managed host wh
 you can only pick an image from a dropdown and fill in variables. **No custom
 image, no custom egg, no root required.**
 
-A small bootstrap provisions a **portable Python** and a **static ffmpeg** into
+A small bootstrap provisions a **portable Python**, a **static ffmpeg** and
+**qrencode** into
 the persistent volume on first boot, then runs the Node gateway and the Python
 bridge together.
 
 | File | Purpose |
 |------|---------|
 | `ptero-boot.mjs` | Entrypoint set as the run command (`CMD_RUN`). The egg runs it as `/usr/local/bin/node …`; it hands off to the bootstrap. |
-| `ptero-bootstrap.sh` | Provisions Python + ffmpeg into the volume (cached), installs deps, then runs the gateway + bridge with tied lifecycles. |
+| `ptero-bootstrap.sh` | Provisions Python + ffmpeg + qrencode into the volume (cached), installs deps, then runs the gateway + bridge with tied lifecycles. |
 | `../.env.minimal.example` | Minimal env template (LLM2 key/model, owner JID, pairing number). Copy to `.env`. Full reference: [`../.env.example`](../.env.example). |
 
 > Scope: **single account**, sub-agent integration **not** included.
@@ -34,13 +35,16 @@ first boot:
 2. `pip install`s the bridge's `requirements.txt` into it (cached by hash).
 3. Downloads a **static ffmpeg** into `/home/container/.ffmpeg` (best-effort;
    only used by `/sticker` video).
-4. Ensures Node deps are present (incl. `tsx`).
-5. Runs the **Node gateway** (`node --import tsx src/index.ts`) and the
+4. Downloads **qrencode** (+ its libs) into `/home/container/.qrencode`
+   (best-effort; renders the WhatsApp login QR in the console).
+5. Ensures Node deps are present (incl. `tsx`).
+6. Runs the **Node gateway** (`node --import tsx src/index.ts`) and the
    **Python bridge** (`python -m bridge.main`) together, communicating over
    loopback (`ws://127.0.0.1:${SERVER_PORT}`). If either process exits, the
    other is stopped so Pterodactyl restarts the whole server.
 
-Everything — Baileys auth, SQLite DBs, media, the portable Python and ffmpeg —
+Everything — Baileys auth, SQLite DBs, media, the portable Python, ffmpeg and
+qrencode —
 lives under the persistent `/home/container` volume, so **you pair once** and the
 heavy provisioning is cached (it re-runs only when `requirements.txt` changes).
 
@@ -75,7 +79,7 @@ heavy provisioning is cached (it re-runs only when `requirements.txt` changes).
    ```
    (LLM1 router vars are optional — see [`../.env.minimal.example`](../.env.minimal.example);
    full reference in [`../.env.example`](../.env.example).)
-5. **Start.** First boot downloads Python + ffmpeg + deps (a minute or two,
+5. **Start.** First boot downloads Python + ffmpeg + qrencode + deps (a minute or two,
    cached afterwards), then runs both processes.
 
 ---
@@ -108,6 +112,12 @@ only pair once.
   image lacks `xz` to unpack the static build, the bootstrap logs a warning and
   the bot keeps running (static-image stickers and everything else still work).
   You can point `FFMPEG_STATIC_URL` at a `.tar.gz` static build instead.
+- **qrencode is best-effort.** Only needed to render the **QR login** in the
+  console; it's pulled from Debian `.deb` packages (pinned to *bookworm*, the
+  yolk base) and unpacked into the volume with `dpkg-deb`/`ar` — no root needed.
+  Code-based login via `WA_PAIRING_NUMBER` needs **no** QR, so this is optional.
+  Override `QRENCODE_DEB_URL` / `LIBQRENCODE_DEB_URL` / `LIBPNG_DEB_URL` if your
+  base image isn't bookworm or an asset 404s.
 - **Network on first boot** fetches Python from
   [`astral-sh/python-build-standalone`](https://github.com/astral-sh/python-build-standalone/releases)
   and ffmpeg from johnvansickle. Override with `PBS_RELEASE` / `PYTHON_VERSION`
@@ -133,6 +143,7 @@ in the other `data/` files are kept.
 | Symptom | Fix |
 |---------|-----|
 | **No pairing code / QR in the console** | The code only appears while the device is *unregistered*. If already paired, nothing shows (that's normal). To force a new code, re-pair (above). Check `WA_PAIRING_NUMBER` is digits-only with country code. |
+| **QR shows as a long raw string (not a scannable QR)** | `qrencode` couldn't be provisioned (download/unpack failed, or your base image isn't Debian *bookworm*). Easiest fix: set `WA_PAIRING_NUMBER` and use code-based login (no QR needed). To repair QR rendering, override `QRENCODE_DEB_URL` / `LIBQRENCODE_DEB_URL` / `LIBPNG_DEB_URL` with `.deb`s matching your base image. |
 | **`better-sqlite3` build error / `compiled against a different Node.js version`** | The chosen Node version has no prebuilt binary. Switch the Docker Image to **`nodejs_22`** (or `nodejs_20`) and restart. |
 | **Bot connects but never replies** | The Python bridge isn't running or has no LLM key. Check the console for `[bootstrap] WARN: ... Python ...`, and confirm `LLM2_API_KEY` (plus `LLM2_ENDPOINT`/`LLM2_MODEL`) are set in `.env`. |
 | **Python deps failed on first boot** | Usually a transient network error fetching wheels. Restart to retry; the cache marker is only written on success. If a Python asset 404s, set `PBS_RELEASE` / `PYTHON_VERSION` to a valid [python-build-standalone](https://github.com/astral-sh/python-build-standalone/releases) release. |

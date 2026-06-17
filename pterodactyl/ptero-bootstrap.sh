@@ -29,6 +29,8 @@ PY_BIN="$PY_DIR/bin/python3"
 FFMPEG_DIR="/home/container/.ffmpeg"
 FFMPEG_BIN="$FFMPEG_DIR/ffmpeg"
 FFPROBE_BIN="$FFMPEG_DIR/ffprobe"
+QR_DIR="/home/container/.qrencode"
+QR_BIN="$QR_DIR/usr/bin/qrencode"
 
 # --- State + transport env (everything persists under /home/container) ------
 export DATA_DIR="${DATA_DIR:-/home/container/data}"
@@ -45,9 +47,9 @@ mkdir -p "$DATA_DIR"
 # --- Architecture mapping ---------------------------------------------------
 arch="$(uname -m)"
 case "$arch" in
-  x86_64|amd64)  PBS_ARCH="x86_64-unknown-linux-gnu";  FF_ARCH="amd64" ;;
-  aarch64|arm64) PBS_ARCH="aarch64-unknown-linux-gnu"; FF_ARCH="arm64" ;;
-  *) log "WARN: unknown arch '$arch'; assuming x86_64"; PBS_ARCH="x86_64-unknown-linux-gnu"; FF_ARCH="amd64" ;;
+  x86_64|amd64)  PBS_ARCH="x86_64-unknown-linux-gnu";  FF_ARCH="amd64"; DEB_ARCH="amd64"; DEB_TRIPLET="x86_64-linux-gnu" ;;
+  aarch64|arm64) PBS_ARCH="aarch64-unknown-linux-gnu"; FF_ARCH="arm64"; DEB_ARCH="arm64"; DEB_TRIPLET="aarch64-linux-gnu" ;;
+  *) log "WARN: unknown arch '$arch'; assuming x86_64"; PBS_ARCH="x86_64-unknown-linux-gnu"; FF_ARCH="amd64"; DEB_ARCH="amd64"; DEB_TRIPLET="x86_64-linux-gnu" ;;
 esac
 
 # --- download <url> <dest> : curl -> wget -> node fetch fallback ------------
@@ -125,6 +127,67 @@ if [ -x "$FFMPEG_BIN" ]; then
   export FFMPEG_PATH="$FFMPEG_BIN"
   [ -x "$FFPROBE_BIN" ] && export FFPROBE_PATH="$FFPROBE_BIN"
   export PATH="$FFMPEG_DIR:$PATH"
+fi
+
+# --- 3b) qrencode (best-effort; renders the WhatsApp login QR) --------------
+# The Node gateway shells out to `qrencode -t ANSIUTF8` to draw the pairing QR
+# (src/wa/connection.ts → printQrInTerminal). The node-only yolk image ships no
+# qrencode, so provision it WITHOUT root by extracting the Debian .deb packages
+# (qrencode + libqrencode4 + libpng16-16) into the volume and pointing
+# PATH + LD_LIBRARY_PATH at them. Defaults are pinned to the Debian *bookworm*
+# versions (the yolk base); override the *_DEB_URL env vars for another base.
+# Best-effort: if it fails, the QR prints as a raw string — code-based login via
+# WA_PAIRING_NUMBER needs no QR and is the recommended headless path.
+if [ ! -x "$QR_BIN" ]; then
+  log "provisioning qrencode (best-effort)..."
+  DEB_BASE="https://deb.debian.org/debian/pool/main"
+  QRENCODE_DEB_URL="${QRENCODE_DEB_URL:-$DEB_BASE/q/qrencode/qrencode_4.1.1-1_${DEB_ARCH}.deb}"
+  LIBQRENCODE_DEB_URL="${LIBQRENCODE_DEB_URL:-$DEB_BASE/q/qrencode/libqrencode4_4.1.1-1_${DEB_ARCH}.deb}"
+  LIBPNG_DEB_URL="${LIBPNG_DEB_URL:-$DEB_BASE/libp/libpng1.6/libpng16-16_1.6.39-2+deb12u5_${DEB_ARCH}.deb}"
+  rm -rf /home/container/.qrtmp && mkdir -p /home/container/.qrtmp "$QR_DIR"
+  qr_ok=1
+  # unpack one .deb's payload into $QR_DIR (dpkg-deb preferred; ar+tar fallback)
+  unpack_deb() {
+    local deb="$1"
+    if command -v dpkg-deb >/dev/null 2>&1; then
+      dpkg-deb -x "$deb" "$QR_DIR"
+    elif command -v ar >/dev/null 2>&1; then
+      ( cd /home/container/.qrtmp && ar x "$deb" && tar -xf data.tar.* -C "$QR_DIR" \
+        && rm -f data.tar.* control.tar.* debian-binary )
+    else
+      return 2
+    fi
+  }
+  # libpng16-16 is often already on the image; treat its download as optional.
+  for url in "$LIBPNG_DEB_URL:opt" "$LIBQRENCODE_DEB_URL:req" "$QRENCODE_DEB_URL:req"; do
+    u="${url%:*}"; kind="${url##*:}"
+    deb="/home/container/.qrtmp/$(basename "$u")"
+    if download "$u" "$deb"; then
+      unpack_deb "$deb"; rc=$?
+      if [ "$rc" != 0 ]; then
+        if [ "$rc" = 2 ]; then
+          log "WARN: neither dpkg-deb nor ar available; cannot unpack qrencode"
+        else
+          log "WARN: failed to unpack $(basename "$u")"
+        fi
+        [ "$kind" = req ] && qr_ok=0
+      fi
+    else
+      log "WARN: failed to download $(basename "$u")"
+      [ "$kind" = req ] && qr_ok=0
+    fi
+  done
+  rm -rf /home/container/.qrtmp
+  if [ "$qr_ok" = 1 ] && [ -x "$QR_BIN" ]; then
+    log "qrencode ready at $QR_BIN"
+  else
+    log "WARN: qrencode provisioning failed; the login QR will print as a raw string. Use WA_PAIRING_NUMBER for code-based login instead."
+    rm -rf "$QR_DIR"
+  fi
+fi
+if [ -x "$QR_BIN" ]; then
+  export PATH="$QR_DIR/usr/bin:$PATH"
+  export LD_LIBRARY_PATH="$QR_DIR/usr/lib/${DEB_TRIPLET}:$QR_DIR/usr/lib:${LD_LIBRARY_PATH:-}"
 fi
 
 # --- 4) Node deps (the generic egg runs `npm install`, but ensure tsx too) --
