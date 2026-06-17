@@ -196,6 +196,29 @@ if [ ! -x "/home/container/node_modules/.bin/tsx" ]; then
   npm install --include=dev || log "WARN: npm install failed"
 fi
 
+# --- 4b) Ensure the better-sqlite3 native binding matches THIS Node ABI ------
+# better-sqlite3 is a native addon: its compiled `better_sqlite3.node` must
+# match the running Node ABI. If the prebuilt wasn't fetched (offline/blocked,
+# or `npm install --ignore-scripts`) or the Node version changed across an
+# image bump, the gateway crashes with "Could not locate the bindings file".
+# The binding only loads when a Database is constructed, so health-check that.
+# The yolk image ships build-essential + python3 + libsqlite3-dev, so rebuild
+# from source when needed (works regardless of whether a matching prebuilt
+# exists for this Node version).
+if ! node -e "new (require('better-sqlite3'))(':memory:').close()" >/dev/null 2>&1; then
+  log "better-sqlite3 binding missing/mismatched for this Node; rebuilding from source..."
+  npm rebuild better-sqlite3 --build-from-source 2>&1 | tail -n 5 || true
+  # If a rebuild-in-place didn't fix it, try a clean reinstall from source.
+  if ! node -e "new (require('better-sqlite3'))(':memory:').close()" >/dev/null 2>&1; then
+    npm install better-sqlite3 --build-from-source 2>&1 | tail -n 5 || true
+  fi
+  if node -e "new (require('better-sqlite3'))(':memory:').close()" >/dev/null 2>&1; then
+    log "better-sqlite3 binding ready"
+  else
+    log "WARN: better-sqlite3 rebuild failed — the gateway cannot start. Ensure the image has build-essential + python3 (the nodejs_22 yolk does)."
+  fi
+fi
+
 # --- 5) Run gateway + bridge, tie lifecycles --------------------------------
 NODE_PID=""
 PY_PID=""
