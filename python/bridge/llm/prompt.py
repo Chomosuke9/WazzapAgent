@@ -368,7 +368,7 @@ Only delete messages with clear justification.
 _MUTE_RULES = """<mute>
 MUTE is ALLOWED for this chat. Use the mute_member tool to auto-delete all messages from a user for a specified duration.
 Use for persistent rule violators. Muted user's messages are auto-deleted for the specified duration.
-To unmute a currently muted user, call mute_member with duration_minutes=0.
+To unmute a currently muted user, call mute_member with duration_minutes=0. The senderRefs of everyone currently muted are listed under "Currently muted users" in the message metadata — use those exact senderRefs to unmute.
 </mute>"""
 
 _KICK_RULES = """<kick>
@@ -484,6 +484,37 @@ def _normalize_chat_type(chat_type: str | None) -> str:
     if lowered in {"private", "group"}:
         return lowered
     return "private"
+
+
+def _active_mutes_block(chat_id: str | None) -> str:
+    """Render the list of currently-muted users so LLM2 can reference them.
+
+    A muted user's messages are deleted by the mute gate before they ever
+    reach LLM2's history, so without this block the model has no senderRef to
+    target when asked to unmute someone — making unmute unreliable. Returns an
+    empty string when nothing is muted (or when ``chat_id`` is unknown).
+    """
+    if not chat_id:
+        return ""
+    try:
+        from ..db import list_active_mutes  # local import avoids db↔llm import cycle
+        mutes = list_active_mutes(chat_id)
+    except Exception:
+        return ""
+    if not mutes:
+        return ""
+    lines = []
+    for m in mutes:
+        name = (m.get("name") or "").strip() or "unknown"
+        ref = m.get("sender_ref") or "?"
+        remaining = m.get("remaining_minutes")
+        lines.append(f"- {name} (senderRef: {ref}, {remaining}m remaining)")
+    listing = "\n".join(lines)
+    return (
+        "\n\nCurrently muted users (their messages are auto-deleted and hidden from you):\n"
+        f"{listing}\n"
+        "To unmute one of them, call mute_member with their senderRef and duration_minutes=0."
+    )
 
 
 def _chat_state_header(
@@ -656,6 +687,7 @@ def _context_injection_block(
 
     assistant_reply_block = "\n".join(assistant_reply_lines)
     chat_state_text = _chat_state_header(chat_type, bot_is_admin, bot_is_super_admin)
+    muted_users_block = _active_mutes_block(chat_id)
 
     return (
         "Current message metadata:\n"
@@ -671,4 +703,5 @@ def _context_injection_block(
         f"{llm1_reason_line}"
         "Chat state:\n"
         f"{chat_state_text}"
+        f"{muted_users_block}"
     )

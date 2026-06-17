@@ -1,9 +1,12 @@
 """Unit tests for :class:`bridge.agent.mute_gate.MuteGate` (Step 08).
 
-Constructs the gate directly with fake db callables and fake async gateway send
-functions that record their calls — no live socket / LLM / DB. Drives the async
-``enforce`` with :func:`asyncio.run` (bounded, no hanging tasks). Mirrors the
-former inline mute-enforcement block in ``session.py``.
+Constructs the gate directly with fake db callables and a fake async delete
+function that records its calls — no live socket / LLM / DB. Drives the async
+``enforce`` with :func:`asyncio.run` (bounded, no hanging tasks).
+
+The first-delete "Message from X deleted (muted, …)" notification was removed,
+so the gate now only deletes the muted user's message — it never sends a chat
+message.
 """
 from __future__ import annotations
 
@@ -13,34 +16,18 @@ from bridge.agent.mute_gate import MuteGate
 
 
 class _Recorder:
-  def __init__(self, muted=False, notified=False, remaining=5):
+  def __init__(self, muted=False):
     self.muted = muted
-    self.notified = notified
-    self.remaining = remaining
-    self.marked = []
     self.deletes = []
-    self.messages = []
     self._req = 0
 
   # --- db fakes ---
   def is_muted(self, chat_id, sender_ref):
     return self.muted
 
-  def is_mute_notified(self, chat_id, sender_ref):
-    return self.notified
-
-  def mark_mute_notified(self, chat_id, sender_ref):
-    self.marked.append((chat_id, sender_ref))
-
-  def get_mute_remaining(self, chat_id, sender_ref):
-    return self.remaining
-
   # --- gateway fakes (async) ---
   async def send_delete_message(self, ws, chat_id, ctx_id, *, request_id):
     self.deletes.append((chat_id, ctx_id, request_id))
-
-  async def send_message(self, ws, chat_id, text, reply_to, *, request_id):
-    self.messages.append((chat_id, text, reply_to, request_id))
 
   def make_request_id(self, prefix):
     self._req += 1
@@ -50,11 +37,7 @@ class _Recorder:
 def _gate(rec: _Recorder) -> MuteGate:
   return MuteGate(
     is_muted=rec.is_muted,
-    is_mute_notified=rec.is_mute_notified,
-    mark_mute_notified=rec.mark_mute_notified,
-    get_mute_remaining=rec.get_mute_remaining,
     send_delete_message=rec.send_delete_message,
-    send_message=rec.send_message,
     make_request_id=rec.make_request_id,
   )
 
@@ -106,42 +89,18 @@ def test_enforce_returns_false_and_no_side_effects_when_not_muted():
   result = asyncio.run(_gate(rec).enforce(object(), "c", _payload()))
   assert result is False
   assert rec.deletes == []
-  assert rec.messages == []
 
 
-def test_enforce_deletes_and_notifies_first_time():
-  rec = _Recorder(muted=True, notified=False, remaining=7)
+def test_enforce_deletes_without_notification():
+  rec = _Recorder(muted=True)
   result = asyncio.run(_gate(rec).enforce(object(), "c@g.us", _payload()))
   assert result is True
+  # Message is deleted ...
   assert rec.deletes == [("c@g.us", "000125", "mute_enforce-1")]
-  assert len(rec.messages) == 1
-  chat_id, text, reply_to, _req = rec.messages[0]
-  assert chat_id == "c@g.us"
-  assert text == "Message from Alice deleted (muted, 7m remaining)."
-  assert reply_to is None
-  assert rec.marked == [("c@g.us", "u8k2d1")]
 
 
-def test_enforce_deletes_only_when_already_notified():
-  rec = _Recorder(muted=True, notified=True)
-  result = asyncio.run(_gate(rec).enforce(object(), "c", _payload()))
-  assert result is True
-  assert len(rec.deletes) == 1
-  assert rec.messages == []  # no repeat notification
-  assert rec.marked == []
-
-
-def test_enforce_skips_delete_without_context_msg_id_but_still_notifies():
-  rec = _Recorder(muted=True, notified=False)
+def test_enforce_skips_delete_without_context_msg_id():
+  rec = _Recorder(muted=True)
   result = asyncio.run(_gate(rec).enforce(object(), "c", _payload(contextMsgId=None)))
   assert result is True
   assert rec.deletes == []
-  assert len(rec.messages) == 1
-
-
-def test_enforce_notification_falls_back_to_sender_ref_when_no_name():
-  rec = _Recorder(muted=True, notified=False, remaining=3)
-  result = asyncio.run(_gate(rec).enforce(object(), "c", _payload(senderName=None)))
-  assert result is True
-  _chat, text, _reply, _req = rec.messages[0]
-  assert text == "Message from u8k2d1 deleted (muted, 3m remaining)."

@@ -196,7 +196,7 @@ async def _deliver_subagent_result(
       "AGAIN on this turn to correct it. This is the ONLY turn where "
       "you can re-dispatch — after your reply, the sub-agent result "
       "context is gone.\n"
-      "- DO NOT repeat \"oke aku cek\" / \"siap, aku cek dokumennya\" "
+      "- DO NOT repeat \"ok let me check\" / \"sure, I'll look at the document\" "
       "or any other pre-task acknowledgement — the task is finished, "
       "deliver the actual result or dispatch a correction.\n"
       f"- {attachments_clause}\n"
@@ -264,8 +264,8 @@ async def _deliver_subagent_result(
   # Strict safety net: if the re-invoke produced no usable
   # ``send_message``, fall back to sending the raw report so the user at
   # least sees the result. Without this, a flaky LLM2 call after a
-  # successful sub-agent run leaves the user staring at "oke aku cek
-  # dulu" forever.
+  # successful sub-agent run leaves the user staring at "ok let me
+  # check" forever.
   has_reinvoke_text = any(
     a.get("type") == "send_message" and (a.get("text") or "").strip()
     for a in reinvoke_actions

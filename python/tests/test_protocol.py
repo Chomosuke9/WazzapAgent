@@ -95,7 +95,7 @@ ROUND_TRIP_INSTANCES = [
         request_id="copy-1-000005",
         chat_id="123@g.us",
         code="PROMO2024",
-        display_text="Salin Kode",
+        display_text="Copy Code",
         reply_to="000125",
         quoted_preview_text="Your promo code",
     ),

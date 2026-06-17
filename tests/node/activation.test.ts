@@ -126,27 +126,27 @@ describe('activateChat', () => {
 
     const result2 = db.activateChat('user_once2@s.whatsapp.net', code.code, 'private');
     assert.equal(result2.success, false);
-    assert.ok(result2.message.includes('sudah digunakan'), 'should say already used');
+    assert.ok(result2.message.toLowerCase().includes('already used'), 'should say already used');
   });
 
   it('rejects private code for group chat', () => {
     const code = db.generateActivationCode('private', 30, 'owner@test');
     const result = db.activateChat('group_priv@g.us', code.code, 'group');
     assert.equal(result.success, false);
-    assert.ok(result.message.toLowerCase().includes('privat'), `should mention private restriction, got: ${result.message}`);
+    assert.ok(result.message.toLowerCase().includes('private'), `should mention private restriction, got: ${result.message}`);
   });
 
   it('rejects group code for private chat', () => {
     const code = db.generateActivationCode('group', 30, 'owner@test');
     const result = db.activateChat('user_group@s.whatsapp.net', code.code, 'private');
     assert.equal(result.success, false);
-    assert.ok(result.message.toLowerCase().includes('grup'), `should mention group restriction, got: ${result.message}`);
+    assert.ok(result.message.toLowerCase().includes('group'), `should mention group restriction, got: ${result.message}`);
   });
 
   it('rejects invalid code', () => {
     const result = db.activateChat('user7@s.whatsapp.net', 'WA-INVALID0', 'private');
     assert.equal(result.success, false);
-    assert.ok(result.message.includes('tidak ditemukan'), 'should say not found');
+    assert.ok(result.message.toLowerCase().includes('not found'), 'should say not found');
   });
 
   it('handles case-insensitive code input', () => {
@@ -161,7 +161,48 @@ describe('activateChat', () => {
     const result = db.activateChat('user9@s.whatsapp.net', code.code, 'private');
     assert.equal(result.success, true);
     assert.equal(result.expiresAt, null);
-    assert.ok(result.message.includes('permanen') || result.message.includes('Permanen'), 'should mention permanent');
+    assert.ok(result.message.toLowerCase().includes('permanent'), 'should mention permanent');
+  });
+
+  it('limited code does NOT downgrade an already-permanent activation', () => {
+    const chat = 'perm_then_limited@s.whatsapp.net';
+    const permCode = db.generateActivationCode('private', 0, 'owner@test');
+    const permResult = db.activateChat(chat, permCode.code, 'private');
+    assert.equal(permResult.expiresAt, null);
+
+    // Applying a finite (30-day) code on top must keep the chat permanent.
+    const limitedCode = db.generateActivationCode('private', 30, 'owner@test');
+    const limitedResult = db.activateChat(chat, limitedCode.code, 'private');
+    assert.equal(limitedResult.success, true);
+    assert.equal(limitedResult.expiresAt, null, 'must stay permanent (no finite expiry)');
+    assert.equal(db.getChatActivation(chat)?.expiresAt, null, 'stored expiry must remain NULL');
+    assert.equal(db.isChatActivated(chat), true);
+  });
+
+  it('permanent code upgrades a limited activation to permanent', () => {
+    const chat = 'limited_then_perm@s.whatsapp.net';
+    const limitedCode = db.generateActivationCode('private', 30, 'owner@test');
+    const limitedResult = db.activateChat(chat, limitedCode.code, 'private');
+    assert.ok(limitedResult.expiresAt, 'should have a finite expiry first');
+
+    const permCode = db.generateActivationCode('private', 0, 'owner@test');
+    const permResult = db.activateChat(chat, permCode.code, 'private');
+    assert.equal(permResult.success, true);
+    assert.equal(permResult.expiresAt, null, 'should become permanent');
+    assert.equal(db.getChatActivation(chat)?.expiresAt, null);
+  });
+
+  it('two limited codes extend (never shorten) the expiry', () => {
+    const chat = 'limited_extend@s.whatsapp.net';
+    const c1 = db.generateActivationCode('private', 30, 'owner@test');
+    const r1 = db.activateChat(chat, c1.code, 'private');
+    const c2 = db.generateActivationCode('private', 30, 'owner@test');
+    const r2 = db.activateChat(chat, c2.code, 'private');
+    assert.ok(r2.expiresAt && r1.expiresAt, 'both should have finite expiries');
+    assert.ok(
+      new Date(r2.expiresAt as string) > new Date(r1.expiresAt as string),
+      'second activation should extend the expiry, not shorten it',
+    );
   });
 });
 
@@ -399,14 +440,14 @@ describe('parseSlashCommand recognizes new commands', () => {
 // ---------------------------------------------------------------------------
 
 describe('formatDuration', () => {
-  it('returns Permanen for null expiresAt', async () => {
+  it('returns Permanent for null expiresAt', async () => {
     const { formatDuration } = await import('../../src/wa/commands/monitor.ts');
-    assert.equal(formatDuration(null), 'Permanen');
+    assert.equal(formatDuration(null), 'Permanent');
   });
 
-  it('returns Kadaluarsa for past date', async () => {
+  it('returns Expired for past date', async () => {
     const { formatDuration } = await import('../../src/wa/commands/monitor.ts');
-    assert.equal(formatDuration('2020-01-01 00:00:00'), 'Kadaluarsa');
+    assert.equal(formatDuration('2020-01-01 00:00:00'), 'Expired');
   });
 
   it('returns days and hours for future date', async () => {
@@ -420,25 +461,25 @@ describe('formatDuration', () => {
       String(future.getMinutes()).padStart(2, '0') + ':' +
       String(future.getSeconds()).padStart(2, '0');
     const result = formatDuration(futureStr);
-    assert.ok(result.includes('hari'), `should contain "hari", got: ${result}`);
-    assert.ok(result.includes('jam'), `should contain "jam", got: ${result}`);
+    assert.ok(result.includes('days'), `should contain "days", got: ${result}`);
+    assert.ok(result.includes('hours'), `should contain "hours", got: ${result}`);
   });
 
-  it('returns Permanen for undefined expiresAt', async () => {
+  it('returns Permanent for undefined expiresAt', async () => {
     const { formatDuration } = await import('../../src/wa/commands/monitor.ts');
-    assert.equal(formatDuration(undefined), 'Permanen');
+    assert.equal(formatDuration(undefined), 'Permanent');
   });
 });
 
 describe('formatDurationShort', () => {
-  it('returns Permanen for null expiresAt', async () => {
+  it('returns Permanent for null expiresAt', async () => {
     const { formatDurationShort } = await import('../../src/wa/commands/monitor.ts');
-    assert.equal(formatDurationShort(null), 'Permanen');
+    assert.equal(formatDurationShort(null), 'Permanent');
   });
 
-  it('returns Kadaluarsa for past date', async () => {
+  it('returns Expired for past date', async () => {
     const { formatDurationShort } = await import('../../src/wa/commands/monitor.ts');
-    assert.equal(formatDurationShort('2020-01-01 00:00:00'), 'Kadaluarsa');
+    assert.equal(formatDurationShort('2020-01-01 00:00:00'), 'Expired');
   });
 
   it('returns short format for future date', async () => {
@@ -452,6 +493,6 @@ describe('formatDurationShort', () => {
       String(future.getSeconds()).padStart(2, '0');
     const result = formatDurationShort(futureStr);
     assert.ok(result.includes('h'), `should contain "h" (hours), got: ${result}`);
-    assert.ok(result.includes('j'), `should contain "j" (days abbreviation), got: ${result}`);
+    assert.ok(result.includes('d'), `should contain "d" (days abbreviation), got: ${result}`);
   });
 });

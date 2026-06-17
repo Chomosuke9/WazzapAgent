@@ -2,7 +2,7 @@
 
 The user-visible bug these tests guard against:
 
-  - The bot keeps replying "Siap, aku cek dokumennya" over and over even
+  - The bot keeps replying "Sure, I'll check the document" over and over even
     after the sub-agent has finished, and the actual report never reaches
     the user.
 
@@ -50,7 +50,7 @@ def test_active_context_warns_against_reack_and_respawn():
     # While a task is in flight the model MAY call execute_subtask again —
     # that steers the running task rather than re-spawning it — so the block
     # surfaces the steering option plus the no-re-acknowledge guard that
-    # actually stops the "oke aku cek dulu" reply loop.
+    # actually stops the "ok let me check" reply loop.
     assert "steering" in block
     assert "DO NOT re-acknowledge" in block
 
@@ -104,13 +104,13 @@ def test_active_context_renders_reason_when_available():
     tracker.update_progress(
         "sess-1",
         "bash",
-        "{'reason': 'Mengekstrak zip yang diterima', 'command': 'unzip foo.zip'}",
-        reason="Mengekstrak zip yang diterima",
+        "{'reason': 'Extracting received zip', 'command': 'unzip foo.zip'}",
+        reason="Extracting received zip",
     )
     block = tracker.format_context("chat-1")
     assert block is not None
     # Rendering must use the reason, not the raw detail.
-    assert "bash: Mengekstrak zip yang diterima" in block
+    assert "bash: Extracting received zip" in block
     # The raw JSON-stringified detail must NOT appear (avoids token
     # bloat and confuses the model).
     assert "command" not in block

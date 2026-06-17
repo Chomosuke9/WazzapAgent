@@ -690,14 +690,23 @@ def _ensure_moderation_tables(conn: sqlite3.Connection) -> None:
   conn.executescript(
     """
     CREATE TABLE IF NOT EXISTS chat_mutes (
-      chat_id    TEXT NOT NULL,
-      sender_ref TEXT NOT NULL,
-      muted_at   TEXT NOT NULL DEFAULT (datetime('now')),
-      duration_m INTEGER NOT NULL DEFAULT 60,
+      chat_id     TEXT NOT NULL,
+      sender_ref  TEXT NOT NULL,
+      muted_at    TEXT NOT NULL DEFAULT (datetime('now')),
+      duration_m  INTEGER NOT NULL DEFAULT 60,
+      sender_name TEXT,
       PRIMARY KEY (chat_id, sender_ref)
     );
     """
   )
+  # Migration: add sender_name to existing chat_mutes tables so the bot can
+  # show a human-readable name in mute/unmute confirmations and surface the
+  # list of currently-muted users (with their senderRef) to LLM2.
+  try:
+    conn.execute('ALTER TABLE chat_mutes ADD COLUMN sender_name TEXT')
+    conn.commit()
+  except sqlite3.OperationalError:
+    pass
 
 
 def _ensure_split_ready() -> None:

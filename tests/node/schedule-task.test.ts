@@ -67,7 +67,7 @@ test('handleScheduleTask emits a schedule_task frame with the parsed delay + pro
   registry.getOrCreate(folderPath); // no client bound -> frame is queued
   try {
     const before = Date.now();
-    const { ctx, sent } = makeCtx('2H30M Ingatkan @Budi (abc123) soal rapat', folderPath);
+    const { ctx, sent } = makeCtx('2H30M Remind @Budi (abc123) about the meeting', folderPath);
     await handleScheduleTask(ctx);
     const after = Date.now();
 
@@ -78,7 +78,7 @@ test('handleScheduleTask emits a schedule_task frame with the parsed delay + pro
     assert.equal(frame.type, 'schedule_task');
     assert.equal(frame.folderPath, folderPath);
     assert.equal(frame.chatId, '12345@g.us');
-    assert.equal(frame.prompt, 'Ingatkan @Budi (abc123) soal rapat');
+    assert.equal(frame.prompt, 'Remind @Budi (abc123) about the meeting');
     assert.equal(typeof frame.taskId, 'string');
     assert.ok(frame.taskId.length > 0, 'taskId is non-empty');
     const expectedDelay = (2 * 60 + 30) * 60000;
@@ -88,7 +88,7 @@ test('handleScheduleTask emits a schedule_task frame with the parsed delay + pro
     );
     // A confirmation message is sent to the chat.
     assert.equal(sent.length, 1);
-    assert.match(sent[0].text, /dijadwalkan/i);
+    assert.match(sent[0].text, /scheduled/i);
   } finally {
     registry.remove(folderPath);
   }
@@ -120,7 +120,7 @@ test('handleScheduleTask rejects durations longer than 30 days', async () => {
     const { ctx, sent } = makeCtx('745H do the thing', folderPath); // 745h > 30 days (720h)
     await handleScheduleTask(ctx);
     assert.equal(registry.get(folderPath)!.reliableQueue.length, 0, 'no frame when > 30 days');
-    assert.match(sent.at(-1).text, /30 hari/i, 'cap message shown');
+    assert.match(sent.at(-1).text, /30 days/i, 'cap message shown');
   } finally {
     registry.remove(folderPath);
   }

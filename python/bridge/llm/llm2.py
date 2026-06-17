@@ -313,7 +313,7 @@ async def generate_reply(
     # signal instead of having to dig the [SUBTASK FINISHED] line out of the
     # chat transcript. Keeping it as a separate HumanMessage (rather than
     # smuggling it into history) is what reliably stops the model from
-    # repeating "oke aku cek dulu" when it should be delivering the report.
+    # repeating "ok let me check" when it should be delivering the report.
     if subagent_result_block:
         msgs.append(HumanMessage(content=subagent_result_block))
     # ``scheduled_task_block`` (feature 5): a dedicated high-priority slot used

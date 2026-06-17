@@ -55,9 +55,6 @@ from .llm.llm1 import call_llm1
 from .llm.llm2 import generate_reply
 from .db import (
   is_muted as db_is_muted,
-  is_mute_notified as db_is_mute_notified,
-  mark_mute_notified as db_mark_mute_notified,
-  get_mute_remaining_minutes as db_get_mute_remaining,
   set_llm2_model as db_set_llm2_model,
   clear_llm2_model_cache as db_clear_llm2_model_cache,
   reset_settings_connection as db_reset_settings_connection,
@@ -186,11 +183,7 @@ class AgentSession:
     self.recent_reply_signatures_by_chat = self._dedup.signatures_by_chat
     self._mute = MuteGate(
       is_muted=db_is_muted,
-      is_mute_notified=db_is_mute_notified,
-      mark_mute_notified=db_mark_mute_notified,
-      get_mute_remaining=db_get_mute_remaining,
       send_delete_message=send_delete_message,
-      send_message=send_message,
       make_request_id=_make_request_id,
     )
 

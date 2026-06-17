@@ -150,11 +150,23 @@ export class ActivationRepository extends BaseRepository {
       chatId,
     );
     const daysInt = codeRow.days;
-    let expiresAt: string | null = null;
     const now = new Date();
-    if (daysInt > 0) {
-      if (existingRows.length > 0 && existingRows[0].expires_at) {
-        const currentExpiry = new Date(existingRows[0].expires_at);
+    const existingExpiry =
+      existingRows.length > 0 ? existingRows[0].expires_at : undefined;
+    // A pre-existing row with a NULL expires_at means the chat is already
+    // permanently active. A limited (days > 0) code must NEVER downgrade a
+    // permanent activation to a finite expiry — applying a shorter code on top
+    // of an unlimited one should keep it unlimited.
+    const existingIsPermanent =
+      existingRows.length > 0 &&
+      (existingExpiry === null || existingExpiry === undefined);
+
+    let expiresAt: string | null = null;
+    if (daysInt > 0 && !existingIsPermanent) {
+      if (existingExpiry) {
+        // Extend from the later of the current (future) expiry or now, so a
+        // re-activation never shortens an in-effect activation.
+        const currentExpiry = new Date(existingExpiry);
         const baseDate = currentExpiry > now ? currentExpiry : now;
         expiresAt = new Date(baseDate.getTime() + daysInt * 86400000)
           .toISOString()
@@ -167,6 +179,8 @@ export class ActivationRepository extends BaseRepository {
           .slice(0, 19);
       }
     } else {
+      // Either the new code is permanent (days === 0) or the chat is already
+      // permanently active — in both cases the result is a permanent activation.
       expiresAt = null;
     }
 
@@ -186,7 +200,7 @@ export class ActivationRepository extends BaseRepository {
       );
     }
     logger.info({ chatId, code: code.toUpperCase(), days: daysInt, expiresAt }, "DB activate_chat");
-    if (daysInt === 0) {
+    if (expiresAt === null) {
       return { success: true, message: "Activation successful! This chat is now permanently active.", expiresAt: null };
     }
     return { success: true, message: `Activation successful! This chat is active for ${daysInt} days.`, expiresAt };

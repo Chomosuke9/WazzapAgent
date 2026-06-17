@@ -43,14 +43,14 @@ test('/bot-conf no args shows usage + current values', async () => {
   const s = settingsSpy();
   const { c, o } = ctx('', s);
   await handleBotConf(c);
-  assert.ok(o.some((m) => /bot-conf/i.test(m.text) && /Nilai saat ini/i.test(m.text)));
+  assert.ok(o.some((m) => /bot-conf/i.test(m.text) && /Current values/i.test(m.text)));
 });
 
 test('/bot-conf activation-msg sets and clears', async () => {
   const s = settingsSpy();
-  let r = ctx('activation-msg Halo aktifkan dulu ya', s);
+  let r = ctx('activation-msg Hello, please activate first', s);
   await handleBotConf(r.c);
-  assert.deepEqual(s.calls.at(-1), ['setBotConfig', 'activation_msg', 'Halo aktifkan dulu ya']);
+  assert.deepEqual(s.calls.at(-1), ['setBotConfig', 'activation_msg', 'Hello, please activate first']);
 
   r = ctx('activation-msg clear', s);
   await handleBotConf(r.c);

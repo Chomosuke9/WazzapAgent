@@ -39,8 +39,8 @@ test('getActivationMessage: default then custom (feature 1)', () => {
   const { repos, cleanup } = freshRepos();
   try {
     assert.equal(getActivationMessage(repos), DEFAULT_ACTIVATION_MESSAGE);
-    repos.settings.setBotConfig('activation_msg', 'Aktifkan dulu bro');
-    assert.equal(getActivationMessage(repos), 'Aktifkan dulu bro');
+    repos.settings.setBotConfig('activation_msg', 'Please activate first');
+    assert.equal(getActivationMessage(repos), 'Please activate first');
   } finally {
     cleanup();
   }

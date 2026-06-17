@@ -77,5 +77,5 @@ test('/generate rejects invalid type', async () => {
   ctx.args = 'bogus 10';
   await handleGenerate(ctx);
   assert.equal(captured.relayed.length, 0);
-  assert.ok(captured.textMessages.some((m) => /Tipe harus/i.test(m.text || '')));
+  assert.ok(captured.textMessages.some((m) => /Type must be/i.test(m.text || '')));
 });

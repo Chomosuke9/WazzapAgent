@@ -88,7 +88,7 @@ test('button tap of a /-command threads sock into the dispatched command context
   // would throw and swallow -> zero sends. Exactly one send proves sock was threaded.
   assert.equal(sock._calls.length, 1, 'command handler must have used context.sock to reply');
   assert.equal(sock._calls[0].chatId, chatId);
-  assert.match(String(sock._calls[0].content?.text ?? ''), /Daftar Perintah/);
+  assert.match(String(sock._calls[0].content?.text ?? ''), /Command List/);
 });
 
 test.after(() => {

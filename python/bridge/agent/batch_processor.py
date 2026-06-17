@@ -45,6 +45,7 @@ from ..db import (
   add_mute as db_add_mute,
   remove_mute as db_remove_mute,
   clear_mutes as db_clear_mutes,
+  list_active_mutes as db_list_active_mutes,
   set_permission as db_set_permission,
   reset_settings_connection as db_reset_settings_connection,
   invalidate_chat_caches as db_invalidate_chat_caches,
@@ -1356,10 +1357,49 @@ class BatchProcessor:
       if action_type == "mute_member":
         sender_ref = action.get("senderRef", "")
         duration = action.get("durationMinutes", 30)
+
+        def _name_for_ref(ref: str) -> str | None:
+          # Resolve a human-readable name from the current burst / history so
+          # the confirmation message is legible. Works for a fresh mute (the
+          # target is still visible); for an unmute the muted user is invisible
+          # (their messages were deleted by the mute gate) so the caller falls
+          # back to the name stored on the mute record.
+          if not ref:
+            return None
+          candidates = list(history)
+          if current is not None:
+            candidates.append(current)
+          for _m in candidates:
+            if getattr(_m, "sender_ref", None) == ref and getattr(_m, "sender", None):
+              return _m.sender
+          return None
+
         if duration == 0:
+          stored_name = None
+          for _mute in db_list_active_mutes(chat_id):
+            if _mute.get("sender_ref") == sender_ref:
+              stored_name = _mute.get("name")
+              break
           db_remove_mute(chat_id, sender_ref)
+          who = stored_name or _name_for_ref(sender_ref) or sender_ref
+          await send_message(
+            ws,
+            chat_id,
+            f"🔊 {who} has been unmuted.",
+            None,
+            request_id=_make_request_id("unmute_notify"),
+          )
         else:
-          db_add_mute(chat_id, sender_ref, duration)
+          who = _name_for_ref(sender_ref)
+          db_add_mute(chat_id, sender_ref, duration, sender_name=who)
+          await send_message(
+            ws,
+            chat_id,
+            f"🔇 {who or sender_ref} has been muted for {duration} minute(s). "
+            "Their messages will be auto-deleted until then.",
+            None,
+            request_id=_make_request_id("mute_notify"),
+          )
         action_counts[action_type] += 1
         continue
       if action_type == "execute_subtask":

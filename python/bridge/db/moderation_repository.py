@@ -45,20 +45,28 @@ def _mute_remaining_minutes(entry: dict) -> int:
   return max(0, int(remaining))
 
 @_db_resilient('moderation')
-def add_mute(chat_id: str, sender_ref: str, duration_minutes: int) -> None:
-  """Add or update a mute. Persists to DB and updates cache."""
+def add_mute(chat_id: str, sender_ref: str, duration_minutes: int, sender_name: str | None = None) -> None:
+  """Add or update a mute. Persists to DB and updates cache.
+
+  ``sender_name`` (when known) is stored so the bot can show a human-readable
+  name in mute/unmute confirmations and so :func:`list_active_mutes` can surface
+  who is muted to LLM2. A re-mute that passes ``None`` keeps any previously
+  stored name (``COALESCE``) instead of wiping it.
+  """
   duration_minutes = max(1, min(1440, int(duration_minutes)))
+  clean_name = (sender_name or "").strip() or None
   _ensure_split_ready()
   conn = _get_moderation_conn()
   conn.execute(
     """
-    INSERT INTO chat_mutes (chat_id, sender_ref, muted_at, duration_m)
-    VALUES (?, ?, datetime('now'), ?)
+    INSERT INTO chat_mutes (chat_id, sender_ref, muted_at, duration_m, sender_name)
+    VALUES (?, ?, datetime('now'), ?, ?)
     ON CONFLICT(chat_id, sender_ref) DO UPDATE SET
       muted_at = datetime('now'),
-      duration_m = excluded.duration_m
+      duration_m = excluded.duration_m,
+      sender_name = COALESCE(excluded.sender_name, chat_mutes.sender_name)
     """,
-    (chat_id, sender_ref, duration_minutes),
+    (chat_id, sender_ref, duration_minutes, clean_name),
   )
   conn.commit()
   from datetime import datetime, timezone
@@ -67,10 +75,12 @@ def add_mute(chat_id: str, sender_ref: str, duration_minutes: int) -> None:
     key = _tenant_cache_key(chat_id)
     if key not in _mute_cache:
       _mute_cache[key] = {}
+    existing = _mute_cache[key].get(sender_ref) or {}
     _mute_cache[key][sender_ref] = {
       'muted_at': now_str,
       'duration_m': duration_minutes,
       'notified': False,
+      'sender_name': clean_name or existing.get('sender_name'),
     }
   logger.info('mute added chat_id=%s sender_ref=%s duration=%sm', chat_id, sender_ref, duration_minutes)
 
@@ -168,3 +178,47 @@ def get_mute_remaining_minutes(chat_id: str, sender_ref: str) -> int:
     if entry is not None:
       return _mute_remaining_minutes(entry)
   return 0
+
+
+@_db_resilient('moderation')
+def list_active_mutes(chat_id: str) -> list[dict]:
+  """Return the currently-active mutes for *chat_id*, authoritative from DB.
+
+  Each item is ``{'sender_ref': str, 'name': str | None, 'remaining_minutes': int}``.
+  Reads from disk (not cache-only) because a muted user's messages are deleted
+  by the mute gate before they reach LLM2 history — so the in-memory cache may
+  never have been populated for them. Expired rows are skipped (and lazily
+  deleted) so the list reflects only mutes that are still in effect.
+  """
+  _ensure_split_ready()
+  conn = _get_moderation_conn()
+  rows = conn.execute(
+    'SELECT sender_ref, muted_at, duration_m, sender_name FROM chat_mutes WHERE chat_id = ?',
+    (chat_id,),
+  ).fetchall()
+  active: list[dict] = []
+  expired: list[str] = []
+  for row in rows:
+    entry = {'muted_at': row['muted_at'], 'duration_m': int(row['duration_m'])}
+    if _is_mute_active(entry):
+      name = row['sender_name'] if 'sender_name' in row.keys() else None
+      active.append({
+        'sender_ref': row['sender_ref'],
+        'name': (name or None),
+        'remaining_minutes': _mute_remaining_minutes(entry),
+      })
+    else:
+      expired.append(row['sender_ref'])
+  if expired:
+    conn.executemany(
+      'DELETE FROM chat_mutes WHERE chat_id = ? AND sender_ref = ?',
+      [(chat_id, ref) for ref in expired],
+    )
+    conn.commit()
+    with _cache_lock:
+      chat_mutes = _mute_cache.get(_tenant_cache_key(chat_id))
+      if chat_mutes is not None:
+        for ref in expired:
+          chat_mutes.pop(ref, None)
+  active.sort(key=lambda item: item['remaining_minutes'])
+  return active

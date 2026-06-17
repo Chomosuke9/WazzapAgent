@@ -362,3 +362,53 @@ class TestMuteDB:
     add_mute("chat1", "u1abc", 60)
     remaining = get_mute_remaining_minutes("chat1", "u1abc")
     assert 58 <= remaining <= 60
+
+  def test_add_mute_stores_sender_name(self):
+    from bridge.db import add_mute, list_active_mutes
+    add_mute("chatname", "u1abc", 30, sender_name="Alice")
+    mutes = list_active_mutes("chatname")
+    by_ref = {m["sender_ref"]: m for m in mutes}
+    assert by_ref["u1abc"]["name"] == "Alice"
+
+  def test_add_mute_without_name_keeps_none(self):
+    from bridge.db import add_mute, list_active_mutes
+    add_mute("chatnoname", "u2def", 30)
+    mutes = list_active_mutes("chatnoname")
+    by_ref = {m["sender_ref"]: m for m in mutes}
+    assert by_ref["u2def"]["name"] is None
+
+  def test_remute_without_name_preserves_existing_name(self):
+    from bridge.db import add_mute, list_active_mutes
+    add_mute("chatkeep", "u3ghi", 30, sender_name="Bob")
+    # Re-mute with no name should not wipe the stored name.
+    add_mute("chatkeep", "u3ghi", 10)
+    by_ref = {m["sender_ref"]: m for m in list_active_mutes("chatkeep")}
+    assert by_ref["u3ghi"]["name"] == "Bob"
+
+  def test_list_active_mutes_excludes_unmuted(self):
+    from bridge.db import add_mute, remove_mute, list_active_mutes
+    add_mute("chatlist", "active1", 30, sender_name="Active")
+    add_mute("chatlist", "tounmute", 30, sender_name="Gone")
+    # Unmute one (the duration=0 dispatch path calls remove_mute).
+    remove_mute("chatlist", "tounmute")
+    refs = {m["sender_ref"] for m in list_active_mutes("chatlist")}
+    assert refs == {"active1"}
+
+  def test_list_active_mutes_drops_expired_db_rows(self):
+    from bridge.db import add_mute, list_active_mutes, _get_moderation_conn
+    add_mute("chatexp", "stale1", 30, sender_name="Stale")
+    add_mute("chatexp", "fresh1", 30, sender_name="Fresh")
+    # Backdate the DB row + duration so it is genuinely expired on disk.
+    conn = _get_moderation_conn()
+    conn.execute(
+      "UPDATE chat_mutes SET muted_at = '2020-01-01 00:00:00', duration_m = 1 "
+      "WHERE chat_id = ? AND sender_ref = ?",
+      ("chatexp", "stale1"),
+    )
+    conn.commit()
+    refs = {m["sender_ref"] for m in list_active_mutes("chatexp")}
+    assert refs == {"fresh1"}
+
+  def test_list_active_mutes_empty_when_none(self):
+    from bridge.db import list_active_mutes
+    assert list_active_mutes("chatempty") == []
