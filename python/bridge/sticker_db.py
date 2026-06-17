@@ -311,12 +311,12 @@ def add_sticker(
   normalized = normalize_name(name)
   if not is_valid_name(normalized):
     return False, (
-      f"Nama sticker tidak valid: *{name}*\n"
-      "Gunakan huruf kecil, angka, underscore, atau tanda minus (1-64 karakter)."
+      f"Invalid sticker name: *{name}*\n"
+      "Use lowercase letters, numbers, underscores, or hyphens (1-64 characters)."
     )
 
   if not os.path.isfile(source_path):
-    return False, f"File sticker tidak ditemukan: {source_path}"
+    return False, f"Sticker file not found: {source_path}"
 
   # Determine destination filename
   upload_dir = _sticker_upload_dir()
@@ -358,7 +358,7 @@ def add_sticker(
     return True, stored
   except Exception as exc:
     logger.exception("sticker_db: add failed chat_id=%s name=%s: %s", chat_id, normalized, exc)
-    return False, f"Gagal menyimpan sticker: {exc}"
+    return False, f"Failed to save sticker: {exc}"
 
 
 def add_lottie_sticker(
@@ -387,12 +387,12 @@ def add_lottie_sticker(
   normalized = normalize_name(name)
   if not is_valid_name(normalized):
     return False, (
-      f"Nama sticker tidak valid: *{name}*\n"
-      "Gunakan huruf kecil, angka, underscore, atau tanda minus (1-64 karakter)."
+      f"Invalid sticker name: *{name}*\n"
+      "Use lowercase letters, numbers, underscores, or hyphens (1-64 characters)."
     )
 
   if not lottie_payload_json or not lottie_payload_json.strip():
-    return False, "Lottie payload kosong."
+    return False, "Lottie payload is empty."
 
   def _do():
     conn = _get_conn()
@@ -424,7 +424,7 @@ def add_lottie_sticker(
     return True, "lottie"
   except Exception as exc:
     logger.exception("sticker_db: add_lottie failed chat_id=%s name=%s: %s", chat_id, normalized, exc)
-    return False, f"Gagal menyimpan sticker Lottie: {exc}"
+    return False, f"Failed to save Lottie sticker: {exc}"
 
 
 def get_sticker(chat_id: str, name: str) -> Optional[dict]:
@@ -524,10 +524,10 @@ def remove_sticker(chat_id: str, name: str) -> tuple[bool, str]:
     if found:
       logger.info("sticker_db: remove chat_id=%s name=%s", chat_id, normalized)
       return True, ""
-    return False, f"Sticker *{name}* tidak ditemukan untuk chat ini."
+    return False, f"Sticker *{name}* not found for this chat."
   except Exception as exc:
     logger.exception("sticker_db: remove failed chat_id=%s name=%s: %s", chat_id, normalized, exc)
-    return False, f"Gagal menghapus sticker: {exc}"
+    return False, f"Failed to remove sticker: {exc}"
 
 
 def close_connection() -> None:

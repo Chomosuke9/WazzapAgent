@@ -80,7 +80,7 @@ BOT_OWNER_JIDS=
 :::note
 Each owner can use either a phone JID or an LID. If the phone JID does not work, use `/info` to get the LID.
 
-[See the full LID guide here](/instalasi/cara-mendapatkan-lid).
+[See the full LID guide here](/installation/how-to-get-lid).
 :::
 
 ### 3. Install Dependencies
@@ -133,7 +133,7 @@ Add at least one AI model before using the bot. Without a model, the bot cannot 
 
 Steps:
 
-1. Make sure your number is registered as an owner. If not, [configure it first](/instalasi/cara-mendapatkan-lid).
+1. Make sure your number is registered as an owner. If not, [configure it first](/installation/how-to-get-lid).
 2. Send `/modelcfg add` to the bot with this format:
 
 ![model add](/img/slash_model_add.jpg)

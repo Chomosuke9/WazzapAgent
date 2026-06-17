@@ -1,27 +1,27 @@
 /**
- * /addsticker <nama> — Tambahkan sticker ke katalog bot untuk chat ini.
+ * /addsticker <name> — Add a sticker to the bot's catalog for this chat.
  *
- * Cara pakai:
- *   - Kirim sticker WhatsApp dengan caption  `/addsticker <nama>`
- *   - Atau reply ke sticker yang sudah ada dengan  `/addsticker <nama>`
+ * Usage:
+ *   - Send a WhatsApp sticker with the caption  `/addsticker <name>`
+ *   - Or reply to an existing sticker with  `/addsticker <name>`
  *
- * Izin:
- *   - Group : hanya admin grup atau bot owner
- *   - Private: siapa saja (pengecualian — private chat = owner langsung)
+ * Permissions:
+ *   - Group : group admin or bot owner only
+ *   - Private: anyone (exception — private chat = owner directly)
  *
- * Nama sticker:
- *   - Huruf kecil, angka, underscore (_), tanda minus (-), panjang 1–64 karakter
- *   - Contoh: "smile", "thumbs_up", "no-way"
+ * Sticker name:
+ *   - Lowercase letters, digits, underscore (_), minus (-), length 1–64 characters
+ *   - Example: "smile", "thumbs_up", "no-way"
  *
- * Stiker yang ditambahkan disimpan di DB terpisah (stickers.db) dan tersedia
- * HANYA untuk chat yang menambahkannya (isolasi per-chat).
+ * Added stickers are stored in a separate DB (stickers.db) and are available
+ * ONLY to the chat that added them (per-chat isolation).
  *
  * Lottie/premium stickers:
- *   Untuk sticker premium WhatsApp (lottieStickerMessage, mime: application/was),
- *   alih-alih mendownload dan menyimpan file .webp (yang kehilangan animasi),
- *   kita simpan payload JSON asli dari lottieStickerMessage. Saat bot mengirim
- *   kembali sticker ini, payload tersebut direlay verbatim via Baileys relayMessage
- *   sehingga animasi Lottie tetap terjaga.
+ *   For WhatsApp premium stickers (lottieStickerMessage, mime: application/was),
+ *   instead of downloading and storing a .webp file (which loses the animation),
+ *   we store the original JSON payload from lottieStickerMessage. When the bot
+ *   sends this sticker back, that payload is relayed verbatim via Baileys
+ *   relayMessage so the Lottie animation is preserved.
  */
 
 import path from 'path';
@@ -257,7 +257,7 @@ async function handleAddSticker({
   // 2. Permission check
   // ------------------------------------------------------------------
   if (isGlobal && !senderIsOwner) {
-    await reply('Hanya bot owner yang bisa menambahkan sticker global. ❌');
+    await reply('Only the bot owner can add global stickers. ❌');
     return;
   }
 
@@ -267,19 +267,19 @@ async function handleAddSticker({
   const rawName = nameArg.toLowerCase();
   if (!rawName) {
     await reply(
-      'Cara pakai: `/add-sticker <nama>`\n'
-      + 'Kirim/reply sticker dengan caption tersebut.\n\n'
-      + 'Nama harus huruf kecil, angka, underscore atau minus (maks 64 karakter).\n'
-      + 'Contoh: `/add-sticker senyum`\n\n'
-      + '_Owner only:_ `/add-sticker global <nama>` — tambahkan ke katalog global (semua chat).',
+      'Usage: `/add-sticker <name>`\n'
+      + 'Send/reply to a sticker with that caption.\n\n'
+      + 'The name must be lowercase letters, digits, underscore or minus (max 64 characters).\n'
+      + 'Example: `/add-sticker smile`\n\n'
+      + '_Owner only:_ `/add-sticker global <name>` — add to the global catalog (all chats).',
     );
     return;
   }
 
   if (!STICKER_NAME_RE.test(rawName)) {
     await reply(
-      `Nama sticker tidak valid: *${rawName}*\n`
-      + 'Gunakan huruf kecil, angka, underscore (_) atau tanda minus (-), 1–64 karakter.',
+      `Invalid sticker name: *${rawName}*\n`
+      + 'Use lowercase letters, digits, underscore (_) or minus (-), 1–64 characters.',
     );
     return;
   }
@@ -341,8 +341,8 @@ async function handleAddSticker({
 
   if (!stickerContent) {
     await reply(
-      'Tidak ada sticker yang ditemukan.\n'
-      + 'Kirim sticker dengan caption `/addsticker <nama>`, atau reply ke sticker dengan perintah tersebut.',
+      'No sticker found.\n'
+      + 'Send a sticker with the caption `/addsticker <name>`, or reply to a sticker with that command.',
     );
     return;
   }
@@ -365,16 +365,16 @@ async function handleAddSticker({
       );
 
       if (action === 'updated') {
-        await reply(`Sticker Lottie${globalLabel} *${rawName}* berhasil diperbarui! ✨✅`);
+        await reply(`Lottie sticker${globalLabel} *${rawName}* updated successfully! ✨✅`);
       } else {
         await reply(
-          `Sticker Lottie${globalLabel} *${rawName}* berhasil ditambahkan! ✨✅\n`
-          + 'Bot bisa menggunakan sticker animasi ini sepenuhnya.',
+          `Lottie sticker${globalLabel} *${rawName}* added successfully! ✨✅\n`
+          + 'The bot can use this animated sticker fully.',
         );
       }
     } catch (err: any) {
       logger.error({ err, chatId, name: rawName }, 'addsticker: lottie save failed');
-      await reply(`Gagal menyimpan sticker Lottie: ${err.message} ❌`);
+      await reply(`Failed to save Lottie sticker: ${err.message} ❌`);
     }
     return;
   }
@@ -384,7 +384,7 @@ async function handleAddSticker({
   try {
     tempPath = await downloadStickerToTemp(stickerContent, messageIdForFile, mediaDir);
     if (!tempPath) {
-      await reply('Gagal mengunduh sticker. Coba lagi nanti. ❌');
+      await reply('Failed to download the sticker. Try again later. ❌');
       return;
     }
 
@@ -397,13 +397,13 @@ async function handleAddSticker({
     );
 
     if (action === 'updated') {
-      await reply(`Sticker${globalLabel} *${rawName}* berhasil diperbarui! ✅`);
+      await reply(`Sticker${globalLabel} *${rawName}* updated successfully! ✅`);
     } else {
-      await reply(`Sticker${globalLabel} *${rawName}* berhasil ditambahkan! ✅\nBot sekarang bisa menggunakan sticker ini.`);
+      await reply(`Sticker${globalLabel} *${rawName}* added successfully! ✅\nThe bot can now use this sticker.`);
     }
   } catch (err: any) {
     logger.error({ err, chatId, name: rawName }, 'addsticker: failed');
-    await reply(`Gagal menyimpan sticker: ${err.message} ❌`);
+    await reply(`Failed to save sticker: ${err.message} ❌`);
   } finally {
     if (tempPath) {
       try { await fs.remove(tempPath); } catch { /* ignore */ }
@@ -415,7 +415,7 @@ export { handleAddSticker };
 
 export const addStickerCommand: CommandHandler = {
   commands: ["add-sticker", "addsticker", "addstickers", "add-stickers"],
-  description: "Tambahkan stiker ke katalog bot dengan membalas sebuah stiker dan menyebut namanya. Bot dapat mengirim stiker dari katalog ini menggunakan tool send_sticker. Gunakan /add-sticker global <nama> untuk menambah ke katalog global semua chat (khusus owner). Contoh: /add-sticker kucing lucu.",
+  description: "Add a sticker to the bot's catalog by replying to a sticker and naming it. The bot can send stickers from this catalog using the send_sticker tool. Use /add-sticker global <name> to add it to the global catalog for all chats (owner only). Example: /add-sticker funny cat.",
   permission: "isPrivate or isAdmin or isOwner",
   run: (_sock, _message, ctx) => handleAddSticker(ctx),
 };

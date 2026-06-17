@@ -9,7 +9,7 @@ WhatsApp now often identifies accounts with an LID (`user@lid`) instead of a pho
 ## Using `/info`
 
 :::note
-This method requires the bot to be online. If it is not running yet, start it from the [installation guide](/instalasi).
+This method requires the bot to be online. If it is not running yet, start it from the [installation guide](/installation).
 :::
 
 Send `/info` from the owner number. The response shows the current user IDs WhatsApp exposes for that account.

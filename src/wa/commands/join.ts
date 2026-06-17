@@ -33,7 +33,7 @@ function errorToken(err: any): { text: string; status: number | null } {
 }
 
 /**
- * Map a /join failure to a friendly Indonesian message. Falls back to a
+ * Map a /join failure to a friendly English message. Falls back to a
  * generic message (without leaking the raw error) for unknown failures.
  */
 function joinErrorMessage(err: any): string {
@@ -42,24 +42,24 @@ function joinErrorMessage(err: any): string {
   const has = (...tokens: string[]) => tokens.some((t) => text.includes(t));
 
   if (has("not-authorized", "not authorized", "forbidden") || status === 401 || status === 403) {
-    return "Gagal masuk grup: bot tidak diizinkan masuk lewat link ini (kemungkinan bot pernah dikeluarkan). Minta admin grup menambahkan bot secara manual.";
+    return "Failed to join the group: the bot is not allowed in via this link (it may have been removed before). Ask a group admin to add the bot manually.";
   }
   if (has("gone", "item-not-found", "not-found", "not found") || status === 404) {
-    return "Gagal masuk grup: link tidak valid atau sudah direset. Pastikan link benar atau minta link undangan yang baru.";
+    return "Failed to join the group: the link is invalid or has been reset. Make sure the link is correct or ask for a new invite link.";
   }
   if (has("conflict", "already") || status === 409) {
-    return "Gagal masuk grup: bot sudah berada di grup ini.";
+    return "Failed to join the group: the bot is already in this group.";
   }
   if (has("rate-overlimit", "rate overlimit", "too many", "rate-limit", "rate limit") || status === 429) {
-    return "Gagal masuk grup: terlalu banyak permintaan. Coba lagi beberapa saat lagi.";
+    return "Failed to join the group: too many requests. Try again in a little while.";
   }
   if (has("timed out", "timeout")) {
-    return "Gagal masuk grup: waktu permintaan habis. Periksa koneksi lalu coba lagi.";
+    return "Failed to join the group: the request timed out. Check your connection and try again.";
   }
   if (has("full", "participant-limit", "size")) {
-    return "Gagal masuk grup: grup sudah penuh.";
+    return "Failed to join the group: the group is full.";
   }
-  return "Gagal masuk grup. Pastikan link undangan masih valid dan coba lagi. Jika tetap gagal, minta admin grup menambahkan bot secara manual.";
+  return "Failed to join the group. Make sure the invite link is still valid and try again. If it keeps failing, ask a group admin to add the bot manually.";
 }
 
 async function handleJoinCommand({ chatId, senderId, args, sock }: CommandContext): Promise<void> {
@@ -67,7 +67,7 @@ async function handleJoinCommand({ chatId, senderId, args, sock }: CommandContex
   if (!input) {
     try {
       await sock.sendMessage(chatId, {
-        text: "Penggunaan: `/join` <link undangan atau kode>\nContoh: `/join` https://chat.whatsapp.com/ABC123",
+        text: "Usage: `/join` <invite link or code>\nExample: `/join` https://chat.whatsapp.com/ABC123",
       });
     } catch (e) {
       /* ignore */
@@ -82,8 +82,8 @@ async function handleJoinCommand({ chatId, senderId, args, sock }: CommandContex
   try {
     const groupId = await sock.groupAcceptInvite(inviteCode);
     const reply = groupId
-      ? `Berhasil masuk grup. Group ID: ${groupId}`
-      : "Berhasil masuk grup.";
+      ? `Successfully joined the group. Group ID: ${groupId}`
+      : "Successfully joined the group.";
     await sock.sendMessage(chatId, { text: reply });
     logger.info({ chatId, senderId, inviteCode, groupId }, "/join success");
   } catch (err: any) {
@@ -100,7 +100,7 @@ export { handleJoinCommand, joinErrorMessage };
 
 export const joinCommand: CommandHandler = {
   commands: ["join", "joins"],
-  description: "Perintahkan bot untuk bergabung ke grup WhatsApp menggunakan link undangan. Bot akan join atas namanya sendiri. Contoh: /join https://chat.whatsapp.com/AbCdEfGhIjK.",
+  description: "Tell the bot to join a WhatsApp group using an invite link. The bot joins on its own behalf. Example: /join https://chat.whatsapp.com/AbCdEfGhIjK.",
   permission: "public",
   run: (_sock, _message, ctx) => handleJoinCommand(ctx),
 };

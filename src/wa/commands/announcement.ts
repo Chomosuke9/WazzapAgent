@@ -82,7 +82,7 @@ export { handleAnnouncement };
 
 export const announcementCommand: CommandHandler = {
   commands: ["announcement", "announcements"],
-  description: "Kirim pesan pengumuman ke seluruh anggota grup dengan mention @all. Tanpa argumen menampilkan status on/off saat ini. Contoh: /announcement Rapat malam ini jam 20.00 WIB.",
+  description: "Send an announcement message to all group members with an @all mention. Without arguments it shows the current on/off status. Example: /announcement Meeting tonight at 8 PM.",
   permission: "isGroup and (isAdmin or isOwner)",
   run: (_sock, _message, ctx) => handleAnnouncement(ctx),
 };

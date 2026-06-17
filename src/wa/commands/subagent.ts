@@ -79,7 +79,7 @@ export { handleSubagent };
 
 export const subagentCommand: CommandHandler = {
   commands: ["subagent", "subagents"],
-  description: "Aktifkan atau nonaktifkan sub-agent untuk chat ini. Sub-agent memungkinkan bot mendelegasikan tugas kompleks ke layanan eksternal (WazzapSubAgents). Perlu SUBAGENT_URL dikonfigurasi. Contoh: /subagent on.",
+  description: "Enable or disable the sub-agent for this chat. The sub-agent lets the bot delegate complex tasks to an external service (WazzapSubAgents). Requires SUBAGENT_URL to be configured. Example: /subagent on.",
   permission: "isOwner",
   run: (_sock, _message, ctx) => handleSubagent(ctx),
 };

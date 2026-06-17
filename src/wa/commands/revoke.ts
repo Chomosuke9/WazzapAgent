@@ -6,7 +6,7 @@ async function handleRevoke({ chatId, args, sock, repos }: CommandContext): Prom
 
   if (!idStr) {
     try {
-      await sock.sendMessage(chatId, { text: 'Penggunaan: /revoke <id>\n\nGunakan /monitor untuk melihat daftar ID kode aktivasi.' });
+      await sock.sendMessage(chatId, { text: 'Usage: /revoke <id>\n\nUse /monitor to see the list of activation code IDs.' });
     } catch (err) { /* ignore */ }
     return;
   }
@@ -14,7 +14,7 @@ async function handleRevoke({ chatId, args, sock, repos }: CommandContext): Prom
   const id = parseInt(idStr, 10);
   if (isNaN(id) || id <= 0) {
     try {
-      await sock.sendMessage(chatId, { text: 'ID harus berupa angka positif. Gunakan /monitor untuk melihat daftar ID.' });
+      await sock.sendMessage(chatId, { text: 'The ID must be a positive number. Use /monitor to see the list of IDs.' });
     } catch (err) { /* ignore */ }
     return;
   }
@@ -23,9 +23,9 @@ async function handleRevoke({ chatId, args, sock, repos }: CommandContext): Prom
 
   try {
     if (result.success) {
-      let msg = `Kode aktivasi #${id} berhasil dicabut.`;
+      let msg = `Activation code #${id} revoked successfully.`;
       if (result.wasUsed) {
-        msg += '\nKode sudah dipakai oleh chat yang sekarang juga kehilangan akses.';
+        msg += '\nThe code was already used by a chat, which now loses access too.';
       }
       await sock.sendMessage(chatId, { text: msg });
     } else {
@@ -40,7 +40,7 @@ export { handleRevoke };
 
 export const revokeCommand: CommandHandler = {
   commands: ["revoke"],
-  description: "Cabut link undangan grup saat ini dan buat link baru yang fresh. Berguna ketika link lama bocor atau disebar sembarangan. Opsional: ulangi beberapa kali. Contoh: /revoke 3.",
+  description: "Revoke the current group invite link and generate a fresh one. Useful when the old link has leaked or been shared carelessly. Optional: repeat several times. Example: /revoke 3.",
   permission: "owner",
   run: (_sock, _message, ctx) => handleRevoke(ctx),
 };

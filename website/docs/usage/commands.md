@@ -227,7 +227,7 @@ Tells the bot to **join a group** via an invite link. The bot joins under its ow
 
 ## `/lid`
 
-Fetches the **LID** (WhatsApp's internal identifier) for a number. Useful for populating `BOT_OWNER_JIDS`. See [How to get a LID](../instalasi/cara-mendapatkan-lid.md) for the full guide.
+Fetches the **LID** (WhatsApp's internal identifier) for a number. Useful for populating `BOT_OWNER_JIDS`. See [How to get a LID](../installation/how-to-get-lid.md) for the full guide.
 
 ```
 /lid 628123456789

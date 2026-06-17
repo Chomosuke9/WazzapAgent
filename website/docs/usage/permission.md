@@ -39,7 +39,7 @@ Can only be used in **groups**. Only **group admins** can change permissions.
 ## Recommended Workflow
 
 1. **Make the bot an admin** first
-2. **Set a moderator prompt** (see [Prompt Examples](/penggunaan/contoh-prompt))
+2. **Set a moderator prompt** (see [Prompt Examples](/usage/prompt-examples))
 3. **Test in a testing group** starting from level 1
 4. Increase the level once you're confident the bot behaves correctly
 

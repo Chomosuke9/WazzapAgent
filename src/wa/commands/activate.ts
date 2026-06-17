@@ -6,7 +6,7 @@ async function handleActivate({ chatId, chatType, args, sock, repos }: CommandCo
 
   if (!code) {
     try {
-      await sock.sendMessage(chatId, { text: 'Penggunaan: /activate <kode>' });
+      await sock.sendMessage(chatId, { text: 'Usage: /activate <code>' });
     } catch (err) { /* ignore */ }
     return;
   }
@@ -24,7 +24,7 @@ export { handleActivate };
 
 export const activateCommand: CommandHandler = {
   commands: ["activate"],
-  description: "Aktifkan chat ini menggunakan kode aktivasi yang diberikan oleh owner. Setelah diaktifkan, bot akan merespon pesan di chat ini. Contoh: /activate WA-ABC12345.",
+  description: "Activate this chat using the activation code provided by the owner. Once activated, the bot will respond to messages in this chat. Example: /activate WA-ABC12345.",
   permission: "public",
   run: (_sock, _message, ctx) => handleActivate(ctx),
 };

@@ -120,7 +120,7 @@ export { handlePermission };
 
 export const permissionCommand: CommandHandler = {
   commands: ["permission", "permissions"],
-  description: "Atur level izin moderasi untuk chat ini. Level 0 = tidak ada moderasi; level 1 = bot bisa hapus pesan; level 2 = + mute anggota; level 3 = + kick anggota. Tanpa argumen menampilkan level saat ini. Contoh: /permission 2.",
+  description: "Set the moderation permission level for this chat. Level 0 = no moderation; level 1 = bot can delete messages; level 2 = + mute members; level 3 = + kick members. Without arguments it shows the current level. Example: /permission 2.",
   permission: "isGroup and (isAdmin or isOwner)",
   run: (_sock, _message, ctx) => handlePermission(ctx),
 };

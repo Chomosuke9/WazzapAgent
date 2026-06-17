@@ -5,7 +5,7 @@ import type { CommandContext, CommandHandler } from '../command/CommandContext.j
 async function handleCatch({ chatId, quotedMessageId, account, sock }: CommandContext): Promise<void> {
   if (!quotedMessageId) {
     try {
-      await sock.sendMessage(chatId, { text: 'Balas ke pesan yang ingin di-catch, lalu ketik `/catch`.' });
+      await sock.sendMessage(chatId, { text: 'Reply to the message you want to catch, then type `/catch`.' });
     } catch (err) {
       logger.warn({ err, chatId }, 'failed sending /catch usage hint');
     }
@@ -19,7 +19,7 @@ async function handleCatch({ chatId, quotedMessageId, account, sock }: CommandCo
 
   if (!cachedMsg || !cachedMsg.message) {
     try {
-      await sock.sendMessage(chatId, { text: 'Pesan tidak ditemukan di cache. Coba balas ke pesan yang lebih baru.' });
+      await sock.sendMessage(chatId, { text: 'Message not found in cache. Try replying to a more recent message.' });
     } catch (err) {
       logger.warn({ err, chatId, quotedMessageId }, 'failed sending /catch not-found hint');
     }
@@ -37,7 +37,7 @@ async function handleCatch({ chatId, quotedMessageId, account, sock }: CommandCo
       await sock.sendMessage(chatId, { text: `\`\`\`json\n${truncated}\n\`\`\`` });
     } catch (e) {
       try {
-        await sock.sendMessage(chatId, { text: 'Gagal mengirim payload: terlalu panjang atau terjadi kesalahan.' });
+        await sock.sendMessage(chatId, { text: 'Failed to send payload: too long or an error occurred.' });
       } catch (e2) {
         logger.warn({ err: e2, chatId }, 'failed sending /catch fallback');
       }
@@ -49,7 +49,7 @@ export { handleCatch };
 
 export const catchCommand: CommandHandler = {
   commands: ["catch", "catches"],
-  description: "Tandai pesan yang kamu balas agar dapat diproses ulang oleh bot. Berguna ketika bot perlu menganalisis ulang pesan tertentu tanpa harus mengirim ulang.",
+  description: "Mark a message you reply to so the bot can reprocess it. Useful when the bot needs to re-analyze a specific message without resending it.",
   permission: "public",
   run: (_sock, _message, ctx) => handleCatch(ctx),
 };

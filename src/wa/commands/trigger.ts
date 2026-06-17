@@ -150,7 +150,7 @@ export { handleTrigger };
 
 export const triggerCommand: CommandHandler = {
   commands: ["trigger", "triggers"],
-  description: "Konfigurasi pemicu respon prefix di mode prefix/hybrid. Jenis pemicu: tag (di-mention), tagall (saat @all), reply (membalas pesan bot), name (menyebut nama bot), join (anggota baru bergabung). Contoh: /trigger reply on.",
+  description: "Configure the prefix response triggers in prefix/hybrid mode. Trigger types: tag (mentioned), tagall (on @all), reply (replying to a bot message), name (bot name mentioned), join (a new member joins). Example: /trigger reply on.",
   permission: "isGroup and (isAdmin or isOwner)",
   run: (_sock, _message, ctx) => handleTrigger(ctx),
 };

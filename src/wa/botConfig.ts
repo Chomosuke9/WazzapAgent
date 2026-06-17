@@ -15,7 +15,7 @@ export const BOT_CONFIG_KEYS = {
 } as const;
 
 export const DEFAULT_ACTIVATION_MESSAGE =
-  "Bot ini belum diaktifkan untuk chat ini. Minta kode aktivasi ke owner, lalu kirim:\n/activate <kode>";
+  "This bot hasn't been activated for this chat yet. Request an activation code from the owner, then send:\n/activate <code>";
 
 /** Resolve the activation notice text (owner override or the built-in default). */
 export function getActivationMessage(repos: AccountRepositories): string {

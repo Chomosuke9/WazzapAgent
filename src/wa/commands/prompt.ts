@@ -197,7 +197,7 @@ export { handlePrompt, rewritePromptMentions };
 
 export const promptCommand: CommandHandler = {
   commands: ["prompt", "prompts"],
-  description: "Atur instruksi atau kepribadian bot khusus untuk chat ini (system prompt). Tanpa argumen menampilkan prompt saat ini. Gunakan /prompt clear untuk menghapus. Contoh: /prompt Jawab dengan singkat, sopan, dan dalam bahasa Indonesia.",
+  description: "Set a custom instruction or personality for the bot in this chat (system prompt). Without arguments it shows the current prompt. Use /prompt clear to remove it. Example: /prompt Reply concisely, politely, and in English.",
   permission: "isPrivate or isAdmin or isOwner",
   run: (_sock, _message, ctx) => handlePrompt(ctx),
 };

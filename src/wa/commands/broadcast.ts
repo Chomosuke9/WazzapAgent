@@ -214,7 +214,7 @@ export { handleBroadcastCommand, reconstructAndSend };
 
 export const broadcastCommand: CommandHandler = {
   commands: ["broadcast", "broadcasts"],
-  description: "Kirim pesan siaran ke semua grup tempat bot berada (khusus owner). Contoh: /broadcast Halo semua.",
+  description: "Send a broadcast message to all groups the bot is in (owner only). Example: /broadcast Hello everyone.",
   isHidden: true,
   permission: "isOwner",
   run: (_sock, _message, ctx) => handleBroadcastCommand(ctx),

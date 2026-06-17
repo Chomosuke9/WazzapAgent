@@ -23,7 +23,7 @@ export { handleDump };
 export const dumpCommand: CommandHandler = {
   commands: ["dump"],
   description:
-    "Ekspor konteks LLM lengkap (system prompt, deskripsi grup, state chat, riwayat, dan pesan saat ini) sebagai berkas .txt.",
+    "Export the full LLM context (system prompt, group description, chat state, history, and current message) as a .txt file.",
   permission: "public",
   run: (_sock, _message, ctx) => handleDump(ctx),
 };

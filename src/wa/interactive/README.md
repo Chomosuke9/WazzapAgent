@@ -1,29 +1,30 @@
 # Interactive Messages — Implementation Notes
 
-> **Baca ini dulu sebelum menyentuh file apapun di folder ini.**
-> Dokumen ini merangkum semua hal penting yang ditemukan saat mengimplementasikan
-> pesan interaktif WhatsApp di Baileys v7. Banyak hal di sini **tidak terdokumentasi**
-> secara resmi dan hanya ditemukan melalui riset dan trial-error.
+> **Read this first before touching any file in this folder.**
+> This document summarizes everything important discovered while implementing
+> WhatsApp interactive messages in Baileys v7. Much of what's here is **not
+> officially documented** and was only found through research and trial-and-error.
 
 ---
 
-## Daftar File
+## File List
 
-| File | Isi |
+| File | Contents |
 |------|-----|
 | `sendInteractive.js` | Core helper + NativeFlow functions (quick reply, URL, copy, call, list, combined, rich) |
 | `sendButtons.js` | Legacy button formats (ButtonsMessage, TemplateMessage) |
 | `sendCarousel.js` | Carousel / swipeable cards |
-| `index.js` | Barrel re-export semua fungsi publik |
+| `index.js` | Barrel re-export of all public functions |
 
 ---
 
-## Bagaimana Cara Kerjanya (Wajib Dibaca)
+## How It Works (Must Read)
 
-### 1. Jangan pakai `sock.sendMessage` untuk `interactiveMessage`
+### 1. Don't use `sock.sendMessage` for `interactiveMessage`
 
-`sock.sendMessage` melewati `prepareWAMessageMedia` yang tidak mendukung `interactiveMessage`
-dan akan throw `"Invalid media type"`. Semua interactive message **harus** menggunakan:
+`sock.sendMessage` goes through `prepareWAMessageMedia`, which doesn't support
+`interactiveMessage` and will throw `"Invalid media type"`. Every interactive
+message **must** use:
 
 ```js
 import { generateWAMessageFromContent, proto } from 'baileys';
@@ -32,9 +33,9 @@ const msg = generateWAMessageFromContent(jid, { /* content */ }, { userJid: sock
 await sock.relayMessage(jid, msg.message, { messageId: msg.key.id, additionalNodes: [...] });
 ```
 
-### 2. Wrapper proto yang benar
+### 2. The correct proto wrapper
 
-Semua `interactiveMessage` harus dibungkus dalam:
+Every `interactiveMessage` must be wrapped in:
 
 ```js
 {
@@ -50,36 +51,36 @@ Semua `interactiveMessage` harus dibungkus dalam:
 }
 ```
 
-**Jangan** langsung taruh `interactiveMessage` di level atas — tidak akan dirender.
+**Don't** put `interactiveMessage` at the top level directly — it won't render.
 
-### 3. `proto.create()`, bukan `.fromObject()`
+### 3. `proto.create()`, not `.fromObject()`
 
-Baileys v7 **menghapus** `.fromObject()` dari tipe `InteractiveMessage` dan subtipe-nya.
-Untuk `InteractiveMessage` dan turunannya, selalu gunakan `.create()`. Catatan: `ButtonsMessage`
-dan `TemplateMessage` (di `sendButtons.js`) **masih** menggunakan `.fromObject()` dan tetap
-berfungsi.
+Baileys v7 **removed** `.fromObject()` from the `InteractiveMessage` type and its
+subtypes. For `InteractiveMessage` and its descendants, always use `.create()`.
+Note: `ButtonsMessage` and `TemplateMessage` (in `sendButtons.js`) **still** use
+`.fromObject()` and continue to work.
 
 ```js
-// ✅ Benar (InteractiveMessage)
+// ✅ Correct (InteractiveMessage)
 proto.Message.InteractiveMessage.create({ ... })
 proto.Message.InteractiveMessage.Header.create({ ... })
 proto.Message.InteractiveMessage.Body.create({ text: '...' })
 proto.Message.InteractiveMessage.NativeFlowMessage.create({ buttons: [...] })
 
-// ❌ Salah — akan throw di Baileys v7
+// ❌ Wrong — throws in Baileys v7
 proto.Message.InteractiveMessage.fromObject({ ... })
 
-// ✅ Masih valid (ButtonsMessage / TemplateMessage — legacy)
+// ✅ Still valid (ButtonsMessage / TemplateMessage — legacy)
 proto.Message.ButtonsMessage.fromObject({ ... })
 proto.Message.TemplateMessage.fromObject({ ... })
 ```
 
-### 4. Binary nodes (`additionalNodes`) — WAJIB
+### 4. Binary nodes (`additionalNodes`) — REQUIRED
 
-Tanpa `additionalNodes` yang benar, WhatsApp akan menampilkan:
-> *"Anda telah menerima pesan, tetapi versi WhatsApp anda tidak mendukungnya."*
+Without the correct `additionalNodes`, WhatsApp will display:
+> *"You received a message, but your version of WhatsApp doesn't support it."*
 
-Struktur yang benar (berlaku untuk **semua** tipe interactive message termasuk carousel):
+The correct structure (applies to **all** interactive message types including carousel):
 
 ```js
 function buildInteractiveNodes(jid, badge = true) {
@@ -90,143 +91,143 @@ function buildInteractiveNodes(jid, badge = true) {
       content: [
         {
           tag: 'interactive',
-          attrs: { type: 'native_flow', v: '1' },   // SELALU native_flow
+          attrs: { type: 'native_flow', v: '1' },   // ALWAYS native_flow
           content: [
-            { tag: 'native_flow', attrs: { v: '9', name: 'mixed' } }, // child WAJIB ada
+            { tag: 'native_flow', attrs: { v: '9', name: 'mixed' } }, // child is REQUIRED
           ],
         },
       ],
     },
   ];
   if (badge && !isJidGroup(jid)) {
-    nodes.push({ tag: 'bot', attrs: { biz_bot: '1' } }); // badge AI — private chat only
+    nodes.push({ tag: 'bot', attrs: { biz_bot: '1' } }); // AI badge — private chat only
   }
   return nodes;
 }
 ```
 
-**Hal-hal penting:**
-- `type` di `interactive` attrs selalu `'native_flow'` — bahkan untuk carousel
-- Child node `native_flow` dengan `v: '9'` dan `name: 'mixed'` **harus ada** di dalam `interactive`
-- Node `bot` (`biz_bot: '1'`) hanya untuk private chat (bukan `@g.us`) — ini yang menciptakan badge AI
-- Carousel sempat dicoba dengan `type: 'carousel'` → **error 479**, tidak bekerja
+**Important points:**
+- `type` in the `interactive` attrs is always `'native_flow'` — even for carousel
+- The `native_flow` child node with `v: '9'` and `name: 'mixed'` **must be present** inside `interactive`
+- The `bot` node (`biz_bot: '1'`) is only for private chats (not `@g.us`) — this is what creates the AI badge
+- Carousel was tried with `type: 'carousel'` → **error 479**, doesn't work
 
-### 5. Error codes yang relevan
+### 5. Relevant error codes
 
-| Error | Artinya |
+| Error | Meaning |
 |-------|---------|
-| `"Invalid media type"` | Pakai `sock.sendMessage` untuk `interactiveMessage` — ganti ke `relayMessage` |
-| Pesan "versi tidak didukung" | `additionalNodes` salah/tidak ada |
-| Error 479 (ACK) | Struktur binary stanza tidak valid di server — paling sering: tipe node salah, atau field proto hilang |
+| `"Invalid media type"` | Using `sock.sendMessage` for `interactiveMessage` — switch to `relayMessage` |
+| "version not supported" message | `additionalNodes` is wrong/missing |
+| Error 479 (ACK) | Invalid binary stanza structure on the server — most often: wrong node type, or a missing proto field |
 
 ---
 
-## Fungsi-Fungsi yang Tersedia
+## Available Functions
 
-### `sendRichMessage(sock, jid, options)` — Fungsi Utama / Universal
+### `sendRichMessage(sock, jid, options)` — Main / Universal Function
 
-Kirim pesan styled dengan footer, header opsional, dan tombol opsional.
-Ini adalah fungsi paling fleksibel — gunakan ini sebagai default untuk pesan bot.
+Send a styled message with a footer, optional header, and optional buttons.
+This is the most flexible function — use it as the default for bot messages.
 
 ```js
-// Pesan teks biasa dengan footer AI
+// Plain text message with an AI footer
 await sendRichMessage(sock, jid, {
-  text: 'Halo!',
-  footer: 'Pesan ini dibuat oleh AI',
+  text: 'Hello!',
+  footer: 'This message was generated by AI',
 });
 
-// Dengan header (title) dan tombol
+// With a header (title) and buttons
 await sendRichMessage(sock, jid, {
-  title: 'Konfirmasi',
-  text: 'Lanjutkan pesanan?',
-  footer: 'Tap tombol di bawah',
+  title: 'Confirm',
+  text: 'Continue with the order?',
+  footer: 'Tap the button below',
   buttons: [
-    { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Ya', id: 'yes' }) },
-    { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Tidak', id: 'no' }) },
+    { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Yes', id: 'yes' }) },
+    { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'No', id: 'no' }) },
   ],
 });
 
-// Dengan image header
+// With an image header
 await sendRichMessage(sock, jid, {
   image: { url: 'https://example.com/img.jpg' },
-  title: 'Produk A',
-  text: 'Deskripsi produk',
+  title: 'Product A',
+  text: 'Product description',
   footer: 'Rp 100.000',
 });
 
-// Tanpa badge AI (misalnya untuk broadcast)
-await sendRichMessage(sock, jid, { text: 'Halo', footer: 'Broadcast 📢', badge: false });
+// Without the AI badge (e.g. for broadcasts)
+await sendRichMessage(sock, jid, { text: 'Hello', footer: 'Broadcast 📢', badge: false });
 
-// Dengan @mentions
+// With @mentions
 await sendRichMessage(sock, jid, {
-  text: 'Halo @628123456789!',
+  text: 'Hello @628123456789!',
   footer: 'Bot',
   mentions: ['628123456789@s.whatsapp.net'],
 });
 ```
 
-**Catatan tentang `title` tanpa media:**
-`Header.title` di proto mungkin tidak dirender secara visual oleh WhatsApp jika tidak ada
-image/video. Jika ingin header yang pasti terlihat tanpa media, pertimbangkan
-untuk memasukkan teks judul langsung ke `text` dengan formatting (`*bold*`).
+**Note about `title` without media:**
+`Header.title` in the proto may not be rendered visually by WhatsApp when there's
+no image/video. If you want a header that's definitely visible without media,
+consider putting the title text directly into `text` with formatting (`*bold*`).
 
-**`subtitle`:** `sendRichMessage` mendukung `options.subtitle` (`sendInteractive.js:341`)
-yang akan muncul di bawah `title` di header. Kombinasi `title` + `subtitle` memberi efek
-judul dan deskripsi singkat tanpa perlu media.
+**`subtitle`:** `sendRichMessage` supports `options.subtitle` (`sendInteractive.js:341`)
+which appears below `title` in the header. The `title` + `subtitle` combination gives
+the effect of a title and a short description without needing media.
 
 ### `sendQuickReply(sock, jid, body, buttons, options)`
 
 ```js
-await sendQuickReply(sock, jid, 'Pilih menu:', [
-  { id: 'menu_1', displayText: 'Produk' },
-  { id: 'menu_2', displayText: 'Hubungi CS' },
+await sendQuickReply(sock, jid, 'Choose a menu:', [
+  { id: 'menu_1', displayText: 'Products' },
+  { id: 'menu_2', displayText: 'Contact Support' },
 ], { title: 'Menu', footer: 'Bot v1' });
 ```
 
 ### `sendUrlButtons(sock, jid, body, buttons, options)`
 
 ```js
-await sendUrlButtons(sock, jid, 'Kunjungi kami:', [
+await sendUrlButtons(sock, jid, 'Visit us:', [
   { displayText: 'Website', url: 'https://example.com' },
 ]);
 ```
 
-**Catatan:** `sendUrlButtons` **tidak** meneruskan `options.mentions` ke `_sendInteractive`.
-Mention tidak didukung untuk tipe tombol URL.
+**Note:** `sendUrlButtons` does **not** pass `options.mentions` to `_sendInteractive`.
+Mentions are not supported for URL button types.
 
 ### `sendCopyCode(sock, jid, body, copyCode, displayText, options)`
 
 ```js
-await sendCopyCode(sock, jid, 'Kode promo:', 'PROMO2024', 'Salin Kode');
+await sendCopyCode(sock, jid, 'Promo code:', 'PROMO2024', 'Copy Code');
 ```
 
 ### `sendCombinedButtons(sock, jid, body, buttons, options)`
 
-Campurkan berbagai tipe tombol dalam satu pesan:
+Mix different button types in a single message:
 
-**Catatan:** `sendCombinedButtons` **tidak** meneruskan `options.mentions` ke `_sendInteractive`.
-Untuk mention di pesan dengan tombol, gunakan `sendRichMessage` atau `sendQuickReply`.
+**Note:** `sendCombinedButtons` does **not** pass `options.mentions` to `_sendInteractive`.
+For mentions in a message with buttons, use `sendRichMessage` or `sendQuickReply`.
 
 ```js
-await sendCombinedButtons(sock, jid, 'Pilih aksi:', [
-  { type: 'reply', displayText: 'Konfirmasi', id: 'confirm' },
-  { type: 'url',   displayText: 'Detail', url: 'https://example.com' },
-  { type: 'copy',  displayText: 'Salin', copyCode: 'CODE123' },
-  { type: 'call',  displayText: 'Telepon', phoneNumber: '+6281234567890' },
+await sendCombinedButtons(sock, jid, 'Choose an action:', [
+  { type: 'reply', displayText: 'Confirm', id: 'confirm' },
+  { type: 'url',   displayText: 'Details', url: 'https://example.com' },
+  { type: 'copy',  displayText: 'Copy', copyCode: 'CODE123' },
+  { type: 'call',  displayText: 'Call', phoneNumber: '+6281234567890' },
 ]);
 ```
 
 ### `sendNativeFlow(sock, jid, body, buttons, options)`
 
-Raw NativeFlow — untuk tombol tipe lain (`single_select`, dll.) dengan format pre-built:
+Raw NativeFlow — for other button types (`single_select`, etc.) with a pre-built format:
 
 ```js
-await sendNativeFlow(sock, jid, 'Pilih opsi:', [
+await sendNativeFlow(sock, jid, 'Choose an option:', [
   {
     name: 'single_select',
     buttonParamsJson: JSON.stringify({
-      title: 'Pilih',
-      sections: [{ title: 'Kategori', rows: [{ title: 'Item', id: 'item1' }] }],
+      title: 'Choose',
+      sections: [{ title: 'Category', rows: [{ title: 'Item', id: 'item1' }] }],
     }),
   },
 ]);
@@ -234,87 +235,87 @@ await sendNativeFlow(sock, jid, 'Pilih opsi:', [
 
 ### `sendList(sock, jid, content, options)`
 
-List/dropdown menggunakan `listMessage` via `sock.sendMessage` biasa (bukan interactive):
+List/dropdown using `listMessage` via the regular `sock.sendMessage` (not interactive):
 
 ```js
 await sendList(sock, jid, {
   title: 'Menu',
-  buttonText: 'Buka Daftar',
-  description: 'Tap untuk melihat pilihan',
-  footer: 'Pilih satu item',
+  buttonText: 'Open List',
+  description: 'Tap to see the options',
+  footer: 'Choose one item',
   sections: [{
-    title: 'Kategori',
-    rows: [{ rowId: 'item1', title: 'Item 1', description: 'Deskripsi' }],
+    title: 'Category',
+    rows: [{ rowId: 'item1', title: 'Item 1', description: 'Description' }],
   }],
 });
 ```
 
-**Catatan tentang `selectedRowId`:** Lokasi `selectedRowId` berbeda tergantung bagaimana
-user memilih item:
+**Note about `selectedRowId`:** The location of `selectedRowId` differs depending on how
+the user selected the item:
 
-| Skenario | Path `selectedRowId` |
+| Scenario | `selectedRowId` path |
 |----------|----------------------|
-| User pakai **list** (`listResponseMessage`) | `msg.message.listResponseMessage.singleSelectReply.selectedRowId` |
-| User pakai **interactive** (`interactiveResponseMessage`) — terjadi di beberapa versi WA Mobile | `msg.message.interactiveResponseMessage.singleSelectReply.selectedRowId` |
+| User uses a **list** (`listResponseMessage`) | `msg.message.listResponseMessage.singleSelectReply.selectedRowId` |
+| User uses **interactive** (`interactiveResponseMessage`) — happens on some WA Mobile versions | `msg.message.interactiveResponseMessage.singleSelectReply.selectedRowId` |
 
-Kode parsing harus mengecek **kedua** lokasi:
+The parsing code must check **both** locations:
 
 ```js
-// src/messageParser.js — pola yang benar
+// src/messageParser.js — the correct pattern
 const selectedRowId =
   listResponse?.singleSelectReply?.selectedRowId ||
   interactiveResponse?.singleSelectReply?.selectedRowId;
 ```
 
-Fallback ke `interactiveResponseMessage` penting karena WhatsApp Mobile terkadang
-mengirim response sebagai `interactiveResponseMessage` meskipun message aslinya adalah
-`listMessage`. Ini adalah inkonsistensi dari pihak WhatsApp, bukan bug kode.
+The fallback to `interactiveResponseMessage` is important because WhatsApp Mobile sometimes
+sends the response as `interactiveResponseMessage` even though the original message was a
+`listMessage`. This is an inconsistency on WhatsApp's side, not a code bug.
 
-### `sendCarousel(sock, jid, cards, options)` — ⚠️ Eksperimental
+### `sendCarousel(sock, jid, cards, options)` — ⚠️ Experimental
 
-Carousel / swipeable cards. **Status: error 479 saat pengiriman, belum resolved.**
+Carousel / swipeable cards. **Status: error 479 on send, not yet resolved.**
 
 ```js
 await sendCarousel(sock, jid, [
   {
     image: { url: 'https://example.com/img.jpg' },
-    title: 'Kartu 1',
-    body: 'Deskripsi kartu 1',
+    title: 'Card 1',
+    body: 'Description of card 1',
     footer: 'Footer',
-    buttons: [{ name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Pilih', id: 'c1' }) }],
+    buttons: [{ name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Choose', id: 'c1' }) }],
   },
-], { title: 'Produk Unggulan', text: 'Swipe untuk lihat lebih' });
+], { title: 'Featured Products', text: 'Swipe to see more' });
 ```
 
-**Investigasi error 479 (sejauh ini):**
+**Error 479 investigation (so far):**
 
-| Pendekatan | Hasil |
+| Approach | Result |
 |------------|-------|
- | `type: 'carousel'` di node `interactive` attrs | ❌ Error 479 — server tolak |
- | Tetap pakai `type: 'native_flow'` dengan `carouselMessage` di proto | ❌ Error 479 — tetap gagal |
- | Hanya 1 card (bukan multiple) | ❌ Error 479 |
- | Tanpa image header di cards (body-only) | ❌ Error 479 |
+ | `type: 'carousel'` in the `interactive` node attrs | ❌ Error 479 — server rejects |
+ | Keep `type: 'native_flow'` with `carouselMessage` in the proto | ❌ Error 479 — still fails |
+ | Only 1 card (not multiple) | ❌ Error 479 |
+ | No image header in cards (body-only) | ❌ Error 479 |
  | `messageVersion: 1` vs `messageVersion: 2` | ❌ Error 479 |
- | Tanpa buttons di cards | ❌ Error 479 |
+ | No buttons in cards | ❌ Error 479 |
 
-**Kesimpulan sementara:** Error 479 kemungkinan berasal dari:
-1. **Server-side restrictions** — WhatsApp mungkin membatasi carousel hanya untuk business API resmi, bukan di web gateway
-2. **Binary stanza structure** — Mungkin ada field atau node tambahan yang diperlukan server tapi tidak didokumentasikan
-3. **Proto version mismatch** — `CarouselMessage` mungkin butuh versi proto lebih baru dari yang didukung Baileys v7
+**Tentative conclusion:** Error 479 likely comes from:
+1. **Server-side restrictions** — WhatsApp may limit carousel to the official business API only, not a web gateway
+2. **Binary stanza structure** — there may be an additional field or node the server requires but isn't documented
+3. **Proto version mismatch** — `CarouselMessage` may need a newer proto version than Baileys v7 supports
 
-**Workaround:** Untuk menampilkan beberapa opsi, gunakan `sendRichMessage` dengan tombol terpisah
-atau `sendList` dengan sections. Carousel tidak bisa digunakan di production sampai ada
-perubahan dari WhatsApp atau Baileys.
+**Workaround:** To show multiple options, use `sendRichMessage` with separate buttons
+or `sendList` with sections. Carousel can't be used in production until there's a
+change from WhatsApp or Baileys.
 
 ---
 
-## Mentions di Interactive Message
+## Mentions in Interactive Messages
 
-Mentions bekerja melalui `contextInfo.mentionedJid` di proto `InteractiveMessage`.
-`_sendInteractive` menerima parameter `mentions` (array JID) dan menyuntikkannya:
+Mentions work through `contextInfo.mentionedJid` in the `InteractiveMessage` proto.
+`_sendInteractive` accepts a `mentions` parameter (array of JIDs) and injects it:
 
 ```js
-// Internal — di _sendInteractive:
+// Internal — in _sendInteractive:
 const ctxFields = {};
 if (mentions.length > 0) ctxFields.mentionedJid = mentions;
 if (nonJidMentions > 0) ctxFields.nonJidMentions = nonJidMentions;
@@ -323,53 +324,54 @@ if (Object.keys(ctxFields).length > 0) {
 }
 ```
 
-`sendRichMessage` meneruskan `options.mentions` dan `options.nonJidMentions` ke sini secara otomatis.
+`sendRichMessage` forwards `options.mentions` and `options.nonJidMentions` here automatically.
 
-### `adminGroupMention` hanya berfungsi di plain-text fallback
+### `adminGroupMention` only works in the plain-text fallback
 
-`sendRichMessage` menerima `options.adminGroupMention` (`outbound.js:366`) tapi `_sendInteractive`
-**tidak menanganinya**. Fitur @admin (groupMentions) hanya berfungsi di jalur plain-text fallback
-(`outbound.js:376`) saat `sendRichMessage` gagal. Dalam mode interactive, @admin tetap tampil
-sebagai teks biasa tanpa tag ke admin grup.
-
----
-
-## Badge AI
-
-Badge AI (label "AI" di pojok pesan) muncul dari node `{ tag: 'bot', attrs: { biz_bot: '1' } }`
-di `additionalNodes`. **Hanya bekerja di private chat (`@s.whatsapp.net` / `@lid`).**
-Di group chat, node ini diabaikan — tidak ada badge.
-
-Untuk mematikan badge: `badge: false` di `sendRichMessage`, atau gunakan `buildInteractiveNodes(jid, false)`.
+`sendRichMessage` accepts `options.adminGroupMention` (`outbound.js:366`) but `_sendInteractive`
+**doesn't handle it**. The @admin (groupMentions) feature only works in the plain-text fallback
+path (`outbound.js:376`) when `sendRichMessage` fails. In interactive mode, @admin still appears
+as plain text without tagging the group admins.
 
 ---
 
-## Integrasi dengan LLM Replies (`outbound.js`)
+## AI Badge
 
-### Kontrol dengan `LLM_REPLY_INTERACTIVE`
+The AI badge (the "AI" label in the corner of the message) comes from the
+`{ tag: 'bot', attrs: { biz_bot: '1' } }` node in `additionalNodes`.
+**It only works in private chats (`@s.whatsapp.net` / `@lid`).**
+In group chats this node is ignored — there's no badge.
 
-Env var `LLM_REPLY_INTERACTIVE` (default `false`) menentukan format reply LLM:
+To turn off the badge: `badge: false` in `sendRichMessage`, or use `buildInteractiveNodes(jid, false)`.
 
-| Value | Perilaku | Kelebihan | Kekurangan |
+---
+
+## Integration with LLM Replies (`outbound.js`)
+
+### Control with `LLM_REPLY_INTERACTIVE`
+
+The `LLM_REPLY_INTERACTIVE` env var (default `false`) determines the LLM reply format:
+
+| Value | Behavior | Pros | Cons |
 |-------|----------|-----------|------------|
-| `false` (default) | `sock.sendMessage` biasa (plain text) | Bekerja di **semua** klien termasuk WA Web | Tampilan polos, tanpa footer interaktif |
-| `true` | `sendRichMessage` (interactive card) | Footer terpisah, tampilan lebih modern di mobile | **Tidak muncul** di WA Web (viewOnceMessage wrapper) |
+| `false` (default) | Regular `sock.sendMessage` (plain text) | Works on **all** clients including WA Web | Plain look, no interactive footer |
+| `true` | `sendRichMessage` (interactive card) | Separate footer, more modern look on mobile | **Doesn't appear** on WA Web (viewOnceMessage wrapper) |
 
-### Footer dengan `LLM_REPLY_FOOTER`
+### Footer with `LLM_REPLY_FOOTER`
 
-Env var `LLM_REPLY_FOOTER` mengontrol teks footer yang ditambahkan ke setiap reply:
+The `LLM_REPLY_FOOTER` env var controls the footer text appended to every reply:
 
-- **Mode interactive** (`LLM_REPLY_INTERACTIVE=true`): Footer dikirim sebagai `footer` di `sendRichMessage` — muncul sebagai teks abu-abu di bawah pesan.
-- **Mode plain** (`LLM_REPLY_INTERACTIVE=false`): Footer digabung ke body text dengan separator `\n\n` — karena `sock.sendMessage` tidak punya field footer terpisah.
+- **Interactive mode** (`LLM_REPLY_INTERACTIVE=true`): The footer is sent as the `footer` in `sendRichMessage` — it appears as gray text below the message.
+- **Plain mode** (`LLM_REPLY_INTERACTIVE=false`): The footer is joined to the body text with a `\n\n` separator — because `sock.sendMessage` has no separate footer field.
 
-Jika `LLM_REPLY_FOOTER` kosong, tidak ada footer yang ditambahkan.
+If `LLM_REPLY_FOOTER` is empty, no footer is added.
 
-### Implementasi di `outbound.js`
+### Implementation in `outbound.js`
 
 ```js
-// Di src/wa/outbound.js — sendOutgoing()
+// In src/wa/outbound.js — sendOutgoing()
 if (config.llmReplyInteractive) {
-  // Interactive mode: sendRichMessage dengan optional footer
+  // Interactive mode: sendRichMessage with an optional footer
   try {
     sentMsg = await sendRichMessage(sock, chatId, {
       text: renderedText.text,
@@ -380,12 +382,12 @@ if (config.llmReplyInteractive) {
       adminGroupMention: renderedText.adminGroupMention || null,
     });
   } catch (err) {
-    // Fallback — pesan tetap terkirim
+    // Fallback — the message still gets sent
     logger.warn({ err, chatId }, 'sendRichMessage failed, falling back to sendMessage');
     sentMsg = await sock.sendMessage(chatId, textPayload, quoted ? { quoted } : {});
   }
 } else {
-  // Plain mode: sock.sendMessage — footer digabung ke body
+  // Plain mode: sock.sendMessage — footer joined to the body
   const bodyText = config.llmReplyFooter
     ? `${renderedText.text}\n\n${config.llmReplyFooter}`
     : renderedText.text;
@@ -395,52 +397,53 @@ if (config.llmReplyInteractive) {
 
 ### Fallback mechanism
 
-Jika `sendRichMessage` throw error (misalnya socket disconnected, timeout, atau error proto),
-system otomatis fallback ke `sock.sendMessage` biasa. Ini memastikan pesan **tetap terkirim**
-meskipun format interaktif gagal. Logger mencatat warning dengan `chatId` dan `err` untuk debugging.
+If `sendRichMessage` throws an error (e.g. socket disconnected, timeout, or a proto error),
+the system automatically falls back to the regular `sock.sendMessage`. This ensures the message
+**still gets sent** even when the interactive format fails. The logger records a warning with
+`chatId` and `err` for debugging.
 
-### Copy code button untuk code blocks
+### Copy code button for code blocks
 
-Fitur terpisah namun terkait: ketika LLM reply mengandung code block, Python bridge mengirim
-action `send_copy_code` ke Node. Implementasi ada di `src/index.js:314-348` — Node menerima
-action tersebut, membuat quoted preview sintetis dengan dummy ID (`CPY_...`), lalu memanggil
-`sendCopyCode` dengan `quotedPreviewText` berupa potongan code yang akan disalin.
-Reply button ini menggunakan `relayMessage` dengan `viewOnceMessage` wrapper yang sama.
-Deteksi code block terjadi di Python bridge, **bukan** di Node. Tidak ada penambahan
-copy code button otomatis di `outbound.js`.
+A separate but related feature: when an LLM reply contains a code block, the Python bridge sends
+a `send_copy_code` action to Node. The implementation is in `src/index.js:314-348` — Node receives
+that action, creates a synthetic quoted preview with a dummy ID (`CPY_...`), then calls
+`sendCopyCode` with a `quotedPreviewText` containing the snippet of code to be copied.
+This reply button uses `relayMessage` with the same `viewOnceMessage` wrapper.
+Code block detection happens in the Python bridge, **not** in Node. There is no automatic
+copy code button added in `outbound.js`.
 
 ---
 
-## Integrasi Quiz (`send_quiz` action)
+## Quiz Integration (`send_quiz` action)
 
-Quiz dikirim dari Python bridge sebagai action `send_quiz` dan diproses di `src/index.js`.
+A quiz is sent from the Python bridge as a `send_quiz` action and processed in `src/index.js`.
 
-### Alur pengiriman
+### Send flow
 
-1. **Python** (LLM2) memanggil tool `send_quiz` → action `send_quiz` dikirim via WS
-2. **Node** (`src/index.js:209`) menerima action, memanggil `sendQuickReply` dengan button ID ber-`qz:` prefix
-3. **WhatsApp** menampilkan quick reply buttons — user tap salah satu
-4. **Node** (`src/wa/connection.js:424`) mendeteksi `selectedId` berawalan `qz:` → **tidak** ditangani lokal, diteruskan ke Python
-5. **Python** menerima reply sebagai `incoming_message` biasa → LLM2 mengevaluasi jawaban
+1. **Python** (LLM2) calls the `send_quiz` tool → a `send_quiz` action is sent via WS
+2. **Node** (`src/index.js:209`) receives the action and calls `sendQuickReply` with button IDs that have a `qz:` prefix
+3. **WhatsApp** displays quick reply buttons — the user taps one
+4. **Node** (`src/wa/connection.js:424`) detects a `selectedId` starting with `qz:` → it is **not** handled locally and is forwarded to Python
+5. **Python** receives the reply as a regular `incoming_message` → LLM2 evaluates the answer
 
 ### Button ID format: `qz:<label>`
 
-Semua quiz buttons menggunakan prefix `qz:` untuk membedakannya dari button jenis lain:
+All quiz buttons use the `qz:` prefix to distinguish them from other button types:
 
 ```js
-// src/index.js — mapping dari pilihan LLM ke button
+// src/index.js — mapping from the LLM's choices to buttons
 const buttons = choices.map((ch) => ({
-  id: `qz:${ch.label}`,      // prefix qz: — critical untuk routing
-  displayText: ch.text,       // teks yang muncul di button
+  id: `qz:${ch.label}`,      // qz: prefix — critical for routing
+  displayText: ch.text,       // the text shown on the button
 }));
 ```
 
-Tanpa prefix `qz:`, quiz reply akan ditangani oleh handler button lokal Node (sama seperti
-button `/setting` atau `modelcfg:`) dan tidak akan sampai ke LLM.
+Without the `qz:` prefix, the quiz reply would be handled by Node's local button handler (just like
+`/setting` or `modelcfg:` buttons) and would never reach the LLM.
 
 ### Quiz message tracking (`quizMessageIds`)
 
-Setiap quiz yang dikirim dicatat message ID-nya di `quizMessageIds` Set (bounded 2000 entries):
+Every quiz sent has its message ID recorded in the `quizMessageIds` Set (bounded to 2000 entries):
 
 ```js
 // src/caches.js
@@ -448,10 +451,10 @@ const quizMessageIds = new Set();
 const MAX_QUIZ_IDS = 2000;
 ```
 
-Set ini digunakan di `src/wa/inbound.js` untuk membedakan:
+This set is used in `src/wa/inbound.js` to distinguish:
 
-- **Quiz reply**: user menjawab quiz → `isQuizButtonReply=true` atau `isQuizReply=true` → diteruskan ke LLM
-- **Settings reply**: user tap button `/setting` → `replyToInteractive=true` → diset `contextOnly=true` (diblokir dari LLM)
+- **Quiz reply**: user answers the quiz → `isQuizButtonReply=true` or `isQuizReply=true` → forwarded to the LLM
+- **Settings reply**: user taps a `/setting` button → `replyToInteractive=true` → set to `contextOnly=true` (blocked from the LLM)
 
 ```js
 // src/wa/inbound.js:255-267
@@ -463,73 +466,73 @@ const isQuizReply = isInteractiveReply && Boolean(quoted?.messageId && quizMessa
 const replyToInteractive = isInteractiveReply && !isQuizReply; // → contextOnly=true
 ```
 
-### Catatan penting
+### Important notes
 
-- `question` dikirim apa adanya (LLM sudah memasukkan pilihan ke dalam teks) — Node tidak auto-append daftar pilihan
-- Mention resolution (`@Name (senderRef)`) tetap dilakukan di `question` text sebelum dikirim
-- Quiz buttons adalah `quick_reply` NativeFlow — bukan `listMessage` atau `single_select`
-- Action ack mengembalikan `{ contextMsgId, messageId }` untuk hydrasi history di Python
+- `question` is sent as-is (the LLM already includes the choices in the text) — Node does not auto-append the choice list
+- Mention resolution (`@Name (senderRef)`) is still applied to the `question` text before sending
+- Quiz buttons are `quick_reply` NativeFlow — not `listMessage` or `single_select`
+- The action ack returns `{ contextMsgId, messageId }` for history hydration in Python
 
 ---
 
-## Status Setiap Tipe Pesan
+## Status of Each Message Type
 
-| Tipe | Status | Catatan |
+| Type | Status | Notes |
 |------|--------|---------|
-| `sendQuickReply` | ✅ Bekerja | |
-| `sendUrlButtons` | ✅ Bekerja | |
-| `sendCopyCode` | ✅ Bekerja | |
-| `sendCombinedButtons` | ✅ Bekerja | |
-| `sendNativeFlow` | ✅ Bekerja | Base function untuk semua NativeFlow |
-| `sendRichMessage` | ✅ Bekerja | `title` tanpa media mungkin tidak render |
-| `sendList` | ✅ Bekerja | Pakai `sock.sendMessage`, bukan `relayMessage` |
-| `sendCarousel` | ⚠️ Error 479 | Ditunda — belum ditemukan solusi |
-| `sendLegacyButtons` | ❓ Tidak diuji | Format lama, kemungkinan deprecated |
-| `sendTemplate` | ❓ Tidak diuji | Format lama, kemungkinan deprecated |
+| `sendQuickReply` | ✅ Works | |
+| `sendUrlButtons` | ✅ Works | |
+| `sendCopyCode` | ✅ Works | |
+| `sendCombinedButtons` | ✅ Works | |
+| `sendNativeFlow` | ✅ Works | Base function for all NativeFlow |
+| `sendRichMessage` | ✅ Works | `title` without media may not render |
+| `sendList` | ✅ Works | Uses `sock.sendMessage`, not `relayMessage` |
+| `sendCarousel` | ⚠️ Error 479 | Deferred — no solution found yet |
+| `sendLegacyButtons` | ❓ Untested | Old format, possibly deprecated |
+| `sendTemplate` | ❓ Untested | Old format, possibly deprecated |
 
 ---
 
 ## `/debug` Command
 
-Untuk menguji semua tipe di WhatsApp:
+To test all types on WhatsApp:
 
 ```
 /debug buttons      → quick_reply, cta_url, cta_copy, cta_call
 /debug menu         → single_select dropdown
 /debug list         → sendList
-/debug rich         → sendRichMessage (tanpa & dengan tombol)
-/debug combined     → semua tipe tombol dalam satu pesan
-/debug broadcast    → preview format pesan broadcast
-/debug all          → semua 6 tipe di atas sekaligus
-/debug carousel     → carousel (eksperimental, mungkin error)
-/debug carousel-img → carousel dengan image header (eksperimental)
+/debug rich         → sendRichMessage (with & without buttons)
+/debug combined     → all button types in one message
+/debug broadcast    → preview of the broadcast message format
+/debug all          → all 6 types above at once
+/debug carousel     → carousel (experimental, may error)
+/debug carousel-img → carousel with an image header (experimental)
 ```
 
 ---
 
 ## Recent Changes
 
-### Copy code button untuk code blocks (commit `4ffa2df`)
-- LLM replies yang mengandung code block otomatis ditambahi CTA copy code button
-- Menggunakan `sendCopyCode` dengan `quotedPreviewText` berisi potongan code
-- Button di-reply ke pesan asli, bukan dikirim sebagai pesan terpisah
+### Copy code button for code blocks (commit `4ffa2df`)
+- LLM replies containing a code block automatically get a CTA copy code button
+- Uses `sendCopyCode` with a `quotedPreviewText` containing the code snippet
+- The button replies to the original message, rather than being sent as a separate message
 
-### Perbaikan quoted preview untuk CTA copy code (commit `5c9bbf1`, `c9dad3c`)
-- CTA copy code button sebelumnya tidak memiliki quoted preview → button tidak muncul
-- Solusi: dummy quoted preview message dikirim sebelum button, menggunakan `relayMessage`
-- Commit `c9dad3c` mengganti quoted preview dengan `key: { fromMe: true, id: 'dummy_cta_copy' }` — ID dummy untuk menghindari lookup message yang tidak ada
+### Quoted preview fix for CTA copy code (commit `5c9bbf1`, `c9dad3c`)
+- The CTA copy code button previously had no quoted preview → the button didn't appear
+- Solution: a dummy quoted preview message is sent before the button, using `relayMessage`
+- Commit `c9dad3c` replaced the quoted preview with `key: { fromMe: true, id: 'dummy_cta_copy' }` — a dummy ID to avoid looking up a message that doesn't exist
 
-### Penghapusan reply-to dan badge AI dari `sendCopyCode` (commit `8e0851a`)
-- Copy code button dulunya di-reply ke pesan asli + badge AI
-- Ternyata CTA copy tidak perlu badge AI (bukan konten AI, hanya utility button)
-- Reply-to juga dihapus karena button CTA akan muncul di atas pesan asli tanpa perlu quote
+### Removal of reply-to and AI badge from `sendCopyCode` (commit `8e0851a`)
+- The copy code button used to reply to the original message + an AI badge
+- It turned out CTA copy doesn't need the AI badge (it's not AI content, just a utility button)
+- The reply-to was also removed because the CTA button appears above the original message without needing a quote
 
-### Integrasi quiz dengan `qz:` prefix (commit `8a4afa8`)
-- Penambahan `quizMessageIds` Set di `caches.js` untuk tracking pesan quiz
-- Perbaikan routing: plain-text reply ke quiz button sekarang benar sampai ke LLM
-- Settings menu interactive reply tetap di-block (`contextOnly=true`) — tidak tercampur dengan quiz
+### Quiz integration with the `qz:` prefix (commit `8a4afa8`)
+- Added a `quizMessageIds` Set in `caches.js` to track quiz messages
+- Routing fix: a plain-text reply to a quiz button now correctly reaches the LLM
+- Settings menu interactive replies are still blocked (`contextOnly=true`) — not mixed up with quizzes
 
-### `LLM_REPLY_INTERACTIVE` dan `LLM_REPLY_FOOTER`
-- Penambahan env var untuk mengontrol format reply LLM
-- Footer dapat dikustomisasi tanpa mengubah kode
-- Fallback mechanism: jika `sendRichMessage` gagal, auto-fallback ke `sock.sendMessage`
+### `LLM_REPLY_INTERACTIVE` and `LLM_REPLY_FOOTER`
+- Added env vars to control the LLM reply format
+- The footer can be customized without changing code
+- Fallback mechanism: if `sendRichMessage` fails, auto-fallback to `sock.sendMessage`

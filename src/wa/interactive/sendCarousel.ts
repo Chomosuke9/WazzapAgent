@@ -36,12 +36,12 @@ type CarouselOptions = {
  * await sendCarousel(sock, jid, [
  *   {
  *     image: { url: 'https://example.com/p1.jpg' },
- *     title: 'Produk A',
- *     body: 'Deskripsi A',
+ *     title: 'Product A',
+ *     body: 'Description A',
  *     footer: 'Rp 100.000',
- *     buttons: [{ name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Beli', id: 'buy_a' }) }]
+ *     buttons: [{ name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Buy', id: 'buy_a' }) }]
  *   }
- * ], { title: 'Produk Unggulan', footer: 'Swipe untuk lihat lebih' });
+ * ], { title: 'Featured Products', footer: 'Swipe to see more' });
  */
 async function sendCarousel(
   sock: WaSocketLike,

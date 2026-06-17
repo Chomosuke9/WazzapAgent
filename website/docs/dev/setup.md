@@ -245,7 +245,7 @@ WazzapAgents/
 │   │   └── subagent/          # Sub-agent integration
 │   └── systemprompt.txt        # LLM2 system prompt template
 ├── docs/llm-architecture/       # Architecture docs
-├── website/                     # Docusaurus docs (Indonesian + English)
+├── website/                     # Docusaurus docs (English)
 ├── data/                        # Default tenant folder (auto-created, git-ignored)
 │   ├── auth/                    # WhatsApp session
 │   ├── media/                   # Media files

@@ -183,7 +183,7 @@ async function dispatchButton(
   if (!isPermitted(permission, (name) => resolveButtonAtom(name, bc))) {
     try {
       await bc.sock.sendMessage(bc.chatId, {
-        text: `Tindakan ini hanya untuk ${describePermission(permission)}. ❌`,
+        text: `This action is only for ${describePermission(permission)}. ❌`,
       });
     } catch (e) {
       /* ignore */

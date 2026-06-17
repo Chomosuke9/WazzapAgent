@@ -8,15 +8,15 @@ import {
 import type { CommandContext, CommandHandler } from "../command/CommandContext.js";
 
 const USAGE = [
-  "*/bot-conf — Konfigurasi bot (owner only)*",
+  "*/bot-conf — Bot configuration (owner only)*",
   "",
-  "`/bot-conf activation-msg <teks>` — atur pesan saat bot di-tag di chat yang belum diaktifkan",
-  "`/bot-conf activation-msg clear` — kembalikan ke pesan bawaan",
-  "`/bot-conf prompt-override <teks>` — atur prompt dasar untuk chat yang belum set /prompt sendiri",
-  "`/bot-conf prompt-override clear` — hapus prompt dasar",
-  "`/bot-conf require-activation <on|off>` — wajibkan aktivasi (override .env saat runtime)",
+  "`/bot-conf activation-msg <text>` — set the message shown when the bot is tagged in a chat that isn't activated yet",
+  "`/bot-conf activation-msg clear` — restore the default message",
+  "`/bot-conf prompt-override <text>` — set the base prompt for chats that haven't set their own /prompt",
+  "`/bot-conf prompt-override clear` — remove the base prompt",
+  "`/bot-conf require-activation <on|off>` — require activation (overrides .env at runtime)",
   "",
-  "_Ketik `/bot-conf` tanpa argumen untuk melihat nilai saat ini._",
+  "_Type `/bot-conf` without arguments to see the current values._",
 ].join("\n");
 
 function isClear(v: string): boolean {
@@ -34,10 +34,10 @@ async function handleBotConf({ chatId, folderPath = config.dataDir, args, sock, 
     const requireAct = isActivationRequired(repos!);
     const status = [
       "",
-      "*Nilai saat ini:*",
+      "*Current values:*",
       `• require-activation: ${requireAct ? "on" : "off"}`,
-      `• activation-msg: ${activationMsg ? "(custom)" : "(bawaan)"}`,
-      `• prompt-override: ${promptOverride ? "(diset)" : "(kosong)"}`,
+      `• activation-msg: ${activationMsg ? "(custom)" : "(default)"}`,
+      `• prompt-override: ${promptOverride ? "(set)" : "(empty)"}`,
     ].join("\n");
     try {
       await sock.sendMessage(chatId, { text: `${USAGE}\n${status}` });
@@ -60,23 +60,23 @@ async function handleBotConf({ chatId, folderPath = config.dataDir, args, sock, 
     case "activation-msg":
     case "activation_msg": {
       if (!rest) {
-        await reply("Penggunaan: `/bot-conf activation-msg <teks>` atau `clear`.");
+        await reply("Usage: `/bot-conf activation-msg <text>` or `clear`.");
         return;
       }
       if (isClear(rest)) {
         repos!.settings.setBotConfig(BOT_CONFIG_KEYS.ACTIVATION_MSG, null);
-        await reply(`Pesan aktivasi dikembalikan ke bawaan:\n\n${DEFAULT_ACTIVATION_MESSAGE}`);
+        await reply(`Activation message restored to default:\n\n${DEFAULT_ACTIVATION_MESSAGE}`);
         return;
       }
       repos!.settings.setBotConfig(BOT_CONFIG_KEYS.ACTIVATION_MSG, rest);
-      await reply(`Pesan aktivasi diperbarui:\n\n${rest}`);
+      await reply(`Activation message updated:\n\n${rest}`);
       return;
     }
 
     case "prompt-override":
     case "prompt_override": {
       if (!rest) {
-        await reply("Penggunaan: `/bot-conf prompt-override <teks>` atau `clear`.");
+        await reply("Usage: `/bot-conf prompt-override <text>` or `clear`.");
         return;
       }
       const value = isClear(rest) ? null : rest;
@@ -88,7 +88,7 @@ async function handleBotConf({ chatId, folderPath = config.dataDir, args, sock, 
         folderPath,
         chatId: "global",
       });
-      await reply(value === null ? "Prompt dasar dihapus." : "Prompt dasar diperbarui.");
+      await reply(value === null ? "Base prompt removed." : "Base prompt updated.");
       return;
     }
 
@@ -96,16 +96,16 @@ async function handleBotConf({ chatId, folderPath = config.dataDir, args, sock, 
     case "require_activation": {
       const v = rest.trim().toLowerCase();
       if (v !== "on" && v !== "off") {
-        await reply("Penggunaan: `/bot-conf require-activation on` atau `off`.");
+        await reply("Usage: `/bot-conf require-activation on` or `off`.");
         return;
       }
       repos!.settings.setBotConfig(BOT_CONFIG_KEYS.REQUIRE_ACTIVATION, v);
-      await reply(`Wajib aktivasi sekarang: *${v}*.`);
+      await reply(`Require activation is now: *${v}*.`);
       return;
     }
 
     default:
-      await reply(`Subcommand tidak dikenal: \`${sub}\`\n\n${USAGE}`);
+      await reply(`Unknown subcommand: \`${sub}\`\n\n${USAGE}`);
       return;
   }
 }
@@ -114,7 +114,7 @@ export { handleBotConf };
 
 export const botConfCommand: CommandHandler = {
   commands: ["bot-conf", "botconf"],
-  description: "Konfigurasi bot secara global (berlaku untuk semua chat): ubah pesan aktivasi, atur system prompt dasar, atau aktifkan/nonaktifkan wajib-aktivasi. Khusus owner.",
+  description: "Configure the bot globally (applies to all chats): change the activation message, set the base system prompt, or enable/disable require-activation. Owner only.",
   permission: "owner",
   run: (_sock, _message, ctx) => handleBotConf(ctx),
 };

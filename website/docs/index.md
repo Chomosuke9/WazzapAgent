@@ -1,27 +1,27 @@
 ---
-slug: /pengantar
+slug: /intro
 sidebar_position: 1
 ---
 
-# Selamat Datang di WazzapAgents
+# Welcome to WazzapAgents
 
-**WazzapAgents** (juga dikenal sebagai **Vivy AI**) adalah bot WhatsApp berbasis kecerdasan buatan (AI).
+**WazzapAgents** (also known as **Vivy AI**) is an AI-powered WhatsApp bot.
 
-## Apa yang Bisa Bot Ini Lakukan?
+## What Can This Bot Do?
 
-- **Mengobrol** secara natural di grup maupun chat pribadi
-- **Memahami konteks** percakapan (mengingat pesan sebelumnya)
-- **Membaca gambar, foto, dan dokumen** yang dikirim ke chat
-- **Moderasi grup** — menghapus pesan spam atau mengeluarkan anggota nakal
-- **Kepribadian bisa disesuaikan** sepenuhnya sesuai kebutuhan grupmu
-- **Menyapa anggota baru** secara otomatis
+- **Chat** naturally in groups and private messages
+- **Understand context** of conversations (remembers previous messages)
+- **Read images, photos, and documents** sent to the chat
+- **Group moderation** — delete spam messages or kick troublesome members
+- **Fully customizable personality** to suit your group's needs
+- **Greet new members** automatically
 
-Bot ini menggunakan model AI besar (LLM) di baliknya, sehingga mampu menjawab pertanyaan kompleks, bercanda, membantu menyelesaikan masalah, dan masih banyak lagi.
+The bot uses a large language model (LLM) under the hood, enabling it to answer complex questions, joke around, help solve problems, and much more.
 
-## Mulai dari Mana?
+## Where to Start?
 
-- **Baru pertama kali?** → Baca [Cara Memulai](/instalasi/memulai)
-- **Ingin menjalankan bot sendiri?** → Baca [Panduan Instalasi](/instalasi)
-- **Mau lihat semua perintah?** → Lihat [Daftar Perintah](/penggunaan/perintah)
-- **Mau atur kepribadian bot?** → Baca [Mengatur Prompt](/penggunaan/prompt)
-- **Butuh contoh prompt siap pakai?** → Lihat [Contoh Prompt](/penggunaan/contoh-prompt)
+- **First time here?** → Read [Getting Started](/installation/getting-started)
+- **Want to run the bot yourself?** → Read the [Installation Guide](/installation)
+- **Want to see all commands?** → See [Command List](/usage/commands)
+- **Want to set the bot's personality?** → Read [Setting Up Prompts](/usage/prompt)
+- **Need ready-to-use prompt examples?** → See [Prompt Examples](/usage/prompt-examples)

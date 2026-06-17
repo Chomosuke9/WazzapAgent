@@ -271,7 +271,7 @@ async function dispatchCommand(
             if (expiry <= now) {
               try {
                 await sock!.sendMessage(chatId, {
-                  text: `Aktivasi sudah kadaluarsa sejak ${expiry.toLocaleDateString('id-ID')}. Gunakan /activate <kode> untuk memperpanjang.`,
+                  text: `Activation expired on ${expiry.toLocaleDateString('id-ID')}. Use /activate <code> to renew.`,
                 });
               } catch (err) { /* ignore */ }
               repos!.activation.markExpiryNotified(chatId);
@@ -289,7 +289,7 @@ async function dispatchCommand(
   if (!isPermitted(handler.permission, context)) {
     try {
       await context.sock!.sendMessage(chatId, {
-        text: `Perintah ini hanya untuk ${describePermission(handler.permission)}. ❌`,
+        text: `This command is only for ${describePermission(handler.permission)}. ❌`,
       });
     } catch (e) { /* ignore */ }
     return true;

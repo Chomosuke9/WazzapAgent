@@ -8,19 +8,19 @@ import type { ButtonHandler } from '../command/ButtonContext.js';
 import type { AccountRepositories } from '../../db/repositories/index.js';
 
 function formatActivationInfo(repos: AccountRepositories, chatId: string): string {
-  if (!config.requireActivation) return 'Tidak diperlukan';
+  if (!config.requireActivation) return 'Not required';
   const activation = repos.activation.getChatActivation(chatId);
-  if (!activation) return 'Tidak aktif';
-  if (!activation.expiresAt) return 'Permanen';
+  if (!activation) return 'Inactive';
+  if (!activation.expiresAt) return 'Permanent';
   const now = new Date();
   const expiry = new Date(activation.expiresAt);
-  if (expiry <= now) return 'Kadaluarsa';
+  if (expiry <= now) return 'Expired';
   const diffMs = expiry.getTime() - now.getTime();
   const diffDays = Math.floor(diffMs / 86400000);
   const diffHours = Math.floor((diffMs % 86400000) / 3600000);
-  if (diffDays > 0) return `${diffDays} hari ${diffHours} jam`;
-  if (diffHours > 0) return `${diffHours} jam`;
-  return `${Math.floor(diffMs / 60000)} menit`;
+  if (diffDays > 0) return `${diffDays} days ${diffHours} hours`;
+  if (diffHours > 0) return `${diffHours} hours`;
+  return `${Math.floor(diffMs / 60000)} minutes`;
 }
 
 async function handleSettings({ chatId, senderId: _senderId, args: _args, sock, repos }: CommandContext): Promise<void> {
@@ -97,7 +97,7 @@ async function handleSettings({ chatId, senderId: _senderId, args: _args, sock, 
   ];
 
   try {
-    await sendNativeFlow(sock, chatId, `Chat Settings\n\nCurrent:\n- Mode: ${currentMode}\n- Model: ${activeModelName}\n- Permission: Level ${currentPermission} (${permissionLabel})\n- Idle Trigger: ${idleLabel}\n- Aktivasi: ${formatActivationInfo(repos!, chatId)}`, buttons, { footer: 'Click a button' });
+    await sendNativeFlow(sock, chatId, `Chat Settings\n\nCurrent:\n- Mode: ${currentMode}\n- Model: ${activeModelName}\n- Permission: Level ${currentPermission} (${permissionLabel})\n- Idle Trigger: ${idleLabel}\n- Activation: ${formatActivationInfo(repos!, chatId)}`, buttons, { footer: 'Click a button' });
   } catch (err) {
     logger.warn({ err, chatId }, 'failed sending /settings interactive');
     try {
@@ -110,7 +110,7 @@ export { handleSettings };
 
 export const settingCommand: CommandHandler = {
   commands: ["setting", "settings"],
-  description: "Buka menu pengaturan interaktif untuk chat ini. Dari sini kamu bisa mengubah mode respon, model LLM, system prompt, permission moderasi, dan pengaturan lainnya tanpa menghafal perintah.",
+  description: "Open the interactive settings menu for this chat. From here you can change the response mode, LLM model, system prompt, moderation permission, and other settings without memorizing commands.",
   permission: "isPrivate or isAdmin or isOwner",
   run: (_sock, _message, ctx) => handleSettings(ctx),
 };
@@ -152,26 +152,26 @@ export const settingsButton: ButtonHandler = {
       await sendNativeFlow(
         sock,
         chatId,
-        'Pilih Model LLM',
+        'Select LLM Model',
         [
           {
             name: 'single_select',
-            buttonParamsJson: JSON.stringify({ title: 'Pilih Model', sections }),
+            buttonParamsJson: JSON.stringify({ title: 'Select Model', sections }),
           },
         ],
-        { footer: 'Model saat ini: ' + (activeModelId || 'default') },
+        { footer: 'Current model: ' + (activeModelId || 'default') },
       );
       return;
     }
     if (action === 'prompt') {
       await sock.sendMessage(chatId, {
-        text: 'Gunakan `/prompt` <teks> untuk mengubah prompt.',
+        text: 'Use `/prompt` <text> to change the prompt.',
       });
       return;
     }
     if (action === 'permission') {
       await sock.sendMessage(chatId, {
-        text: 'Gunakan `/permission` <0-3> untuk mengubah level.',
+        text: 'Use `/permission` <0-3> to change the level.',
       });
       return;
     }
@@ -197,7 +197,7 @@ export const modeSelectButton: ButtonHandler = {
       folderPath: account.folderPath,
       chatId,
     });
-    await sock.sendMessage(chatId, { text: `Mode diubah ke: *${mode}*` });
+    await sock.sendMessage(chatId, { text: `Mode changed to: *${mode}*` });
   },
 };
 
@@ -224,7 +224,7 @@ export const modelSelectButton: ButtonHandler = {
     const displayName = model?.displayName || modelId;
     const visionNote = model?.visionSupport ? ' (Vision)' : '';
     await sock.sendMessage(chatId, {
-      text: `Model diubah ke: ${displayName}${visionNote}`,
+      text: `Model changed to: ${displayName}${visionNote}`,
     });
   },
 };

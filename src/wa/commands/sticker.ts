@@ -352,7 +352,7 @@ async function handleSticker({ chatId, chatType: _chatType, senderIsAdmin: _send
   if (!mediaPath) {
     try {
       await sock.sendMessage(chatId, {
-        text: 'Kirim gambar/video dengan caption `/sticker`, atau reply gambar/video dengan `/sticker`.',
+        text: 'Send an image/video with the caption `/sticker`, or reply to an image/video with `/sticker`.',
       });
     } catch (err) { /* ignore */ }
     return;
@@ -389,7 +389,7 @@ export { handleSticker };
 
 export const stickerCommand: CommandHandler = {
   commands: ["sticker", "stickers"],
-  description: "Buat stiker WhatsApp dari gambar atau video. Kirim gambar dengan caption `/sticker` atau reply gambar/video dengan `/sticker`. Tambahkan teks meme dengan format `/sticker teks_bawah#teks_atas`. Contoh: `/sticker gue banget#ketika senin tiba`.",
+  description: "Create a WhatsApp sticker from an image or video. Send an image with the caption `/sticker` or reply to an image/video with `/sticker`. Add meme text with the format `/sticker bottom_text#top_text`. Example: `/sticker so me#when monday arrives`.",
   permission: "public",
   run: (_sock, _message, ctx) => handleSticker(ctx),
 };

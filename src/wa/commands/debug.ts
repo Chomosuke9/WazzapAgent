@@ -51,17 +51,17 @@ async function sendDebugMenu(sock: WaSocketLike, chatId: string): Promise<void> 
     {
       name: 'single_select',
       buttonParamsJson: JSON.stringify({
-        title: 'Pilih opsi',
+        title: 'Choose an option',
         sections: [
           {
-            title: 'Kategori 1',
+            title: 'Category 1',
             rows: [
-              { title: 'Item A', description: 'Deskripsi item A', id: 'debug_menu_a' },
-              { title: 'Item B', description: 'Deskripsi item B', id: 'debug_menu_b' },
+              { title: 'Item A', description: 'Description of item A', id: 'debug_menu_a' },
+              { title: 'Item B', description: 'Description of item B', id: 'debug_menu_b' },
             ],
           },
           {
-            title: 'Kategori 2',
+            title: 'Category 2',
             rows: [
               { title: 'Item C', id: 'debug_menu_c' },
               { title: 'Item D', id: 'debug_menu_d' },
@@ -76,19 +76,19 @@ async function sendDebugMenu(sock: WaSocketLike, chatId: string): Promise<void> 
 async function sendDebugList(sock: WaSocketLike, chatId: string): Promise<void> {
   await sendList(sock, chatId, {
     title: '[DEBUG] List Message',
-    description: 'Tap tombol untuk membuka daftar pilihan',
-    buttonText: 'Buka Daftar',
-    footer: 'Pilih salah satu item',
+    description: 'Tap the button to open the list of choices',
+    buttonText: 'Open List',
+    footer: 'Pick one of the items',
     sections: [
       {
-        title: 'Kategori A',
+        title: 'Category A',
         rows: [
-          { rowId: 'debug_list_a1', title: 'Item A1', description: 'Deskripsi item A1' },
-          { rowId: 'debug_list_a2', title: 'Item A2', description: 'Deskripsi item A2' },
+          { rowId: 'debug_list_a1', title: 'Item A1', description: 'Description of item A1' },
+          { rowId: 'debug_list_a2', title: 'Item A2', description: 'Description of item A2' },
         ],
       },
       {
-        title: 'Kategori B',
+        title: 'Category B',
         rows: [
           { rowId: 'debug_list_b1', title: 'Item B1' },
           { rowId: 'debug_list_b2', title: 'Item B2' },
@@ -99,37 +99,37 @@ async function sendDebugList(sock: WaSocketLike, chatId: string): Promise<void> 
 }
 
 async function sendDebugRichMessage(sock: WaSocketLike, chatId: string): Promise<void> {
-  // Styled text tanpa tombol
+  // Styled text without buttons
   await sendRichMessage(sock, chatId, {
     title: '[DEBUG] Rich Message',
-    subtitle: 'Subtitle teks',
-    text: 'Pesan styled tanpa tombol. Header + body + footer dengan badge AI (private) atau tanpa badge (group).',
-    footer: 'Footer teks',
+    subtitle: 'Subtitle text',
+    text: 'Styled message without buttons. Header + body + footer with AI badge (private) or without badge (group).',
+    footer: 'Footer text',
   });
-  // Styled text dengan tombol
+  // Styled text with buttons
   await sendRichMessage(sock, chatId, {
     title: '[DEBUG] Rich Message + Buttons',
-    text: 'Pesan styled dengan tombol quick_reply.',
-    footer: 'Tap tombol di bawah',
+    text: 'Styled message with quick_reply buttons.',
+    footer: 'Tap a button below',
     buttons: [
-      { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Pilihan A', id: 'debug_rich_a' }) },
-      { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Pilihan B', id: 'debug_rich_b' }) },
+      { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Choice A', id: 'debug_rich_a' }) },
+      { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Choice B', id: 'debug_rich_b' }) },
     ],
   });
 }
 
 async function sendDebugCombined(sock: WaSocketLike, chatId: string): Promise<void> {
-  await sendCombinedButtons(sock, chatId, '[DEBUG] semua tipe tombol dalam satu pesan', [
+  await sendCombinedButtons(sock, chatId, '[DEBUG] all button types in one message', [
     { type: 'reply', displayText: 'Quick Reply', id: 'debug_comb_reply' },
-    { type: 'url', displayText: 'Buka URL', url: 'https://github.com/chomosuke9/wazzapagents' },
-    { type: 'copy', displayText: 'Salin Kode', copyCode: 'COMBINED-123' },
-    { type: 'call', displayText: 'Telepon', phoneNumber: '+621234567890' },
+    { type: 'url', displayText: 'Open URL', url: 'https://github.com/chomosuke9/wazzapagents' },
+    { type: 'copy', displayText: 'Copy Code', copyCode: 'COMBINED-123' },
+    { type: 'call', displayText: 'Call', phoneNumber: '+621234567890' },
   ], { title: '[DEBUG] Combined Buttons', footer: 'url + reply + copy + call' });
 }
 
 async function sendDebugBroadcast(sock: WaSocketLike, chatId: string): Promise<void> {
   await sendRichMessage(sock, chatId, {
-    text: 'Ini adalah contoh pesan broadcast.\n\nPesan ini biasanya dikirim ke semua group yang diikuti bot.',
+    text: 'This is a sample broadcast message.\n\nThis message is usually sent to all groups the bot is in.',
     footer: 'Broadcast 📢',
     badge: false,
   });
@@ -138,14 +138,14 @@ async function sendDebugBroadcast(sock: WaSocketLike, chatId: string): Promise<v
 async function sendDebugCarousel(sock: WaSocketLike, chatId: string): Promise<void> {
   await sendCarousel(sock, chatId, [
     {
-      body: 'Kartu 1 — quick_reply buttons',
-      footer: 'Footer kartu 1',
+      body: 'Card 1 — quick_reply buttons',
+      footer: 'Card 1 footer',
       buttons: [
-        { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Pilih Ini', id: 'debug_c1_qr' }) },
+        { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Pick This', id: 'debug_c1_qr' }) },
         {
           name: 'cta_url',
           buttonParamsJson: JSON.stringify({
-            display_text: 'Buka Link',
+            display_text: 'Open Link',
             url: 'https://github.com/chomosuke9/wazzapagents',
             merchant_url: 'https://github.com/chomosuke9/wazzapagents',
           }),
@@ -153,27 +153,27 @@ async function sendDebugCarousel(sock: WaSocketLike, chatId: string): Promise<vo
       ],
     },
     {
-      body: 'Kartu 2 — cta_copy & cta_call',
-      footer: 'Footer kartu 2',
+      body: 'Card 2 — cta_copy & cta_call',
+      footer: 'Card 2 footer',
       buttons: [
-        { name: 'cta_copy', buttonParamsJson: JSON.stringify({ display_text: 'Salin Kode', id: 'debug_c2_copy', copy_code: 'CAROUSEL-456' }) },
-        { name: 'cta_call', buttonParamsJson: JSON.stringify({ display_text: 'Hubungi', id: 'debug_c2_call', phone_number: '+621234567890' }) },
+        { name: 'cta_copy', buttonParamsJson: JSON.stringify({ display_text: 'Copy Code', id: 'debug_c2_copy', copy_code: 'CAROUSEL-456' }) },
+        { name: 'cta_call', buttonParamsJson: JSON.stringify({ display_text: 'Call', id: 'debug_c2_call', phone_number: '+621234567890' }) },
       ],
     },
     {
-      body: 'Kartu 3 — single_select',
-      footer: 'Footer kartu 3',
+      body: 'Card 3 — single_select',
+      footer: 'Card 3 footer',
       buttons: [
         {
           name: 'single_select',
           buttonParamsJson: JSON.stringify({
-            title: 'Pilih dari menu',
+            title: 'Choose from the menu',
             sections: [
               {
-                title: 'Pilihan',
+                title: 'Choices',
                 rows: [
-                  { title: 'Opsi X', id: 'debug_c3_x' },
-                  { title: 'Opsi Y', id: 'debug_c3_y' },
+                  { title: 'Option X', id: 'debug_c3_x' },
+                  { title: 'Option Y', id: 'debug_c3_y' },
                 ],
               },
             ],
@@ -192,14 +192,14 @@ async function sendDebugCarouselImg(sock: WaSocketLike, chatId: string, imageUrl
   await sendCarousel(sock, chatId, [
     {
       image: { url },
-      body: 'Kartu 1 — header image + quick_reply',
-      footer: 'Footer kartu 1',
+      body: 'Card 1 — header image + quick_reply',
+      footer: 'Card 1 footer',
       buttons: [
-        { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Pilih Ini', id: 'debug_ci1_qr' }) },
+        { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Pick This', id: 'debug_ci1_qr' }) },
         {
           name: 'cta_url',
           buttonParamsJson: JSON.stringify({
-            display_text: 'Buka Link',
+            display_text: 'Open Link',
             url: 'https://github.com/chomosuke9/wazzapagents',
             merchant_url: 'https://github.com/chomosuke9/wazzapagents',
           }),
@@ -208,17 +208,17 @@ async function sendDebugCarouselImg(sock: WaSocketLike, chatId: string, imageUrl
     },
     {
       image: { url },
-      body: 'Kartu 2 — header image + cta_copy & cta_call',
-      footer: 'Footer kartu 2',
+      body: 'Card 2 — header image + cta_copy & cta_call',
+      footer: 'Card 2 footer',
       buttons: [
-        { name: 'cta_copy', buttonParamsJson: JSON.stringify({ display_text: 'Salin Kode', id: 'debug_ci2_copy', copy_code: 'IMG-CAROUSEL-789' }) },
-        { name: 'cta_call', buttonParamsJson: JSON.stringify({ display_text: 'Hubungi', id: 'debug_ci2_call', phone_number: '+621234567890' }) },
+        { name: 'cta_copy', buttonParamsJson: JSON.stringify({ display_text: 'Copy Code', id: 'debug_ci2_copy', copy_code: 'IMG-CAROUSEL-789' }) },
+        { name: 'cta_call', buttonParamsJson: JSON.stringify({ display_text: 'Call', id: 'debug_ci2_call', phone_number: '+621234567890' }) },
       ],
     },
     {
       // No image — compare rendering with vs without image
-      body: 'Kartu 3 — tanpa header image (baseline)',
-      footer: 'Footer kartu 3',
+      body: 'Card 3 — no header image (baseline)',
+      footer: 'Card 3 footer',
       buttons: [
         { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Baseline', id: 'debug_ci3_qr' }) },
       ],
@@ -242,12 +242,12 @@ async function handleDebugCommand({ chatId, args, sock }: CommandContext): Promi
           '- buttons      → quick_reply, cta_url, cta_copy, cta_call',
           '- menu         → single_select dropdown',
           '- list         → listMessage (sendList)',
-          '- rich         → sendRichMessage tanpa & dengan tombol',
-          '- combined     → semua tipe tombol dalam satu pesan',
-          '- broadcast    → preview format pesan broadcast',
-          '- carousel     → swipeable cards (tanpa header image, eksperimental)',
-          '- carousel-img → swipeable cards dengan header image (eksperimental)',
-          '                 Opsional: `/debug` carousel-img <url>',
+          '- rich         → sendRichMessage without & with buttons',
+          '- combined     → all button types in one message',
+          '- broadcast    → preview of the broadcast message format',
+          '- carousel     → swipeable cards (no header image, experimental)',
+          '- carousel-img → swipeable cards with header image (experimental)',
+          '                 Optional: `/debug` carousel-img <url>',
           '- all          → buttons + menu + list + rich + combined + broadcast',
         ].join('\n'),
       });
@@ -268,7 +268,7 @@ async function handleDebugCommand({ chatId, args, sock }: CommandContext): Promi
     } catch (err: any) {
       logger.warn({ err, label }, 'debug send failed');
       try {
-        await sock.sendMessage(chatId, { text: `❌ Gagal mengirim ${label}: ${err?.message || err}` });
+        await sock.sendMessage(chatId, { text: `❌ Failed to send ${label}: ${err?.message || err}` });
       } catch (e) { /* ignore */ }
     }
   };
@@ -287,7 +287,7 @@ export { handleDebugCommand };
 
 export const debugCommand: CommandHandler = {
   commands: ["debug", "debugs"],
-  description: "Tampilkan info debug teknis untuk chat ini.",
+  description: "Show technical debug info for this chat.",
   isHidden: true,
   permission: "isOwner",
   run: (_sock, _message, ctx) => handleDebugCommand(ctx),

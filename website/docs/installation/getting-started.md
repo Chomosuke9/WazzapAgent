@@ -27,7 +27,7 @@ After the bot joins the group, follow these steps in order:
 1. **Check bot info** by typing `/info` in the chat — make sure the bot is detected as admin if you've already made it one.
 2. **Set the bot's personality** with `/prompt <your instructions>` — this determines how the bot behaves in this group.
 3. **Test it out** by greeting the bot: `@Vivy hello!`
-4. If you want moderation, read the [Permission System](/penggunaan/permission) section first before enabling it.
+4. If you want moderation, read the [Permission System](/usage/permission) section first before enabling it.
 
 ## How the Bot Responds in Groups
 

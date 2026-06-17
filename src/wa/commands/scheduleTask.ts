@@ -51,12 +51,12 @@ function formatDuration(hours: number, minutes: number): string {
 }
 
 const USAGE =
-  "⏰ *Jadwalkan tugas*\n\n" +
-  "Format: `/schedule-task <durasi> <perintah>`\n" +
-  "Durasi: gabungan jam (H) dan menit (M), mis. `2H30M`, `2H`, `30M`, `45m`.\n\n" +
-  "Contoh:\n" +
-  "_/schedule-task 2H30M Ingatkan @Budi (abc123) soal rapat_\n\n" +
-  "Maksimal 30 hari. Gunakan format `@Nama (senderRef)` di perintah agar orang tertentu ikut ditag nanti.";
+  "⏰ *Schedule a task*\n\n" +
+  "Format: `/schedule-task <duration> <prompt>`\n" +
+  "Duration: a combination of hours (H) and minutes (M), e.g. `2H30M`, `2H`, `30M`, `45m`.\n\n" +
+  "Example:\n" +
+  "_/schedule-task 2H30M Remind @Budi (abc123) about the meeting_\n\n" +
+  "Maximum 30 days. Use the `@Name (senderRef)` format in the prompt so specific people get tagged later.";
 
 export async function handleScheduleTask(ctx: CommandContext): Promise<void> {
   const { chatId, args, folderPath = config.dataDir, sock } = ctx;
@@ -80,7 +80,7 @@ export async function handleScheduleTask(ctx: CommandContext): Promise<void> {
   if (parsed.totalMs > MAX_DELAY_MS) {
     try {
       await sock.sendMessage(chatId, {
-        text: "Durasi maksimal adalah 30 hari. ❌",
+        text: "The maximum duration is 30 days. ❌",
       });
     } catch (err) {
       /* ignore */
@@ -102,7 +102,7 @@ export async function handleScheduleTask(ctx: CommandContext): Promise<void> {
 
   try {
     await sock.sendMessage(chatId, {
-      text: `⏰ Task dijadwalkan dalam ${formatDuration(parsed.hours, parsed.minutes)}.`,
+      text: `⏰ Task scheduled in ${formatDuration(parsed.hours, parsed.minutes)}.`,
     });
   } catch (err) {
     /* ignore */
@@ -112,7 +112,7 @@ export async function handleScheduleTask(ctx: CommandContext): Promise<void> {
 export const scheduleTaskCommand: CommandHandler = {
   commands: ["schedule-task"],
   description:
-    "Jadwalkan tugas untuk dijalankan bot setelah jeda waktu. Format: /schedule-task <durasi> <perintah> — durasi gabungan jam (H) dan menit (M) mis. 2H30M, 30M, 45m (maks 30 hari). Contoh: /schedule-task 2H30M Ingatkan @Budi (abc123) soal rapat.",
+    "Schedule a task for the bot to run after a delay. Format: /schedule-task <duration> <prompt> — duration is a combination of hours (H) and minutes (M), e.g. 2H30M, 30M, 45m (max 30 days). Example: /schedule-task 2H30M Remind @Budi (abc123) about the meeting.",
   permission: "public",
   run: (_sock, _message, ctx) => handleScheduleTask(ctx),
 };

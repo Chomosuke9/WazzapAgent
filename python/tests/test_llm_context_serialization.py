@@ -65,14 +65,14 @@ class ReplyToSerializationTests(unittest.TestCase):
 
   def test_quoted_preview_keeps_non_stub_quoted_text(self) -> None:
     payload = _base_payload()
-    payload["quoted"] = _quoted_payload("imageMessage", "ini caption asli")
+    payload["quoted"] = _quoted_payload("imageMessage", "this is the original caption")
 
     preview = _quoted_preview(payload)
 
     self.assertIsNotNone(preview)
     assert preview is not None
     self.assertIn("quoted_media=image", preview)
-    self.assertIn("quoted_text=ini caption asli", preview)
+    self.assertIn("quoted_text=this is the original caption", preview)
 
   def test_quoted_preview_reports_present_for_untyped_metadata_only(self) -> None:
     payload = _base_payload()
@@ -90,7 +90,7 @@ class HistoryFormattingTests(unittest.TestCase):
         sender="Agus Kebab",
         context_msg_id="001880",
         sender_ref="12lttc",
-        text="pakai offset env",
+        text="use env offset",
       )
     ]
 
@@ -120,14 +120,14 @@ class HistoryFormattingTests(unittest.TestCase):
         context_msg_id="001880",
         sender_ref="12lttc",
         sender_is_admin=True,
-        text="pesan teks biasa",
+        text="plain text message",
       ),
       WhatsAppMessage(
         timestamp_ms=1730000001000,
         sender="Agus Kebab",
         context_msg_id="001881",
         sender_ref="12lttc",
-        text="caption media",
+        text="media caption",
         media="image",
       ),
       WhatsAppMessage(
@@ -135,7 +135,7 @@ class HistoryFormattingTests(unittest.TestCase):
         sender="Agus Kebab",
         context_msg_id="001882",
         sender_ref="12lttc",
-        text="reply ke image",
+        text="reply to image",
         quoted_message_id="A56453C5E6E9C87D762D8ADAAB751906",
         quoted_sender="Agus Kebab",
         quoted_text="<media:image>",
@@ -146,7 +146,7 @@ class HistoryFormattingTests(unittest.TestCase):
         sender="User X",
         context_msg_id="001883",
         sender_ref="u1",
-        text="reply dengan text quote asli",
+        text="reply with original quote text",
         quoted_message_id="A56453C5E6E9C87D762D8ADAAB751999",
         quoted_sender="User Y",
         quoted_text="hello world",
@@ -173,10 +173,10 @@ class HistoryFormattingTests(unittest.TestCase):
       rendered = format_history(messages)
 
     self.assertIn("[#001880]", rendered)
-    self.assertIn("Agus Kebab (12lttc) (admin): pesan teks biasa", rendered)
+    self.assertIn("Agus Kebab (12lttc) (admin): plain text message", rendered)
     self.assertIn("[#001881]", rendered)
-    self.assertIn("Agus Kebab (12lttc): [image] caption media", rendered)
-    self.assertIn("reply ke image", rendered)
+    self.assertIn("Agus Kebab (12lttc): [image] media caption", rendered)
+    self.assertIn("reply to image", rendered)
     self.assertNotIn("| media=image", rendered)
     self.assertNotIn('quoted_text=<media:image>', rendered)
     self.assertIn("hello world", rendered)
@@ -187,13 +187,13 @@ class HistoryFormattingTests(unittest.TestCase):
 
   def test_build_burst_current_uses_env_utc_offset_when_set(self) -> None:
     payload = _base_payload()
-    payload["text"] = "pesan pertama"
+    payload["text"] = "first message"
     payload["messageId"] = "wamid-burst-1"
     payload2 = dict(payload)
     payload2["contextMsgId"] = "001883"
     payload2["messageId"] = "wamid-burst-2"
     payload2["timestampMs"] = payload["timestampMs"] + 1000
-    payload2["text"] = "cek burst timezone"
+    payload2["text"] = "check burst timezone"
 
     with patch.dict(os.environ, {"CONTEXT_TIME_UTC_OFFSET_HOURS": "4"}, clear=False):
       burst = _build_burst_current([payload, payload2])
@@ -239,7 +239,7 @@ class MetadataFlagTests(unittest.TestCase):
       {
         "name": "conversation_quote",
         "attachments": [],
-        "quoted": _quoted_payload("conversation", "teks"),
+        "quoted": _quoted_payload("conversation", "text"),
         "expect_current": False,
         "expect_quoted": False,
       },
@@ -298,7 +298,7 @@ class MetadataFlagTests(unittest.TestCase):
         sender="LLM",
         context_msg_id="pending",
         sender_ref="bot",
-        text="samakan text echo",
+        text="match echo text",
         message_id="local-send-0001",
         role="assistant",
       )
@@ -306,7 +306,7 @@ class MetadataFlagTests(unittest.TestCase):
     trigger_payload = _base_payload()
     trigger_payload["fromMe"] = True
     trigger_payload["contextOnly"] = True
-    trigger_payload["text"] = "samakan text echo"
+    trigger_payload["text"] = "match echo text"
     trigger_payload["quoted"] = _quoted_payload("imageMessage", "<media:image>")
     trigger_payload["attachments"] = []
 
@@ -323,7 +323,7 @@ class PromptContextTests(unittest.TestCase):
     first["messageId"] = "wamid-prev"
     first["senderName"] = "User X"
     first["senderRef"] = "u1"
-    first["text"] = "halo"
+    first["text"] = "hello"
     first["senderIsAdmin"] = False
     first["quoted"] = None
 
@@ -448,7 +448,7 @@ class ContextPreviewPrintTests(unittest.TestCase):
       {
         "contextMsgId": "001883",
         "messageId": "wamid-image",
-        "text": "nih foto",
+        "text": "here's a photo",
         "attachments": [{"kind": "image", "mime": "image/jpeg"}],
         "botIsAdmin": True,
         "botIsSuperAdmin": False,

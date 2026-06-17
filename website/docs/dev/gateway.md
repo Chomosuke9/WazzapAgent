@@ -4,11 +4,11 @@ sidebar_position: 3
 
 # Node.js Gateway
 
-Dokumentasi internal untuk Node.js Gateway (`src/`, TypeScript). Gateway adalah **WebSocket server**: ia mem-bind `WS_BIND_HOST:WS_LISTEN_PORT` (default `127.0.0.1:3000`), dan tiap Python `WaSocket` adalah **client** yang men-dial masuk di `NODE_URL` (default `ws://localhost:3000`) untuk menjembatani WhatsApp ke pipeline LLM.
+Internal documentation for the Node.js Gateway (`src/`, TypeScript). The gateway is the **WebSocket server**: it binds `WS_BIND_HOST:WS_LISTEN_PORT` (default `127.0.0.1:3000`), and each Python `WaSocket` is a **client** that dials in at `NODE_URL` (default `ws://localhost:3000`) to bridge WhatsApp to the LLM pipeline.
 
 ## Tech Stack
 
-- **Runtime:** Node.js 18+ dengan ESM (`"type": "module"`)
+- **Runtime:** Node.js 18+ with ESM (`"type": "module"`)
 - **WhatsApp Library:** Baileys v7 (`baileys@7.0.0-rc12`)
 - **WebSocket:** `ws` library
 - **Logging:** Pino (structured JSON logging)
@@ -16,15 +16,15 @@ Dokumentasi internal untuk Node.js Gateway (`src/`, TypeScript). Gateway adalah 
 
 ## Entry Point (`index.ts`)
 
-File `index.ts` adalah composition root utama:
+`index.ts` is the main composition root:
 
-1. Membaca konfigurasi dan mem-bind WebSocket **server** di `WS_BIND_HOST:WS_LISTEN_PORT` (default `127.0.0.1:3000`).
-2. Untuk tiap tenant `folder_path`, membuat/melanjutkan socket Baileys per akun.
-3. Menerima koneksi dari Python `WaSocket` client yang men-dial masuk di `NODE_URL`, lalu mengikatnya ke akun via registry setelah handshake `hello`/`hello_ack`.
-4. Routing **action** dari bridge (Python→Node) ke fungsi WhatsApp yang sesuai, per akun via `src/account/actionDispatcher.ts`.
+1. Reads configuration and binds the WebSocket **server** on `WS_BIND_HOST:WS_LISTEN_PORT` (default `127.0.0.1:3000`).
+2. For each tenant `folder_path`, creates/resumes a per-account Baileys socket.
+3. Accepts connections from Python `WaSocket` clients that dial in at `NODE_URL`, binding each to its account via the registry after the `hello`/`hello_ack` handshake.
+4. Routes **actions** from the bridge (Python→Node) to the appropriate WhatsApp functions, per account via `src/account/actionDispatcher.ts`.
 
 ```js
-// Action dispatch (Python → Node), per akun via src/account/actionDispatcher.ts
+// Action dispatch (Python → Node), per account via src/account/actionDispatcher.ts
 'send_message'          → sendOutgoing(payload)
 'react_message'         → reactToMessage(payload)
 'delete_message'        → deleteMessageByContextId(payload)
@@ -36,135 +36,135 @@ File `index.ts` adalah composition root utama:
 'send_buttons' / 'send_carousel'
 ```
 
-Setiap aksi mengembalikan `action_ack` ke bridge (Node→Python). Untuk `send_message`, juga mengirim `send_ack` legacy. Setiap frame Node→Python membawa `folderPath` untuk routing tenant.
+Each action returns an `action_ack` to the bridge (Node→Python). For `send_message`, a legacy `send_ack` is also emitted. Every Node→Python frame carries `folderPath` for tenant routing.
 
 ## WhatsApp Client (`src/wa/connection.ts`)
 
-### Koneksi
+### Connection
 
-Menggunakan `makeWASocket` dari Baileys dengan auth state yang disimpan di `data/auth/`. Saat pertama kali, menampilkan QR code di terminal.
+Uses `makeWASocket` from Baileys with auth state stored in `data/auth/`. On first run, displays a QR code in the terminal.
 
 ### Event Handling
 
-- **`messages.upsert`** — Event utama saat pesan masuk. Setiap pesan di-parse, di-assign contextMsgId, dan dikirim ke bridge.
-- **`group-participants.update`** — Mendeteksi anggota baru masuk/keluar grup.
-- **`connection.update`** — Mengelola status koneksi dan reconnection.
+- **`messages.upsert`** — Main event when messages arrive. Each message is parsed, assigned a contextMsgId, and sent to the bridge.
+- **`group-participants.update`** — Detects members joining/leaving groups.
+- **`connection.update`** — Manages connection status and reconnection.
 
-### Aksi Moderasi
+### Moderation Actions
 
-| Fungsi | Deskripsi |
-|--------|-----------|
-| `sendOutgoing(payload)` | Kirim pesan teks/media dengan support mentions dan reply |
-| `reactToMessage(payload)` | Tambah reaksi emoji ke pesan |
-| `deleteMessageByContextId(payload)` | Hapus pesan berdasarkan contextMsgId |
-| `kickMembers(payload)` | Kick member dari grup (support `partial_success` mode) |
-| `markChatRead(payload)` | Tandai pesan sebagai dibaca (centang biru) |
-| `sendPresence(payload)` | Kirim typing indicator (`composing`/`paused`) |
+| Function | Description |
+|----------|-------------|
+| `sendOutgoing(payload)` | Send text/media message with mention and reply support |
+| `reactToMessage(payload)` | Add emoji reaction to a message |
+| `deleteMessageByContextId(payload)` | Delete message by contextMsgId |
+| `kickMembers(payload)` | Kick members from group (supports `partial_success` mode) |
+| `markChatRead(payload)` | Mark message as read (blue check) |
+| `sendPresence(payload)` | Send typing indicator (`composing`/`paused`) |
 
 ### Mention Resolution
 
-Saat mengirim pesan, gateway me-resolve token `@Name (senderRef)` di teks menjadi JID WhatsApp yang valid:
+When sending messages, the gateway resolves `@Name (senderRef)` tokens in text to valid WhatsApp JIDs:
 
 ```
-Teks input:  "Hai @whoami (u8k2d1), jangan spam ya"
-Resolusi:    senderRef "u8k2d1" → JID "628123456789@s.whatsapp.net"
-Teks output: "Hai @628123456789, jangan spam ya" (dengan mention tag)
+Input text:  "Hey @whoami (u8k2d1), stop spamming"
+Resolution:  senderRef "u8k2d1" → JID "628123456789@s.whatsapp.net"
+Output text: "Hey @628123456789, stop spamming" (with mention tag)
 ```
 
-Token `@all (all)` di-resolve menjadi mention semua anggota grup.
+The `@all (all)` token resolves to mentioning all group members.
 
 ## Message Parser (`src/wa/domain/messageParser.ts`)
 
-Parser mengekstrak informasi terstruktur dari raw Baileys message:
+The parser extracts structured information from raw Baileys messages:
 
-### Data yang Diekstrak
+### Extracted Data
 
-| Field | Sumber |
+| Field | Source |
 |-------|--------|
-| `text` | `conversation`, `extendedTextMessage`, caption media, reaksi, contact, interactive |
-| `quoted` | `contextInfo.quotedMessage` — sender, teks, tipe, lokasi |
+| `text` | `conversation`, `extendedTextMessage`, media captions, reactions, contacts, interactive |
+| `quoted` | `contextInfo.quotedMessage` — sender, text, type, location |
 | `mentionedJids` | `contextInfo.mentionedJid` |
 | `location` | `locationMessage`, `liveLocationMessage` |
-| `attachments` | Hasil download media (image, video, audio, document, sticker) |
+| `attachments` | Downloaded media results (image, video, audio, document, sticker) |
 
-### Urutan Ekstraksi Teks
+### Text Extraction Priority
 
-Parser mencoba sumber teks dalam urutan prioritas:
+The parser tries text sources in priority order:
 
-1. `conversation` (pesan teks biasa)
-2. `extendedTextMessage.text` (teks dengan formatting/link)
+1. `conversation` (plain text message)
+2. `extendedTextMessage.text` (text with formatting/links)
 3. Interactive responses (button, template, list)
-4. Caption media (image/video/document)
-5. Reaksi → `react:{emoji}`
-6. Contact → `<contact: Name, Phone>`
-7. Media placeholder → `<media:image>`, `<media:video>`, dll.
+4. Media captions (image/video/document)
+5. Reactions → `react:{emoji}`
+6. Contacts → `<contact: Name, Phone>`
+7. Media placeholders → `<media:image>`, `<media:video>`, etc.
 
 ## Identifiers (`src/wa/domain/identifiers.ts`)
 
 ### contextMsgId
 
-- Counter 6 digit per chat: `000000` sampai `999999`.
-- Increment setiap pesan baru di chat tersebut.
-- Wrap kembali ke `000000` setelah `999999`.
-- Disimpan di `contextCounterByChat` Map.
-- Diindeks di `messageKeyIndex` untuk lookup cepat.
+- 6-digit counter per chat: `000000` through `999999`.
+- Increments with each new message in that chat.
+- Wraps back to `000000` after `999999`.
+- Stored in `contextCounterByChat` Map.
+- Indexed in `messageKeyIndex` for fast lookup.
 
 ### senderRef
 
-- ID pendek 6 karakter per sender per chat.
-- Di-generate dari SHA-1 hash: `sha1(chatId|senderId|attempt)` → base36, 6 chars.
-- Collision handling: retry dengan increment `attempt` (max 128 percobaan).
-- Registry per chat: `senderToRef`, `refToSender`, `senderToParticipant`.
-- **Tujuan:** Memastikan JID asli tidak pernah terekspos ke LLM.
+- Short 6-character ID per sender per chat.
+- Generated from SHA-1 hash: `sha1(chatId|senderId|attempt)` → base36, 6 chars.
+- Collision handling: retry with incrementing `attempt` (max 128 attempts).
+- Per-chat registry: `senderToRef`, `refToSender`, `senderToParticipant`.
+- **Purpose:** Ensures real JIDs are never exposed to the LLM.
 
 ## Media Handler (`src/mediaHandler.ts`)
 
-### Alur Download
+### Download Flow
 
-1. Terima stream media dari Baileys.
-2. Validasi MIME type.
-3. Simpan ke `MEDIA_DIR` (`data/media/`).
-4. Kembalikan metadata (kind, mime, fileName, size, path).
+1. Receive media stream from Baileys.
+2. Validate MIME type.
+3. Save to `MEDIA_DIR` (`data/media/`).
+4. Return metadata (kind, mime, fileName, size, path).
 
-### Keamanan
+### Security
 
-- Path media di-sandbox ke `MEDIA_DIR` — tidak bisa directory traversal.
-- Ukuran file dibatasi untuk menghindari OOM.
+- Media paths are sandboxed to `MEDIA_DIR` — no directory traversal possible.
+- File sizes are limited to prevent OOM.
 
 ## Caches (`src/wa/domain/caches.ts`)
 
-| Cache | Tipe | Maks Size | TTL |
-|-------|------|-----------|-----|
+| Cache | Type | Max Size | TTL |
+|-------|------|----------|-----|
 | `messageCache` | `Map<messageId, rawMsg>` | 5000 | - |
 | `messageKeyIndex` | `Map<chatId::contextMsgId, entry>` | 10000 | - |
 | `messageIdToContextId` | `Map<chatId::messageId, contextMsgId>` | 20000 | - |
 | `contextCounterByChat` | `Map<chatId, counter>` | - | - |
 | `senderRefRegistryByChat` | `Map<chatId, registry>` | - | - |
-| Group metadata | Via `groupContext.ts` | - | 60 detik |
+| Group metadata | Via `groupContext.ts` | - | 60 seconds |
 
 ## Group Context (`src/wa/domain/groupContext.ts`)
 
 ### Metadata Caching
 
-Metadata grup (nama, deskripsi, partisipan) di-cache dengan TTL 60 detik. Setelah expire, di-fetch ulang dari WhatsApp.
+Group metadata (name, description, participants) is cached with a 60-second TTL. After expiry, it's re-fetched from WhatsApp.
 
 ## WebSocket Server (`src/server/wsServer.ts`)
 
-Setelah migrasi, topologi **dibalik**: **Node adalah WebSocket server**, bukan client. Tiap Python `WaSocket` adalah client yang men-dial Node di `NODE_URL` (default `ws://localhost:3000`).
+Post-migration the topology is **reversed**: **Node is the WebSocket server**, not a client. Each Python `WaSocket` is a client that dials Node at `NODE_URL` (default `ws://localhost:3000`).
 
-- Mem-bind server `ws` di `WS_BIND_HOST:WS_LISTEN_PORT` (default `127.0.0.1:3000`).
-- Menerima koneksi client dan menjalankan heartbeat per-koneksi (`WS_HEARTBEAT_INTERVAL_MS`).
-- Mendukung bearer token opsional via `LLM_WS_TOKEN` (diperiksa Node, dikirim oleh client Python).
-- `src/server/accountRegistry.ts` mengikat tiap client ke `folder_path`-nya setelah handshake `hello` (Python→Node, `{folderPath, protocolVersion: "2.0"}`) / `hello_ack` (Node→Python, `{folderPath, waStatus}`).
+- Binds the `ws` server on `WS_BIND_HOST:WS_LISTEN_PORT` (default `127.0.0.1:3000`).
+- Accepts client connections and runs a per-connection heartbeat (`WS_HEARTBEAT_INTERVAL_MS`).
+- Supports an optional bearer token via `LLM_WS_TOKEN` (enforced by Node, sent by the Python client).
+- `src/server/accountRegistry.ts` binds each client to its `folder_path` after the `hello` handshake (Python→Node, `{folderPath, protocolVersion: "2.0"}`) / `hello_ack` (Node→Python, `{folderPath, waStatus}`).
 
-Setelah handshake: **action** mengalir Python→Node; **event**, control event, dan ack mengalir Node→Python. Setiap frame Node→Python membawa `folderPath` untuk routing tenant.
+After the handshake: **actions** flow Python→Node; **events**, control events, and acks flow Node→Python. Every Node→Python frame carries `folderPath` for tenant routing.
 
-> Urutan start: jalankan **gateway Node lebih dulu** (server), lalu bridge Python (client men-dial masuk).
+> Start order: start the **Node gateway first** (the server), then the Python bridge (clients dial in).
 
-## Konvensi Kode
+## Code Conventions
 
 - ESM modules (`import`/`export`).
 - 2-space indentation, single quotes.
-- Async/await untuk semua operasi asynchronous.
-- Structured logging via `logger` dengan objek konteks.
-- Tidak ada formatter/linter — ikuti style yang ada dan minimalkan diff.
+- Async/await for all asynchronous operations.
+- Structured logging via `logger` with context objects.
+- No formatter/linter configured — match existing style and keep diffs minimal.

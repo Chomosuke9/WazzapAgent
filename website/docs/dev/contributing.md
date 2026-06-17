@@ -98,7 +98,7 @@ pnpm test
 
 ## Documentation
 
-The documentation website uses Docusaurus and is auto-deployed via GitHub Actions.
+The documentation website uses Docusaurus and is auto-deployed via GitHub Actions. The site is **English-only**.
 
 ### Local Development
 
@@ -108,18 +108,10 @@ npm ci
 npm start
 ```
 
-### Languages
-
-- **Indonesian** is the primary (source) language — edit in `website/docs/`.
-- **English** is the translation — edit in `website/i18n/en/docusaurus-plugin-content-docs/current/`.
-- Keep both languages in sync when adding or modifying pages.
-
 ### Adding New Pages
 
-1. Create a `.md` file in `website/docs/` (Indonesian).
-2. Create the translation file in `website/i18n/en/docusaurus-plugin-content-docs/current/`.
-3. Add an entry in `website/sidebars.ts`.
-4. Add label translation in `website/i18n/en/docusaurus-plugin-content-docs/current/sidebars.json`.
+1. Create a `.md` file in `website/docs/` (English).
+2. Add an entry in `website/sidebars.ts`.
 
 ## CI/CD
 

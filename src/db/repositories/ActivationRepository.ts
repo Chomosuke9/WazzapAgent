@@ -124,17 +124,17 @@ export class ActivationRepository extends BaseRepository {
       code.toUpperCase(),
     );
     if (codeRows.length === 0) {
-      return { success: false, message: "Kode aktivasi tidak ditemukan." };
+      return { success: false, message: "Activation code not found." };
     }
     const codeRow = codeRows[0];
     if (codeRow.used) {
-      return { success: false, message: "Kode aktivasi sudah digunakan." };
+      return { success: false, message: "Activation code already used." };
     }
     const codeType = codeRow.type;
     if (codeType !== "all") {
       const expected = chatType === "group" ? "group" : "private";
       if (codeType !== expected) {
-        return { success: false, message: `Kode ini hanya untuk ${codeType === "group" ? "grup" : "chat privat"}.` };
+        return { success: false, message: `This code is only for ${codeType === "group" ? "groups" : "private chats"}.` };
       }
     }
     this.runSettingsQuery(
@@ -187,9 +187,9 @@ export class ActivationRepository extends BaseRepository {
     }
     logger.info({ chatId, code: code.toUpperCase(), days: daysInt, expiresAt }, "DB activate_chat");
     if (daysInt === 0) {
-      return { success: true, message: "Aktivasi berhasil! Chat ini sekarang aktif secara permanen.", expiresAt: null };
+      return { success: true, message: "Activation successful! This chat is now permanently active.", expiresAt: null };
     }
-    return { success: true, message: `Aktivasi berhasil! Chat ini aktif selama ${daysInt} hari.`, expiresAt };
+    return { success: true, message: `Activation successful! This chat is active for ${daysInt} days.`, expiresAt };
   }
 
   isChatActivated(chatId: string): boolean {
@@ -261,7 +261,7 @@ export class ActivationRepository extends BaseRepository {
       id,
     );
     if (rows.length === 0) {
-      return { success: false, message: "Kode aktivasi tidak ditemukan." };
+      return { success: false, message: "Activation code not found." };
     }
     const codeRow = rows[0];
     const wasUsed = codeRow.used === 1;
@@ -271,7 +271,7 @@ export class ActivationRepository extends BaseRepository {
       this.runSettingsQuery("DELETE FROM chat_activations WHERE code = ?", codeRow.code);
     }
     logger.info({ id, code: codeRow.code, wasUsed, usedBy }, "DB revoke_activation_code");
-    return { success: true, message: "Kode aktivasi dicabut.", wasUsed, usedBy };
+    return { success: true, message: "Activation code revoked.", wasUsed, usedBy };
   }
 
   markExpiryNotified(chatId: string): void {

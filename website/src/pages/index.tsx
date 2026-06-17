@@ -29,7 +29,7 @@ function HomepageHeader() {
               </span>
               <span className={styles.badge}>
                 <Translate id="homepage.badge.multiAccount">
-                  Multi-akun
+                  Multi-account
                 </Translate>
               </span>
             </div>
@@ -38,17 +38,17 @@ function HomepageHeader() {
             </Heading>
             <p className="hero__subtitle">
               <Translate id="homepage.tagline">
-                Bot WhatsApp berbasis AI yang bisa diajak ngobrol, moderasi grup,
-                dan disesuaikan sesukamu.
+                An AI-powered WhatsApp bot you can chat with, moderate groups,
+                and customize however you like.
               </Translate>
             </p>
             <div className={styles.buttons}>
               <Link
                 className="button button--secondary button--lg"
-                to="/pengantar"
+                to="/"
               >
                 <Translate id="homepage.cta.getStarted">
-                  Mulai Sekarang
+                  Get Started
                 </Translate>
               </Link>
               <Link
@@ -56,10 +56,10 @@ function HomepageHeader() {
                   "button button--outline button--lg",
                   styles.heroOutlineButton,
                 )}
-                to="/penggunaan/perintah"
+                to="/usage/commands"
               >
                 <Translate id="homepage.cta.viewCommands">
-                  Lihat Perintah
+                  View Commands
                 </Translate>
               </Link>
             </div>
@@ -70,7 +70,7 @@ function HomepageHeader() {
               alt={translate({
                 id: "homepage.hero.imageAlt",
                 message:
-                  "Tangkapan layar bot WhatsApp WazzapAgents menampilkan perintah /info",
+                  "Screenshot of the WazzapAgents WhatsApp bot showing the /info command",
               })}
               loading="eager"
             />
@@ -107,35 +107,35 @@ function HowItWorks() {
       num: "1",
       title: translate({
         id: "homepage.howItWorks.step1.title",
-        message: "Tambahkan Bot",
+        message: "Add the Bot",
       }),
       desc: translate({
         id: "homepage.howItWorks.step1.desc",
         message:
-          "Masukkan nomor bot ke grup WhatsApp-mu seperti menambah anggota biasa.",
+          "Add the bot's number to your WhatsApp group just like adding a regular member.",
       }),
     },
     {
       num: "2",
       title: translate({
         id: "homepage.howItWorks.step2.title",
-        message: "Atur Prompt",
+        message: "Set the Prompt",
       }),
       desc: translate({
         id: "homepage.howItWorks.step2.desc",
-        message: "Tentukan kepribadian dan aturan bot dengan perintah /prompt.",
+        message: "Define the bot's personality and rules with the /prompt command.",
       }),
     },
     {
       num: "3",
       title: translate({
         id: "homepage.howItWorks.step3.title",
-        message: "Siap Digunakan!",
+        message: "Ready to Use!",
       }),
       desc: translate({
         id: "homepage.howItWorks.step3.desc",
         message:
-          "Bot langsung aktif dan bisa diajak ngobrol oleh semua anggota grup.",
+          "The bot is instantly active and ready to chat with all group members.",
       }),
     },
   ];
@@ -144,7 +144,7 @@ function HowItWorks() {
     <section className="how-it-works">
       <div className="container">
         <Heading as="h2" className={styles.sectionHeading}>
-          <Translate id="homepage.howItWorks.title">Cara Kerja</Translate>
+          <Translate id="homepage.howItWorks.title">How It Works</Translate>
         </Heading>
         <div className="row" style={{ justifyContent: "center" }}>
           {steps.map((step, idx) => (
@@ -170,33 +170,33 @@ function Showcase() {
       src: useBaseUrl("/img/slash_setting.jpg"),
       caption: translate({
         id: "homepage.showcase.settings.caption",
-        message: "Atur perilaku bot per-grup lewat menu /setting.",
+        message: "Configure per-group bot behavior via the /setting menu.",
       }),
       alt: translate({
         id: "homepage.showcase.settings.alt",
-        message: "Tangkapan layar menu pengaturan /setting",
+        message: "Screenshot of the /setting settings menu",
       }),
     },
     {
       src: useBaseUrl("/img/gpt_model.jpg"),
       caption: translate({
         id: "homepage.showcase.model.caption",
-        message: "Pilih model AI favoritmu untuk tiap percakapan.",
+        message: "Pick your favorite AI model for each conversation.",
       }),
       alt: translate({
         id: "homepage.showcase.model.alt",
-        message: "Tangkapan layar konfigurasi model AI",
+        message: "Screenshot of the AI model configuration",
       }),
     },
     {
       src: useBaseUrl("/img/check_success.png"),
       caption: translate({
         id: "homepage.showcase.success.caption",
-        message: "Verifikasi koneksi yang berhasil dengan cepat.",
+        message: "Quickly verify a successful connection.",
       }),
       alt: translate({
         id: "homepage.showcase.success.alt",
-        message: "Tangkapan layar status koneksi berhasil",
+        message: "Screenshot of a successful connection status",
       }),
     },
   ];
@@ -205,11 +205,11 @@ function Showcase() {
     <section className={styles.showcase}>
       <div className="container">
         <Heading as="h2" className={styles.sectionHeading}>
-          <Translate id="homepage.showcase.title">Lihat Langsung</Translate>
+          <Translate id="homepage.showcase.title">See It in Action</Translate>
         </Heading>
         <p className={styles.sectionSubheading}>
           <Translate id="homepage.showcase.subtitle">
-            Cuplikan WazzapAgents saat beraksi di WhatsApp.
+            Snapshots of WazzapAgents in action on WhatsApp.
           </Translate>
         </p>
         <div className={styles.showcaseGrid}>
@@ -231,17 +231,16 @@ function CtaBand() {
       <div className="container">
         <Heading as="h2" className={styles.ctaTitle}>
           <Translate id="homepage.ctaBand.title">
-            Siap menghidupkan grup WhatsApp-mu?
+            Ready to bring your WhatsApp group to life?
           </Translate>
         </Heading>
         <p className={styles.ctaSubtitle}>
           <Translate id="homepage.ctaBand.subtitle">
-            Pasang WazzapAgents dalam beberapa menit dan mulai mengobrol dengan
-            AI.
+            Set up WazzapAgents in minutes and start chatting with AI.
           </Translate>
         </p>
-        <Link className="button button--secondary button--lg" to="/instalasi">
-          <Translate id="homepage.ctaBand.button">Pasang Sekarang</Translate>
+        <Link className="button button--secondary button--lg" to="/installation">
+          <Translate id="homepage.ctaBand.button">Install Now</Translate>
         </Link>
       </div>
     </section>
@@ -252,36 +251,36 @@ const features = [
   {
     title: translate({
       id: "homepage.feature1.title",
-      message: "Asisten AI di WhatsApp",
+      message: "AI Assistant on WhatsApp",
     }),
     description: translate({
       id: "homepage.feature1.desc",
       message:
-        "Bot berbasis AI yang bisa mengobrol natural, menjawab pertanyaan, bercanda, dan membantu anggota grup.",
+        "An AI-powered bot that chats naturally, answers questions, jokes around, and helps group members.",
     }),
     icon: "🤖",
   },
   {
     title: translate({
       id: "homepage.feature2.title",
-      message: "Moderasi Otomatis",
+      message: "Automatic Moderation",
     }),
     description: translate({
       id: "homepage.feature2.desc",
       message:
-        "Bisa menghapus pesan spam atau mengeluarkan anggota nakal secara otomatis sesuai aturan yang kamu set.",
+        "Can delete spam messages or remove troublesome members automatically according to the rules you set.",
     }),
     icon: "🛡️",
   },
   {
     title: translate({
       id: "homepage.feature3.title",
-      message: "Sepenuhnya Bisa Dikustomisasi",
+      message: "Fully Customizable",
     }),
     description: translate({
       id: "homepage.feature3.desc",
       message:
-        "Atur kepribadian, peran, dan aturan bot dengan perintah /prompt. Berbeda di setiap grup.",
+        "Set the bot's personality, role, and rules with the /prompt command. Different for each group.",
     }),
     icon: "🎨",
   },
@@ -292,12 +291,12 @@ export default function Home(): ReactNode {
     <Layout
       title={translate({
         id: "homepage.layout.title",
-        message: "Panduan Pengguna",
+        message: "User Guide",
       })}
       description={translate({
         id: "homepage.layout.description",
         message:
-          "Dokumentasi lengkap cara menggunakan WazzapAgents — bot WhatsApp berbasis AI",
+          "Complete documentation on how to use WazzapAgents — an AI-powered WhatsApp bot",
       })}
     >
       <HomepageHeader />
@@ -306,7 +305,7 @@ export default function Home(): ReactNode {
           <div className="container">
             <Heading as="h2" className={styles.sectionHeading}>
               <Translate id="homepage.features.title">
-                Kenapa WazzapAgents?
+                Why WazzapAgents?
               </Translate>
             </Heading>
             <div className="row">

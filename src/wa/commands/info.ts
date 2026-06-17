@@ -16,11 +16,11 @@ async function handleInfoCommand({ chatId, senderId, senderDisplay, senderRole, 
     ? 'owner'
     : (senderRole?.isSuperAdmin ? 'superadmin' : (senderRole?.isAdmin ? 'admin' : 'member'));
   const lines = [
-    'Info pengguna:',
-    `Nama: ${senderDisplay || 'unknown'}`,
+    'User info:',
+    `Name: ${senderDisplay || 'unknown'}`,
     `JID: ${senderId || 'unknown'}`,
-    `Peran: ${roleLabel}`,
-    `Owner bot: ${isOwner ? 'ya' : 'tidak'}`,
+    `Role: ${roleLabel}`,
+    `Bot owner: ${isOwner ? 'yes' : 'no'}`,
   ];
 
   if (isGroup) {
@@ -28,18 +28,18 @@ async function handleInfoCommand({ chatId, senderId, senderDisplay, senderRole, 
     const memberCount = Array.isArray(group?.participants) ? group!.participants.length : null;
     const description = truncateText(group?.description, 300);
     lines.push('');
-    lines.push('Info grup:');
-    lines.push(`Nama grup: ${groupName || 'unknown'}`);
-    lines.push(`ID grup: ${chatId || 'unknown'}`);
-    lines.push(`Jumlah anggota: ${typeof memberCount === 'number' ? memberCount : 'unknown'}`);
-    lines.push(`Bot admin: ${group?.botIsAdmin ? 'ya' : 'tidak'}`);
-    lines.push(`Bot superadmin: ${group?.botIsSuperAdmin ? 'ya' : 'tidak'}`);
-    if (description) lines.push(`Deskripsi: ${description}`);
+    lines.push('Group info:');
+    lines.push(`Group name: ${groupName || 'unknown'}`);
+    lines.push(`Group ID: ${chatId || 'unknown'}`);
+    lines.push(`Member count: ${typeof memberCount === 'number' ? memberCount : 'unknown'}`);
+    lines.push(`Bot admin: ${group?.botIsAdmin ? 'yes' : 'no'}`);
+    lines.push(`Bot superadmin: ${group?.botIsSuperAdmin ? 'yes' : 'no'}`);
+    if (description) lines.push(`Description: ${description}`);
   } else {
     lines.push('');
-    lines.push('Info chat:');
-    lines.push('Tipe: private');
-    lines.push(`ID chat: ${chatId || 'unknown'}`);
+    lines.push('Chat info:');
+    lines.push('Type: private');
+    lines.push(`Chat ID: ${chatId || 'unknown'}`);
   }
 
   try {
@@ -53,7 +53,7 @@ export { handleInfoCommand };
 
 export const infoCommand: CommandHandler = {
   commands: ["info", "infos"],
-  description: "Tampilkan informasi lengkap tentang konteks saat ini: nama pengirim, peran (admin/owner/anggota), tipe chat (grup/pribadi), status aktivasi, dan konfigurasi bot yang berlaku.",
+  description: "Show full information about the current context: sender name, role (admin/owner/member), chat type (group/private), activation status, and the bot configuration in effect.",
   permission: "public",
   run: (_sock, _message, ctx) => handleInfoCommand(ctx),
 };

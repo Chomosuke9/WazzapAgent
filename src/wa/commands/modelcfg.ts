@@ -115,11 +115,11 @@ async function handleModelcfg({ chatId, senderId: _senderId, args, folderPath = 
         {
           name: 'single_select',
           buttonParamsJson: JSON.stringify({
-            title: 'Hapus Model',
+            title: 'Remove Model',
             sections,
           }),
         },
-      ], { footer: 'Pilih model untuk dihapus' });
+      ], { footer: 'Select a model to remove' });
     } catch (err) {
       logger.warn({ err, chatId }, 'failed sending /modelcfg remove menu');
       try {
@@ -138,7 +138,7 @@ async function handleModelcfg({ chatId, senderId: _senderId, args, folderPath = 
         } catch (err) { /* ignore */ }
         return;
       }
-      const lines = ['*Daftar Model:*'];
+      const lines = ['*Model List:*'];
       const defaultModel = repos!.model.getDefaultLlm2Model();
       for (const m of models) {
         const isDefault = defaultModel?.modelId === m.modelId;
@@ -270,7 +270,7 @@ export { handleModelcfg };
 
 export const modelcfgCommand: CommandHandler = {
   commands: ["modelcfg", "modelcfgs"],
-  description: "Konfigurasi model LLM dan parameternya (temperature, max token, dll) untuk chat ini atau secara global. Tanpa argumen menampilkan konfigurasi saat ini. Khusus owner.",
+  description: "Configure the LLM model and its parameters (temperature, max tokens, etc.) for this chat or globally. Without arguments it shows the current configuration. Owner only.",
   permission: "isOwner",
   run: (_sock, _message, ctx) => handleModelcfg(ctx),
 };
@@ -524,7 +524,7 @@ export const modelcfgButton: ButtonHandler = {
         await sock.sendMessage(chatId, { text: "No models configured." });
         return;
       }
-      const lines = ["*Daftar Model:*"];
+      const lines = ["*Model List:*"];
       const defaultModel = account.repos!.model.getDefaultLlm2Model();
       for (const m of models) {
         const isDefault = defaultModel?.modelId === m.modelId;
@@ -625,7 +625,7 @@ export async function handlePendingModelForm(
   const normalizedText = text?.trim().toLowerCase();
   if (normalizedText === "cancel" || normalizedText === "batal") {
     clearPendingForm(account, chatId);
-    await sock.sendMessage(chatId, { text: "Operasi dibatalkan." });
+    await sock.sendMessage(chatId, { text: "Operation cancelled." });
     return true;
   }
 
@@ -641,8 +641,8 @@ export async function handlePendingModelForm(
     }
     await sock.sendMessage(chatId, {
       text: result.success
-        ? `Model "${result.modelId}" diupdate.`
-        : `Model "${result.modelId}" tidak ditemukan.`,
+        ? `Model "${result.modelId}" updated.`
+        : `Model "${result.modelId}" not found.`,
     });
   } else if (result.action === "add_model") {
     if (result.error) {
@@ -663,8 +663,8 @@ export async function handlePendingModelForm(
       }
       await sock.sendMessage(chatId, {
         text: success
-          ? `Model "${result.displayName}" ditambahkan.${result.visionSupport ? " (Vision enabled)" : ""}`
-          : `Model "${result.modelId}" sudah ada.`,
+          ? `Model "${result.displayName}" added.${result.visionSupport ? " (Vision enabled)" : ""}`
+          : `Model "${result.modelId}" already exists.`,
       });
     }
   }

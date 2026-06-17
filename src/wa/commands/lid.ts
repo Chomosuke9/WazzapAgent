@@ -58,7 +58,7 @@ export { handleLid };
 export const lidCommand: CommandHandler = {
   commands: ["lid"],
   description:
-    "Cari LID WhatsApp dari nomor HP (untuk mengisi BOT_OWNER_JIDS). Pakai: /lid <nomor>",
+    "Look up a WhatsApp LID from a phone number (to fill in BOT_OWNER_JIDS). Usage: /lid <number>",
   permission: "from_me or isOwner",
   run: (_sock, _message, ctx) => handleLid(ctx),
 };

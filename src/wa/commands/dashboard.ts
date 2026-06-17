@@ -251,7 +251,7 @@ export { handleDashboard };
 
 export const dashboardCommand: CommandHandler = {
   commands: ["dashboard", "dashboards"],
-  description: "Tampilkan statistik penggunaan bot untuk chat ini: jumlah pesan, respon bot, dan aktivitas pengguna dalam periode tertentu.",
+  description: "Show bot usage statistics for this chat: message counts, bot responses, and user activity over a given period.",
   permission: "public",
   run: (_sock, _message, ctx) => handleDashboard(ctx),
 };

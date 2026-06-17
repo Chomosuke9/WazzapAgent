@@ -21,7 +21,7 @@ function byCanonical(a: CommandHandler, b: CommandHandler): number {
 }
 
 function formatLine(handler: CommandHandler): string {
-  return `- */\`${handler.commands[0]}\`*\n*Permission* : ${handler.permission}\n*Deskripsi* : ${handler.description}`;
+  return `- */\`${handler.commands[0]}\`*\n*Permission* : ${handler.permission}\n*Description* : ${handler.description}`;
 }
 
 /** Build the `/help` body from the current registry. */
@@ -30,9 +30,9 @@ function buildHelpText(): string {
   const general = visible.filter((c) => !isOwnerCommand(c)).sort(byCanonical);
   const owner = visible.filter(isOwnerCommand).sort(byCanonical);
 
-  const lines: string[] = ["*WazzapAgents — Daftar Perintah*"];
+  const lines: string[] = ["*WazzapAgents — Command List*"];
 
-  lines.push("", "*Umum*", "");
+  lines.push("", "*General*", "");
   lines.push(general.map(formatLine).join("\n\n"));
 
   if (owner.length > 0) {
@@ -42,7 +42,7 @@ function buildHelpText(): string {
 
   lines.push(
     "",
-    "_Ketik sebagian perintah tanpa argumen untuk melihat status/nilai saat ini._",
+    "_Type part of a command without arguments to see its current status/value._",
   );
 
   return lines.join("\n");
@@ -61,7 +61,7 @@ export { handleHelp, buildHelpText };
 export const helpCommand: CommandHandler = {
   commands: ["help", "helps", "menu", "list"],
   description:
-    "Tampilkan daftar lengkap semua perintah yang tersedia beserta level permission dan deskripsinya. Perintah tersembunyi tidak ditampilkan.",
+    "Show the full list of all available commands along with their permission level and description. Hidden commands are not shown.",
   permission: "public",
   run: (_sock, _message, ctx) => handleHelp(ctx),
 };

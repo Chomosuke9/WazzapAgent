@@ -116,7 +116,7 @@ export { handleIdle };
 
 export const idleCommand: CommandHandler = {
   commands: ["idle"],
-  description: "Konfigurasi pemicu idle: bot ikut berkomentar setelah sejumlah pesan berlalu tanpa dibalas. Format: /idle <n> (setelah tepat n pesan), /idle <min>-<max> (acak dalam rentang), /idle off (nonaktifkan). Contoh: /idle 5-10.",
+  description: "Configure the idle trigger: the bot chimes in after a number of messages pass without a reply. Format: /idle <n> (after exactly n messages), /idle <min>-<max> (random within range), /idle off (disable). Example: /idle 5-10.",
   permission: "isAdmin or isOwner",
   run: (_sock, _message, ctx) => handleIdle(ctx),
 };

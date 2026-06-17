@@ -1,20 +1,20 @@
 # WhatsApp Interactive Buttons Guide
 
-> **Referensi implementasi:** Semua fungsi interactive message ada di `src/wa/interactive/` — dokumentasi teknis detail (proto wrapper, binary nodes, error codes) di `src/wa/interactive/README.md`.  
-> Lihat [`AGENTS.md`](../AGENTS.md) untuk arsitektur sistem secara keseluruhan.
+> **Implementation reference:** All interactive message functions live in `src/wa/interactive/` — detailed technical documentation (proto wrapper, binary nodes, error codes) is in `src/wa/interactive/README.md`.  
+> See [`AGENTS.md`](../AGENTS.md) for the overall system architecture.
 
-## Daftar Isi
+## Table of Contents
 
 - [Button Types](#button-types)
 - [Sending Multiple Buttons](#sending-multiple-buttons)
-- [sendRichMessage — Fungsi Universal](#sendrichmessage--fungsi-universal)
+- [sendRichMessage — Universal Function](#sendrichmessage--universal-function)
 - [Processing Button Clicks](#processing-button-clicks)
 - [Button ID Naming Convention](#button-id-naming-convention)
 - [Handling Button Responses](#handling-button-responses)
 - [Quiz System](#quiz-system)
 - [Common Mistakes](#common-mistakes)
 - [Full Example: Settings Menu](#full-example-settings-menu)
-- [Carousel (Eksperimental)](#carousel-eksperimental)
+- [Carousel (Experimental)](#carousel-experimental)
 - [LLM Reply Integration](#llm-reply-integration)
 - [Testing Buttons](#testing-buttons)
 
@@ -140,7 +140,7 @@ const buttons = [
 await sendNativeFlow(sock, chatId, 'Chat Settings', buttons, { footer: 'Click a button' });
 ```
 
-**Catatan:** `sendNativeFlow` tidak memiliki opsi `badge` — badge AI selalu aktif. Untuk mengontrol badge, gunakan `sendRichMessage` dengan opsi `badge: false`.
+**Note:** `sendNativeFlow` has no `badge` option — the AI badge is always on. To control the badge, use `sendRichMessage` with the `badge: false` option.
 
 ### sendCombinedButtons — Mixed Button Types
 
@@ -154,20 +154,20 @@ await sendCombinedButtons(sock, jid, 'Pilih aksi:', [
 ]);
 ```
 
-Supported types: `url`, `reply`, `copy`, `call`. Lihat `src/wa/interactive/sendInteractive.ts`.
+Supported types: `url`, `reply`, `copy`, `call`. See `src/wa/interactive/sendInteractive.ts`.
 
-## sendRichMessage — Fungsi Universal
+## sendRichMessage — Universal Function
 
-`sendRichMessage` adalah fungsi utama untuk mengirim pesan dengan footer, header opsional, dan tombol. Fungsi ini digunakan sebagai default untuk semua reply LLM (lihat [LLM Reply Integration](#llm-reply-integration)).
+`sendRichMessage` is the main function for sending a message with a footer, an optional header, and buttons. It is used as the default for all LLM replies (see [LLM Reply Integration](#llm-reply-integration)).
 
 ```javascript
-// Pesan teks dengan footer
+// Text message with footer
 await sendRichMessage(sock, chatId, {
   text: 'Halo!',
   footer: 'Pesan ini dibuat oleh AI',
 });
 
-// Dengan tombol
+// With buttons
 await sendRichMessage(sock, chatId, {
   title: 'Konfirmasi',
   text: 'Lanjutkan pesanan?',
@@ -179,22 +179,22 @@ await sendRichMessage(sock, chatId, {
 });
 ```
 
-**Parameter lengkap** `sendRichMessage(sock, jid, options)`:
+**Full parameters** `sendRichMessage(sock, jid, options)`:
 
-| Field | Type | Keterangan |
+| Field | Type | Description |
 |-------|------|------------|
-| `text` | `string` | Body pesan (wajib) |
-| `title` | `string` | Header bold (opsional) |
-| `subtitle` | `string` | Header subtitle (opsional, NativeFlow header) |
-| `image` | `{url: string}` | Gambar header (opsional, mutual eksklusif dengan `video`) |
-| `video` | `{url: string}` | Video header (opsional, mutual eksklusif dengan `image`) |
-| `footer` | `string` | Footer teks (opsional) |
-| `buttons` | `Array` | Array tombol `{name, buttonParamsJson}` (opsional) |
-| `badge` | `boolean` | Tampilkan badge AI di private chat (default `true`, nonaktif dengan `false`) |
-| `quoted` | `object` | Pesan yang di-reply (opsional) |
+| `text` | `string` | Message body (required) |
+| `title` | `string` | Bold header (optional) |
+| `subtitle` | `string` | Header subtitle (optional, NativeFlow header) |
+| `image` | `{url: string}` | Header image (optional, mutually exclusive with `video`) |
+| `video` | `{url: string}` | Header video (optional, mutually exclusive with `image`) |
+| `footer` | `string` | Footer text (optional) |
+| `buttons` | `Array` | Array of buttons `{name, buttonParamsJson}` (optional) |
+| `badge` | `boolean` | Show the AI badge in private chats (default `true`, disable with `false`) |
+| `quoted` | `object` | The message being replied to (optional) |
 
 ```javascript
-// Contoh dengan semua parameter
+// Example with all parameters
 await sendRichMessage(sock, chatId, {
   title: '📢 Pengumuman',
   subtitle: 'Info penting',
@@ -208,7 +208,7 @@ await sendRichMessage(sock, chatId, {
 });
 ```
 
-**Dokumentasi lengkap** (proto wrapper, binary nodes, mentions, badge AI): `src/wa/interactive/README.md`.
+**Full documentation** (proto wrapper, binary nodes, mentions, AI badge): `src/wa/interactive/README.md`.
 
 ## Processing Button Clicks
 
@@ -363,10 +363,10 @@ See `src/wa/connection.ts` for the complete implementation with permission check
 
 ## Quiz System
 
-WhatsApp quiz dikirim menggunakan `send_quiz` action dari Python bridge. Quiz menggunakan tombol NativeFlow `quick_reply` dengan ID berformat `qz:<label>`.
+WhatsApp quizzes are sent using the `send_quiz` action from the Python bridge. Quizzes use NativeFlow `quick_reply` buttons with IDs formatted as `qz:<label>`.
 
 ```javascript
-// Di src/index.ts — mapping pilihan quiz ke tombol
+// In src/index.ts — map quiz choices to buttons
 const quizButtons = choices.map(ch => ({
   name: 'quick_reply',
   buttonParamsJson: JSON.stringify({
@@ -376,9 +376,9 @@ const quizButtons = choices.map(ch => ({
 }));
 ```
 
-Saat pengguna mengetuk tombol quiz, response tiba sebagai NativeFlow `quick_reply` — nilai `id` (berprefiks `qz:`) diekstrak dari `interactiveResponseMessage.nativeFlowResponseMessage.paramsJson` di `src/wa/connection.ts`. Karena prefix `qz:`, handler mengembalikan `false` dan message diteruskan ke Python sebagai teks biasa — bukan sebagai command.
+When a user taps a quiz button, the response arrives as a NativeFlow `quick_reply` — the `id` value (prefixed with `qz:`) is extracted from `interactiveResponseMessage.nativeFlowResponseMessage.paramsJson` in `src/wa/connection.ts`. Because of the `qz:` prefix, the handler returns `false` and the message is forwarded to Python as plain text — not as a command.
 
-Lihat juga: `src/wa/inbound.ts` dan `src/wa/domain/caches.ts` (quizMessageIds untuk tracking).
+See also: `src/wa/inbound.ts` and `src/wa/domain/caches.ts` (quizMessageIds for tracking).
 
 ## Common Mistakes
 
@@ -456,9 +456,9 @@ async function handleSettings({ chatId, chatType, senderIsAdmin, senderIsOwner }
 }
 ```
 
-## Carousel (Eksperimental)
+## Carousel (Experimental)
 
-`sendCarousel` mengirim swipeable cards. **Status: error 479 saat pengiriman — belum resolved.**
+`sendCarousel` sends swipeable cards. **Status: error 479 on send — not yet resolved.**
 
 ```javascript
 await sendCarousel(sock, chatId, [
@@ -472,18 +472,18 @@ await sendCarousel(sock, chatId, [
 ], { title: 'Produk Unggulan' });
 ```
 
-Implementasi: `src/wa/interactive/sendCarousel.ts`. Error 479 berarti struktur binary stanza tidak valid di server WhatsApp.
+Implementation: `src/wa/interactive/sendCarousel.ts`. Error 479 means the binary stanza structure is invalid on the WhatsApp server.
 
 ## LLM Reply Integration
 
-Semua teks reply LLM dikirim melalui `sendRichMessage` dengan footer AI (`'Pesan ini dibuat oleh AI'`). Jika `sendRichMessage` gagal, fallback otomatis ke `sock.sendMessage`.
+All LLM text replies are sent through `sendRichMessage` with an AI footer (`'Pesan ini dibuat oleh AI'`). If `sendRichMessage` fails, it automatically falls back to `sock.sendMessage`.
 
-Dapat dikonfigurasi di `src/wa/outbound.ts`:
-- **`LLM_REPLY_INTERACTIVE=true`** (env var) — menggunakan `sendRichMessage` (NativeFlow, tampilan kartu dengan footer)
-- **`LLM_REPLY_INTERACTIVE=false`** — menggunakan `sock.sendMessage` biasa (teks polos, kompatibel dengan WA Web)
+Configurable in `src/wa/outbound.ts`:
+- **`LLM_REPLY_INTERACTIVE=true`** (env var) — uses `sendRichMessage` (NativeFlow, card layout with footer)
+- **`LLM_REPLY_INTERACTIVE=false`** — uses plain `sock.sendMessage` (plain text, compatible with WA Web)
 
 ```javascript
-// Di src/wa/outbound.ts
+// In src/wa/outbound.ts
 if (config.llmReplyInteractive) {
   try {
     sentMsg = await sendRichMessage(sock, chatId, {
@@ -509,7 +509,7 @@ if (config.llmReplyInteractive) {
 }
 ```
 
-Lihat `src/wa/interactive/README.md` untuk detail implementasi `sendRichMessage` dan binary nodes.
+See `src/wa/interactive/README.md` for implementation details of `sendRichMessage` and the binary nodes.
 
 ## Testing Buttons
 
@@ -529,4 +529,4 @@ logger.info({
 }, 'button response received');
 ```
 
-Gunakan `/debug` command untuk menguji semua tipe interactive message. Lihat `src/wa/interactive/README.md` untuk daftar lengkap perintah debug.
+Use the `/debug` command to test all interactive message types. See `src/wa/interactive/README.md` for the full list of debug commands.

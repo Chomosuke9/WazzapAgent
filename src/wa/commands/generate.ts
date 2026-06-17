@@ -8,7 +8,7 @@ async function handleGenerate({ chatId, senderId, args, sock, repos }: CommandCo
   if (parts.length < 2) {
     try {
       await sock.sendMessage(chatId, {
-        text: 'Penggunaan: /generate <private|group|all> <jumlah_hari>/0\n\nContoh:\n/generate private 30\n/generate group 0\n/generate all 7',
+        text: 'Usage: /generate <private|group|all> <num_days>/0\n\nExamples:\n/generate private 30\n/generate group 0\n/generate all 7',
       });
     } catch (err) { /* ignore */ }
     return;
@@ -20,14 +20,14 @@ async function handleGenerate({ chatId, senderId, args, sock, repos }: CommandCo
   const validTypes = new Set(['private', 'group', 'all']);
   if (!validTypes.has(type)) {
     try {
-      await sock.sendMessage(chatId, { text: 'Tipe harus: private, group, atau all' });
+      await sock.sendMessage(chatId, { text: 'Type must be: private, group, or all' });
     } catch (err) { /* ignore */ }
     return;
   }
 
   if (isNaN(days) || days < 0) {
     try {
-      await sock.sendMessage(chatId, { text: 'Jumlah hari harus berupa angka 0 atau lebih. 0 = permanen.' });
+      await sock.sendMessage(chatId, { text: 'The number of days must be 0 or greater. 0 = permanent.' });
     } catch (err) { /* ignore */ }
     return;
   }
@@ -39,25 +39,25 @@ async function handleGenerate({ chatId, senderId, args, sock, repos }: CommandCo
   } catch (err) {
     logger.error({ err }, 'failed generating activation code');
     try {
-      await sock.sendMessage(chatId, { text: 'Gagal membuat kode aktivasi.' });
+      await sock.sendMessage(chatId, { text: 'Failed to create activation code.' });
     } catch (e) { /* ignore */ }
     return;
   }
 
-  const botName = sock.user?.name?.trim() || 'bot ini';
-  const typeLabel = type === 'all' ? 'semua (private & grup)' : (type === 'group' ? 'grup' : 'private');
-  const durationLabel = days === 0 ? 'Permanen' : `${days} hari`;
+  const botName = sock.user?.name?.trim() || 'this bot';
+  const typeLabel = type === 'all' ? 'all (private & group)' : (type === 'group' ? 'group' : 'private');
+  const durationLabel = days === 0 ? 'Permanent' : `${days} days`;
   const activateCommand = `/activate ${code}`;
 
   const body =
-    `*Kode aktivasi berhasil dibuat!*\n` +
-    `Tipe: ${typeLabel}\n` +
-    `Masa aktif: ${durationLabel}\n\n` +
-    `Salin kodenya dengan menekan tombol di bawah, lalu kirim ke grup tempat ${botName} ingin diaktifkan (atau ke chat pribadi ${botName}).`;
+    `*Activation code created successfully!*\n` +
+    `Type: ${typeLabel}\n` +
+    `Valid for: ${durationLabel}\n\n` +
+    `Copy the code by tapping the button below, then send it to the group where you want ${botName} activated (or to ${botName}'s private chat).`;
 
   try {
-    await sendCopyCode(sock, chatId, body, activateCommand, 'Salin Kode', {
-      footer: durationLabel === 'Permanen' ? 'Aktivasi permanen' : `Berlaku ${durationLabel}`,
+    await sendCopyCode(sock, chatId, body, activateCommand, 'Copy Code', {
+      footer: durationLabel === 'Permanent' ? 'Permanent activation' : `Valid for ${durationLabel}`,
     });
   } catch (err) {
     logger.warn({ err, chatId }, 'failed sending /generate cta_copy, falling back to text');
@@ -73,7 +73,7 @@ export { handleGenerate };
 
 export const generateCommand: CommandHandler = {
   commands: ["generate"],
-  description: "Buat gambar dari prompt teks (khusus owner). Contoh: /generate kucing astronot pakai helm.",
+  description: "Generate an image from a text prompt (owner only). Example: /generate an astronaut cat wearing a helmet.",
   isHidden: true,
   permission: "owner",
   run: (_sock, _message, ctx) => handleGenerate(ctx),

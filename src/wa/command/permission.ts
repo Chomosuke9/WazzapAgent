@@ -120,12 +120,12 @@ export function validatePermission(permission: string, canonical: string): void 
 
 // Human-readable label per canonical atom (for the auto-generated denial).
 export const PERMISSION_LABELS: Record<string, string> = {
-  public: "semua orang",
-  owner: "owner bot",
-  admin: "admin grup",
-  group: "anggota grup",
-  private: "chat pribadi",
-  from_me: "bot",
+  public: "everyone",
+  owner: "the bot owner",
+  admin: "group admins",
+  group: "group members",
+  private: "private chats",
+  from_me: "the bot",
 };
 
 /**
@@ -142,12 +142,12 @@ export function describePermission(permission: string): string {
     const canonical = PERMISSION_ATOMS[lower];
     if (canonical && !seen.includes(canonical)) seen.push(canonical);
   }
-  if (seen.includes("public") || seen.length === 0) return "semua orang";
+  if (seen.includes("public") || seen.length === 0) return "everyone";
   // `admin` already implies a group, so drop the redundant bare `group`.
   const atoms = seen.includes("admin")
     ? seen.filter((a) => a !== "group")
     : seen;
   const labels = atoms.map((a) => PERMISSION_LABELS[a] ?? a);
   if (labels.length === 1) return labels[0];
-  return `${labels.slice(0, -1).join(", ")} atau ${labels[labels.length - 1]}`;
+  return `${labels.slice(0, -1).join(", ")} or ${labels[labels.length - 1]}`;
 }

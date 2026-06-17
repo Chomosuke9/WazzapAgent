@@ -29,9 +29,9 @@ type TemplateButton =
  * Send a legacy ButtonsMessage (may not render on newer WhatsApp versions).
  *
  * @example
- * await sendLegacyButtons(sock, jid, 'Pilih:', [
- *   { id: 'btn1', displayText: 'Opsi 1' },
- *   { id: 'btn2', displayText: 'Opsi 2' }
+ * await sendLegacyButtons(sock, jid, 'Choose:', [
+ *   { id: 'btn1', displayText: 'Option 1' },
+ *   { id: 'btn2', displayText: 'Option 2' }
  * ], { footer: 'Tap to choose' });
  */
 async function sendLegacyButtons(
@@ -59,10 +59,10 @@ async function sendLegacyButtons(
  * Send a HydratedFourRowTemplate (TemplateMessage) with mixed button types.
  *
  * @example
- * await sendTemplate(sock, jid, 'Selamat datang!', [
- *   { index: 1, quickReplyButton: { id: 'start', displayText: 'Mulai' } },
+ * await sendTemplate(sock, jid, 'Welcome!', [
+ *   { index: 1, quickReplyButton: { id: 'start', displayText: 'Start' } },
  *   { index: 2, urlButton: { displayText: 'Website', url: 'https://example.com' } }
- * ], { title: 'Halo!', footer: 'Tim Support' });
+ * ], { title: 'Hello!', footer: 'Support Team' });
  */
 async function sendTemplate(
   sock: WaSocketLike,

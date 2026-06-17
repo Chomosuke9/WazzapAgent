@@ -379,7 +379,7 @@ async function handleIncomingMessage(
             if (expiry <= now && !activation.expiryNotified) {
               try {
                 await sock.sendMessage(chatId, {
-                  text: `Aktivasi sudah kadaluarsa. Gunakan /activate <kode> untuk memperpanjang.`,
+                  text: `Activation expired. Use /activate <code> to renew.`,
                 });
               } catch (e) { /* ignore */ }
               ctx.repos!.activation.markExpiryNotified(chatId);

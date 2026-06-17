@@ -1,15 +1,15 @@
 /**
- * /remove-sticker <nama> — Hapus sticker dari katalog bot untuk chat ini.
+ * /remove-sticker <name> — Remove a sticker from the bot's catalog for this chat.
  *
- * Cara pakai:
- *   `/remove-sticker <nama>`
+ * Usage:
+ *   `/remove-sticker <name>`
  *
- * Izin:
- *   - Group : hanya admin grup atau bot owner
- *   - Private: siapa saja
+ * Permissions:
+ *   - Group : group admin or bot owner only
+ *   - Private: anyone
  *
- * Flag opsional:
- *   `/remove-sticker global <nama>` — hapus dari katalog global (owner only)
+ * Optional flag:
+ *   `/remove-sticker global <name>` — remove from the global catalog (owner only)
  */
 
 import path from 'path';
@@ -92,7 +92,7 @@ async function handleRemoveSticker({
   // 2. Permission check
   // ------------------------------------------------------------------
   if (isGlobal && !senderIsOwner) {
-    await reply('Hanya bot owner yang bisa menghapus sticker global. ❌');
+    await reply('Only the bot owner can remove global stickers. ❌');
     return;
   }
 
@@ -102,18 +102,18 @@ async function handleRemoveSticker({
   const rawName = nameArg.toLowerCase().trim();
   if (!rawName) {
     await reply(
-      'Cara pakai: `/remove-sticker <nama>`\n\n'
-      + 'Nama harus huruf kecil, angka, underscore atau minus (maks 64 karakter).\n'
-      + 'Contoh: `/remove-sticker senyum`\n\n'
-      + '_Owner only:_ `/remove-sticker global <nama>` — hapus dari katalog global.',
+      'Usage: `/remove-sticker <name>`\n\n'
+      + 'The name must be lowercase letters, digits, underscore or minus (max 64 characters).\n'
+      + 'Example: `/remove-sticker smile`\n\n'
+      + '_Owner only:_ `/remove-sticker global <name>` — remove from the global catalog.',
     );
     return;
   }
 
   if (!STICKER_NAME_RE.test(rawName)) {
     await reply(
-      `Nama sticker tidak valid: *${rawName}*\n`
-      + 'Gunakan huruf kecil, angka, underscore (_) atau tanda minus (-), 1–64 karakter.',
+      `Invalid sticker name: *${rawName}*\n`
+      + 'Use lowercase letters, digits, underscore (_) or minus (-), 1–64 characters.',
     );
     return;
   }
@@ -128,12 +128,12 @@ async function handleRemoveSticker({
     deleted = deleteSticker(targetChatId, rawName);
   } catch (err: any) {
     logger.error({ err, chatId, targetChatId, name: rawName }, 'remove-sticker: db delete failed');
-    await reply(`Gagal menghapus sticker: ${err.message} ❌`);
+    await reply(`Failed to remove sticker: ${err.message} ❌`);
     return;
   }
 
   if (!deleted) {
-    await reply(`Sticker${globalLabel} *${rawName}* tidak ditemukan. ❌`);
+    await reply(`Sticker${globalLabel} *${rawName}* not found. ❌`);
     return;
   }
 
@@ -142,14 +142,14 @@ async function handleRemoveSticker({
     'remove-sticker: sticker removed',
   );
 
-  await reply(`Sticker${globalLabel} *${rawName}* berhasil dihapus. ✅`);
+  await reply(`Sticker${globalLabel} *${rawName}* removed successfully. ✅`);
 }
 
 export { handleRemoveSticker };
 
 export const removeStickerCommand: CommandHandler = {
   commands: ["remove-sticker", "remove-stickers", "removesticker", "removestickers"],
-  description: "Hapus stiker dari katalog bot berdasarkan namanya. Gunakan /remove-sticker global <nama> untuk menghapus dari katalog global (khusus owner). Contoh: /remove-sticker kucing lucu.",
+  description: "Remove a sticker from the bot's catalog by its name. Use /remove-sticker global <name> to remove it from the global catalog (owner only). Example: /remove-sticker funny cat.",
   permission: "isPrivate or isAdmin or isOwner",
   run: (_sock, _message, ctx) => handleRemoveSticker(ctx),
 };

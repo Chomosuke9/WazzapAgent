@@ -5,7 +5,7 @@ import type * as Preset from "@docusaurus/preset-classic";
 const config: Config = {
   title: "WazzapAgents",
   tagline:
-    "Bot WhatsApp berbasis AI yang bisa diajak ngobrol, moderasi grup, dan disesuaikan sesukamu.",
+    "An AI-powered WhatsApp bot you can chat with, moderate groups, and customize however you like.",
   favicon: "img/favicon.ico",
 
   url: "https://chomosuke9.github.io",
@@ -33,12 +33,8 @@ const config: Config = {
   },
 
   i18n: {
-    defaultLocale: "id",
-    locales: ["id", "en"],
-    localeConfigs: {
-      id: { label: "Bahasa Indonesia" },
-      en: { label: "English" },
-    },
+    defaultLocale: "en",
+    locales: ["en"],
   },
 
   presets: [
@@ -63,12 +59,12 @@ const config: Config = {
       {
         name: "description",
         content:
-          "Bot WhatsApp berbasis AI untuk mengobrol, moderasi grup, stiker, kuis, dan perintah slash. Open source dan mendukung banyak akun.",
+          "An AI-powered WhatsApp bot for chatting, group moderation, stickers, quizzes, and slash commands. Open source and multi-account.",
       },
       {
         name: "keywords",
         content:
-          "whatsapp bot, ai, chatbot, baileys, llm, moderasi grup, open source, wazzapagents",
+          "whatsapp bot, ai, chatbot, baileys, llm, group moderation, open source, wazzapagents",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -76,7 +72,7 @@ const config: Config = {
     announcementBar: {
       id: "star-on-github",
       content:
-        '⭐ Suka WazzapAgents? Beri bintang di <a target="_blank" rel="noopener noreferrer" href="https://github.com/Chomosuke9/WazzapAgent">GitHub</a> untuk mendukung proyek ini!',
+        '⭐ Like WazzapAgents? Give it a star on <a target="_blank" rel="noopener noreferrer" href="https://github.com/Chomosuke9/WazzapAgent">GitHub</a> to support the project!',
       isCloseable: true,
     },
     colorMode: {
@@ -95,11 +91,7 @@ const config: Config = {
           type: "docSidebar",
           sidebarId: "tutorialSidebar",
           position: "left",
-          label: "Panduan",
-        },
-        {
-          type: "localeDropdown",
-          position: "right",
+          label: "Guide",
         },
         {
           href: "https://github.com/Chomosuke9/WazzapAgent",
@@ -113,23 +105,23 @@ const config: Config = {
       style: "dark",
       links: [
         {
-          title: "Panduan",
+          title: "Guide",
           items: [
-            { label: "Mulai di Sini", to: "/pengantar" },
-            { label: "Semua Perintah", to: "/penggunaan/perintah" },
-            { label: "Contoh Prompt", to: "/penggunaan/contoh-prompt" },
+            { label: "Get Started", to: "/" },
+            { label: "All Commands", to: "/usage/commands" },
+            { label: "Prompt Examples", to: "/usage/prompt-examples" },
           ],
         },
         {
           title: "Developer",
           items: [
-            { label: "Arsitektur", to: "/dev/arsitektur" },
-            { label: "Instalasi", to: "/instalasi" },
-            { label: "Protokol WebSocket", to: "/dev/protokol" },
+            { label: "Architecture", to: "/dev/architecture" },
+            { label: "Installation", to: "/installation" },
+            { label: "WebSocket Protocol", to: "/dev/protocol" },
           ],
         },
         {
-          title: "Lainnya",
+          title: "More",
           items: [
             {
               label: "GitHub",

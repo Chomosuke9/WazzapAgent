@@ -18,7 +18,7 @@ function stripToDigits(phoneNumber: string): string {
  *   N:Agus Kebab;;;;
  *   FN:Agus Kebab
  *   item1.TEL;waid=6280000000000:+6280000000000
- *   item1.X-ABLabel:Ponsel
+ *   item1.X-ABLabel:Mobile
  *   END:VCARD
  */
 function buildVcard(phoneNumber: string, displayName: string): string {
@@ -29,7 +29,7 @@ function buildVcard(phoneNumber: string, displayName: string): string {
     `N:${displayName};;;;`,
     `FN:${displayName}`,
     `item1.TEL;waid=${waid}:${phoneNumber}`,
-    "item1.X-ABLabel:Ponsel",
+    "item1.X-ABLabel:Mobile",
     "END:VCARD",
   ].join("\n");
 }
@@ -140,7 +140,7 @@ export { handleOwnerContact };
 
 export const ownerContactCommand: CommandHandler = {
   commands: ["owner-contact"],
-  description: "Kirim kartu kontak owner bot ke chat ini. Owner dapat mengatur kontak yang dikirim menggunakan /owner-contact set <nomor>.",
+  description: "Send the bot owner's contact card to this chat. The owner can set the contact that is sent using /owner-contact set <number>.",
   permission: "public",
   run: (_sock, _message, ctx) => handleOwnerContact(ctx),
 };

@@ -4,29 +4,29 @@ import type { CommandContext, CommandHandler } from '../command/CommandContext.j
 import type { AccountContext } from '../../account/accountContext.js';
 
 function formatDuration(expiresAt: string | null): string {
-  if (!expiresAt) return 'Permanen';
+  if (!expiresAt) return 'Permanent';
   const now = new Date();
   const expiry = new Date(expiresAt);
   const diffMs = expiry.getTime() - now.getTime();
-  if (diffMs <= 0) return 'Kadaluarsa';
+  if (diffMs <= 0) return 'Expired';
   const diffDays = Math.floor(diffMs / 86400000);
   const diffHours = Math.floor((diffMs % 86400000) / 3600000);
   const diffMinutes = Math.floor((diffMs % 3600000) / 60000);
-  if (diffDays > 0) return `${diffDays} hari ${diffHours} jam`;
-  if (diffHours > 0) return `${diffHours} jam ${diffMinutes} menit`;
-  return `${diffMinutes} menit`;
+  if (diffDays > 0) return `${diffDays} days ${diffHours} hours`;
+  if (diffHours > 0) return `${diffHours} hours ${diffMinutes} minutes`;
+  return `${diffMinutes} minutes`;
 }
 
 function formatDurationShort(expiresAt: string | null): string {
-  if (!expiresAt) return 'Permanen';
+  if (!expiresAt) return 'Permanent';
   const now = new Date();
   const expiry = new Date(expiresAt);
   const diffMs = expiry.getTime() - now.getTime();
-  if (diffMs <= 0) return 'Kadaluarsa';
+  if (diffMs <= 0) return 'Expired';
   const diffDays = Math.floor(diffMs / 86400000);
   const diffHours = Math.floor((diffMs % 86400000) / 3600000);
-  if (diffDays > 0) return `${diffDays}h ${diffHours}j`;
-  if (diffHours > 0) return `${diffHours}j`;
+  if (diffDays > 0) return `${diffDays}d ${diffHours}h`;
+  if (diffHours > 0) return `${diffHours}h`;
   return `${Math.floor(diffMs / 60000)}m`;
 }
 
@@ -46,15 +46,15 @@ async function handleMonitor({ chatId, account, sock, repos }: CommandContext): 
 
     const codeLines = [];
     for (const code of codes) {
-      const typeLabel = code.type === 'all' ? 'semua' : (code.type === 'group' ? 'grup' : 'private');
-      const durationLabel = code.days === 0 ? 'Permanen' : `${code.days} hari`;
+      const typeLabel = code.type === 'all' ? 'all' : (code.type === 'group' ? 'group' : 'private');
+      const durationLabel = code.days === 0 ? 'Permanent' : `${code.days} days`;
       const statusIcon = code.used ? '✓' : '✗';
-      let usedInfo = 'Belum dipakai';
+      let usedInfo = 'Not used yet';
       if (code.used && code.usedBy) {
         const name = await getChatName(account, code.usedBy);
         usedInfo = name;
       } else if (code.used) {
-        usedInfo = 'Sudah dipakai';
+        usedInfo = 'Already used';
       }
       codeLines.push(`#${code.id} | ${code.code} | ${typeLabel} | ${durationLabel} | ${statusIcon} ${usedInfo}`);
     }
@@ -63,20 +63,20 @@ async function handleMonitor({ chatId, account, sock, repos }: CommandContext): 
     for (const act of activations) {
       const name = await getChatName(account, act.chatId);
       const remaining = formatDuration(act.expiresAt);
-      activationLines.push(`${name} (${act.chatId}) | #${act.code} | Sisa: ${remaining}`);
+      activationLines.push(`${name} (${act.chatId}) | #${act.code} | Remaining: ${remaining}`);
     }
 
     const sections = [];
     if (codeLines.length > 0) {
-      sections.push('=== Kode Aktivasi ===\n' + codeLines.join('\n'));
+      sections.push('=== Activation Codes ===\n' + codeLines.join('\n'));
     } else {
-      sections.push('=== Kode Aktivasi ===\nBelum ada kode aktivasi.');
+      sections.push('=== Activation Codes ===\nNo activation codes yet.');
     }
 
     if (activationLines.length > 0) {
-      sections.push('\n=== Chat Teraktivasi ===\n' + activationLines.join('\n'));
+      sections.push('\n=== Activated Chats ===\n' + activationLines.join('\n'));
     } else {
-      sections.push('\n=== Chat Teraktivasi ===\nBelum ada chat teraktivasi.');
+      sections.push('\n=== Activated Chats ===\nNo activated chats yet.');
     }
 
     const text = sections.join('\n');
@@ -84,7 +84,7 @@ async function handleMonitor({ chatId, account, sock, repos }: CommandContext): 
   } catch (err) {
     logger.error({ err }, 'failed /monitor');
     try {
-      await sock.sendMessage(chatId, { text: 'Gagal memuat data monitor.' });
+      await sock.sendMessage(chatId, { text: 'Failed to load monitor data.' });
     } catch (e) { /* ignore */ }
   }
 }
@@ -93,7 +93,7 @@ export { handleMonitor, formatDuration, formatDurationShort };
 
 export const monitorCommand: CommandHandler = {
   commands: ["monitor"],
-  description: "Tampilkan monitor dashboard ringkas untuk semua chat (khusus owner).",
+  description: "Show a concise dashboard monitor for all chats (owner only).",
   isHidden: true,
   permission: "owner",
   run: (_sock, _message, ctx) => handleMonitor(ctx),

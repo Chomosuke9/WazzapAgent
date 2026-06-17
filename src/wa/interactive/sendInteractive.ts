@@ -104,10 +104,10 @@ type QuickReplyOptions = {
  * Send quick-reply buttons.
  *
  * @example
- * await sendQuickReply(sock, jid, 'Pilih menu:', [
- *   { id: 'menu_1', displayText: 'Daftar Produk' },
- *   { id: 'menu_2', displayText: 'Hubungi CS' }
- * ], { title: 'Menu Utama', footer: 'Bot v1' });
+ * await sendQuickReply(sock, jid, 'Choose a menu:', [
+ *   { id: 'menu_1', displayText: 'Product List' },
+ *   { id: 'menu_2', displayText: 'Contact Support' }
+ * ], { title: 'Main Menu', footer: 'Bot v1' });
  */
 async function sendQuickReply(
   sock: WaSocketLike,
@@ -139,9 +139,9 @@ async function sendQuickReply(
  * Send CTA URL buttons.
  *
  * @example
- * await sendUrlButtons(sock, jid, 'Kunjungi kami:', [
+ * await sendUrlButtons(sock, jid, 'Visit us:', [
  *   { displayText: 'Website', url: 'https://example.com' }
- * ], { footer: 'Klik untuk buka' });
+ * ], { footer: 'Click to open' });
  */
 async function sendUrlButtons(
   sock: WaSocketLike,
@@ -175,8 +175,8 @@ async function sendUrlButtons(
  * Send a single CTA copy-code button.
  *
  * @example
- * await sendCopyCode(sock, jid, 'Kode promo Anda:', 'PROMO2024', 'Salin', {
- *   footer: 'Berlaku 7 hari'
+ * await sendCopyCode(sock, jid, 'Your promo code:', 'PROMO2024', 'Copy', {
+ *   footer: 'Valid for 7 days'
  * });
  */
 async function sendCopyCode(
@@ -211,10 +211,10 @@ type CombinedButton =
  * Send a mix of different button types (url, reply, copy, call) in one message.
  *
  * @example
- * await sendCombinedButtons(sock, jid, 'Pilih aksi:', [
- *   { type: 'reply', displayText: 'Konfirmasi', id: 'confirm' },
- *   { type: 'url',   displayText: 'Detail', url: 'https://example.com' },
- *   { type: 'call',  displayText: 'Telepon', phoneNumber: '+6281234567890' }
+ * await sendCombinedButtons(sock, jid, 'Choose an action:', [
+ *   { type: 'reply', displayText: 'Confirm', id: 'confirm' },
+ *   { type: 'url',   displayText: 'Details', url: 'https://example.com' },
+ *   { type: 'call',  displayText: 'Call', phoneNumber: '+6281234567890' }
  * ]);
  */
 async function sendCombinedButtons(
@@ -265,11 +265,11 @@ type ListContent = {
  *
  * @example
  * await sendList(sock, jid, {
- *   title: 'Menu Restoran',
- *   buttonText: 'Lihat Menu',
+ *   title: 'Restaurant Menu',
+ *   buttonText: 'View Menu',
  *   sections: [{
- *     title: 'Makanan',
- *     rows: [{ rowId: 'nasi_goreng', title: 'Nasi Goreng', description: 'Rp 25.000' }]
+ *     title: 'Food',
+ *     rows: [{ rowId: 'nasi_goreng', title: 'Fried Rice', description: 'Rp 25.000' }]
  *   }],
  *   footer: 'Order via chat'
  * });
@@ -341,16 +341,16 @@ type RichMessageOptions = {
  *
  * @example
  * // Plain styled text with AI badge (no buttons):
- * await sendRichMessage(sock, jid, { title: '📢 Pengumuman', text: 'Server down 23:00–01:00.' });
+ * await sendRichMessage(sock, jid, { title: '📢 Announcement', text: 'Server down 23:00–01:00.' });
  *
  * // With quick reply buttons:
  * await sendRichMessage(sock, jid, {
- *   title: 'Konfirmasi',
- *   text: 'Lanjutkan pesanan?',
- *   footer: 'Tap tombol di bawah',
+ *   title: 'Confirm',
+ *   text: 'Continue with the order?',
+ *   footer: 'Tap the button below',
  *   buttons: [
- *     { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Ya', id: 'yes' }) },
- *     { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Tidak', id: 'no' }) },
+ *     { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Yes', id: 'yes' }) },
+ *     { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'No', id: 'no' }) },
  *   ],
  * });
  */
