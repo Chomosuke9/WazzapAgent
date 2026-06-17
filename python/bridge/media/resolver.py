@@ -272,3 +272,81 @@ async def materialize_visual_media(sock, payload: dict, media_paths_by_chat: dic
       changed = True
   if changed and ctx_id:
     _store_media_path(media_paths_by_chat, payload)
+
+
+async def materialize_media_for_subagent(
+  sock,
+  chat_id: str,
+  ctx_ids,
+  media_paths_by_chat: dict,
+) -> None:
+  """Ensure the media for ``ctx_ids`` is on disk so it can be sent to the
+  sub-agent.
+
+  Unlike :func:`materialize_visual_media` — which only downloads
+  ``image``/``sticker`` kinds because that is all a vision model needs —
+  the sub-agent operates on ANY attachment kind: PDFs, ``.docx`` /
+  ``.xlsx`` / ``.pptx``, plain text, audio, video, archives, etc.
+
+  With lazy media (feature 8) inbound forwards attachment metadata WITHOUT
+  downloading the bytes (``path: None``, ``pending: True``), and the only
+  on-demand fetch path (``materialize_visual_media``) deliberately skips
+  non-visual kinds. The result was that when LLM2 delegated a document to
+  the sub-agent via ``execute_subtask``, the file's bytes were never
+  downloaded, ``media_paths_by_chat`` held no usable path for it, and the
+  sub-agent silently received nothing — the user-visible symptom being
+  "the bot ignored the file I sent".
+
+  For each ctx_id that does not already resolve to a real file on disk,
+  download it on demand (any kind) and record the resolved path via the
+  same shape :func:`_store_media_path` uses, so the caller's existing
+  resolution loop finds it. Failures degrade gracefully: the ctx_id is
+  left unresolved and simply omitted from the sub-agent inputs, exactly as
+  before this fix.
+  """
+  if sock is None or not chat_id or not ctx_ids:
+    return
+  for cid in ctx_ids:
+    if not cid:
+      continue
+    # Skip ctx_ids whose media is already materialized on disk.
+    existing = media_paths_by_chat.get(chat_id, {}).get(cid)
+    if isinstance(existing, list):
+      if any(
+        isinstance(e, dict) and e.get("path") and os.path.isfile(e["path"])
+        for e in existing
+      ):
+        continue
+    elif isinstance(existing, str) and os.path.isfile(existing):
+      continue
+
+    try:
+      result = await sock.download_media(chat_id, context_msg_id=cid)
+    except Exception as err:  # NotFoundError / TimeoutError / proto evicted
+      logger.info(
+        "materialize_media_for_subagent: download failed ctx=%s: %s",
+        cid, err, extra={"chat_id": chat_id},
+      )
+      continue
+
+    path = result.get("path") if isinstance(result, dict) else None
+    if not path or not os.path.isfile(path):
+      logger.info(
+        "materialize_media_for_subagent: no file returned for ctx=%s",
+        cid, extra={"chat_id": chat_id},
+      )
+      continue
+
+    media_paths_by_chat.setdefault(chat_id, {})[cid] = [{
+      "kind": str(result.get("kind", "")).lower(),
+      "mime": result.get("mime", ""),
+      "fileName": result.get("fileName", ""),
+      "originalFileName": result.get("originalFileName") or None,
+      "jpegThumbnail": result.get("jpegThumbnail") or None,
+      "path": path,
+      "received_at": time.time(),
+    }]
+    logger.info(
+      "materialize_media_for_subagent: downloaded ctx=%s kind=%s -> %s",
+      cid, result.get("kind"), path, extra={"chat_id": chat_id},
+    )

@@ -60,6 +60,9 @@ from ..messaging.gateway import (
 )
 
 
+from ..media import (
+  materialize_media_for_subagent,
+)
 from ..subagent import (
   SubAgentSubmitError,
 )
@@ -614,6 +617,13 @@ class SubAgentCoordinator:
     # media attachment *and* text (e.g. an image with a caption), so
     # both branches run independently for each cid.
     local_input_files: list[str] = []
+    # Lazy media (feature 8): inbound only forwards attachment metadata, and
+    # the visual on-demand path (``materialize_visual_media``) downloads
+    # image/sticker only. Documents/audio/video the user wants the sub-agent
+    # to work on therefore have no bytes on disk yet. Download them now (any
+    # kind) so the resolution loop below finds a real file. Without this the
+    # sub-agent silently receives no input file.
+    await materialize_media_for_subagent(ws, chat_id, ctx_ids, media_paths_by_chat)
     chat_store = media_paths_by_chat.get(chat_id, {})
     tmp_dir = tempfile.mkdtemp(prefix="subagent_ctx_")
     try:
@@ -912,6 +922,10 @@ context block from ``SubTaskTracker.format_context``).
                 session._dashboard.record_stat(chat_id, "responses_sent")
               _new_session_id = f"{chat_id}_{uuid.uuid4().hex[:8]}_{int(time.time())}"
               _local_files: list[str] = []
+              # Same lazy-media materialization as the primary dispatch:
+              # download any non-visual files the correction references so
+              # they actually reach the sub-agent.
+              await materialize_media_for_subagent(ws, chat_id, _ctx_ids, media_paths_by_chat)
               _tmp_dir = tempfile.mkdtemp(prefix="subagent_ctx_")
               try:
                 _fidx = 1

@@ -32,6 +32,7 @@ from .resolver import (
   _resolve_sticker_media,
   _store_media_path,
   materialize_visual_media,
+  materialize_media_for_subagent,
 )
 
 __all__ = [
@@ -51,4 +52,5 @@ __all__ = [
   "_resolve_sticker_media",
   "_store_media_path",
   "materialize_visual_media",
+  "materialize_media_for_subagent",
 ]

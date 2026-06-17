@@ -6,7 +6,7 @@ import json
 import pytest
 
 from wasocket import protocol
-from bridge.media import materialize_visual_media
+from bridge.media import materialize_visual_media, materialize_media_for_subagent
 
 
 class FakeSock:
@@ -82,3 +82,55 @@ def test_materialize_noop_when_already_downloaded():
     asyncio.run(materialize_visual_media(sock, payload, {}))
     assert sock.calls == [], "no download when path already present"
     assert payload["attachments"][0]["path"] == "/already/here.jpg"
+
+
+# --- materialize_media_for_subagent (sub-agent input fix) ---
+
+
+def test_subagent_materialize_downloads_document(tmp_path):
+    """A document referenced by execute_subtask must be downloaded on demand
+    even though materialize_visual_media skips non-visual kinds."""
+    doc = tmp_path / "report.pdf"
+    doc.write_bytes(b"%PDF-1.4 fake")
+    media_paths = {}
+    sock = FakeSock(result={
+        "path": str(doc), "mime": "application/pdf",
+        "kind": "document", "fileName": "report.pdf",
+    })
+    asyncio.run(
+        materialize_media_for_subagent(sock, "c@g.us", ["000200"], media_paths)
+    )
+    assert len(sock.calls) == 1
+    assert sock.calls[0]["context_msg_id"] == "000200"
+    stored = media_paths.get("c@g.us", {}).get("000200")
+    assert stored and stored[0]["path"] == str(doc)
+    assert stored[0]["kind"] == "document"
+
+
+def test_subagent_materialize_skips_already_on_disk(tmp_path):
+    """Already-materialized media is not re-downloaded."""
+    doc = tmp_path / "already.docx"
+    doc.write_bytes(b"PK\x03\x04")
+    media_paths = {"c@g.us": {"000210": [{"path": str(doc), "kind": "document"}]}}
+    sock = FakeSock(result={"path": "/should/not/be/used"})
+    asyncio.run(
+        materialize_media_for_subagent(sock, "c@g.us", ["000210"], media_paths)
+    )
+    assert sock.calls == [], "no download when a real file is already recorded"
+
+
+def test_subagent_materialize_graceful_on_failure():
+    """A download failure leaves the ctx_id unresolved without crashing."""
+    media_paths = {}
+    sock = FakeSock(raises=RuntimeError("proto evicted"))
+    asyncio.run(
+        materialize_media_for_subagent(sock, "c@g.us", ["000220"], media_paths)
+    )
+    assert media_paths.get("c@g.us", {}).get("000220") is None
+
+
+def test_subagent_materialize_noop_without_sock_or_ids():
+    media_paths = {}
+    asyncio.run(materialize_media_for_subagent(None, "c@g.us", ["x"], media_paths))
+    asyncio.run(materialize_media_for_subagent(FakeSock(), "c@g.us", [], media_paths))
+    assert media_paths == {}
