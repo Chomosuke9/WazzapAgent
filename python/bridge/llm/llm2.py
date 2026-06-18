@@ -181,59 +181,81 @@ def get_llm2(
     )
 
 
-async def generate_reply(
+def _resolve_llm2_chat_id(
+    current_payload: dict | None, current: WhatsAppMessage
+) -> str | None:
+    """Resolve the chat id LLM2 logs/keys against (payload first, else sender)."""
+    payload = current_payload if isinstance(current_payload, dict) else {}
+    return payload.get("chatId") or payload.get("chat_id") or current.sender
+
+
+def _compute_llm2_permissions(
+    chat_id: str | None, bot_is_admin: bool, bot_is_super_admin: bool
+) -> tuple[bool, bool, bool]:
+    """Return ``(can_delete, can_mute, can_kick)`` for dynamic tool/prompt gating.
+
+    Shared by :func:`generate_reply` (tool gating) and
+    :func:`build_llm2_messages` (system-prompt rule injection) so the two can
+    never drift apart.
+    """
+    admin_ok = bool(bot_is_admin or bot_is_super_admin)
+    perm_level = db_get_permission(chat_id) if chat_id else 0
+    return (
+        admin_ok and permission_allows_delete(perm_level),
+        admin_ok and permission_allows_mute(perm_level),
+        admin_ok and permission_allows_kick(perm_level),
+    )
+
+
+@dataclass(frozen=True)
+class BuiltLlm2Prompt:
+    """The exact prompt LLM2 is invoked with, plus a few derived log helpers.
+
+    ``messages`` is the real ``list`` of LangChain messages sent to the model;
+    ``text_fallback_messages`` is the text-only variant used when a multimodal
+    invocation fails. Everything else is computed metadata reused for
+    logging/preview so callers don't recompute it.
+    """
+
+    messages: list
+    text_fallback_messages: list
+    rendered_system: str
+    history_list: list
+    prompt_preview: str
+    media_part_count: int
+
+
+def build_llm2_messages(
     history: Iterable[WhatsAppMessage],
     current: WhatsAppMessage,
     *,
     system: str | None = None,
-    tools: Optional[list] = None,
+    prompt_override: str | None = None,
     current_payload: dict | None = None,
     group_description: str | None = None,
-    prompt_override: str | None = None,
     chat_type: str | None = None,
     bot_is_admin: bool = False,
     bot_is_super_admin: bool = False,
-    result_validator=None,
     allow_subagent: bool = False,
     subagent_context: str | None = None,
     subagent_result_block: str | None = None,
     scheduled_task_block: str | None = None,
-):
-    targets = _llm2_targets()
-    payload = current_payload if isinstance(current_payload, dict) else {}
-    log_chat_id = payload.get("chatId") or payload.get("chat_id") or current.sender
-    chat_model_id = get_llm2_model_for_chat(log_chat_id) if log_chat_id else None
-    payload_chat_type = _normalize_chat_type(
-        chat_type
-        or payload.get("chatType")
-        or payload.get("chat_type")
-        or ("group" if bool(payload.get("isGroup")) else "private")
-    )
-    log_chat_name = (
-        (payload.get("chatName") or payload.get("chat_name"))
-        if payload_chat_type == "group"
-        else None
-    )
-    timeout_s = _llm2_timeout()
-    retry_max = _llm2_retry_max()
-    retry_backoff_s = _llm2_retry_backoff_seconds()
-    sdk_max_retries = _llm2_sdk_max_retries()
-    # Compute moderation permissions for dynamic tool/prompt injection
-    admin_ok = bool(bot_is_admin or bot_is_super_admin)
-    perm_level = db_get_permission(log_chat_id) if log_chat_id else 0
-    can_delete = admin_ok and permission_allows_delete(perm_level)
-    can_mute = admin_ok and permission_allows_mute(perm_level)
-    can_kick = admin_ok and permission_allows_kick(perm_level)
+) -> BuiltLlm2Prompt:
+    """Build the EXACT message list LLM2 is invoked with.
 
-    # Build tools dynamically: base tools always, moderation tools only when permitted
-    if tools is None:
-        tools = build_llm2_tools(
-            allow_delete=can_delete,
-            allow_mute=can_mute,
-            allow_kick=can_kick,
-            allow_subagent=allow_subagent,
-        )
-
+    This is the single source of truth for the LLM2 prompt: the rendered system
+    prompt, the group-description block, the context/helper injection, the
+    sub-agent state block + ``execute_subtask`` file-ID helper, the optional
+    re-invoke / scheduled-task slots, and finally the older-messages + current
+    burst (with any visual attachments). :func:`generate_reply` calls this to
+    talk to the model; ``/dump`` calls it (via :func:`serialize_llm2_messages`)
+    so the dumped context is byte-for-byte what the model actually sees instead
+    of a hand-rebuilt approximation.
+    """
+    log_chat_id = _resolve_llm2_chat_id(current_payload, current)
+    can_delete, can_mute, can_kick = _compute_llm2_permissions(
+        log_chat_id, bot_is_admin, bot_is_super_admin
+    )
     sticker_catalog = (
         sticker_catalog_text(log_chat_id) if log_chat_id else sticker_catalog_text()
     )
@@ -271,7 +293,9 @@ async def generate_reply(
     )
     media_parts: list[dict] = []
     media_notes: list[str] = []
-    model_has_vision = get_model_vision_support(log_chat_id) if log_chat_id else False
+    model_has_vision = (
+        get_model_vision_support(log_chat_id) if log_chat_id else False
+    )
     logger.info(
         "LLM2 vision check: chat_id=%s model_vision=%s will_send_media=%s",
         log_chat_id,
@@ -298,69 +322,46 @@ async def generate_reply(
     #   3) user          : helper / context injection
     #   4) user          : sub-agent task block  (only when allow_subagent /
     #                      subagent_context is provided for this chat)
-    #   5) user          : sub-agent FINISHED-this-turn block (re-invoke only)
-    #   6) user          : older messages + current burst
+    #   5) user          : sub-agent execute_subtask file-ID helper
+    #                      (only when allow_subagent and the chat has files)
+    #   6) user          : sub-agent FINISHED-this-turn block (re-invoke only)
+    #   7) user          : scheduled-task block (scheduled cold-fire only)
+    #   8) user          : older messages + current burst
     msgs = [SystemMessage(content=rendered_system)]
     msgs.append(HumanMessage(content=f"Group description:\n{group_text}"))
     msgs.append(HumanMessage(content=context_injection))
-    # Sub-agent context block: always injected as a dedicated HumanMessage
-    # so LLM2 has an explicit signal about the sub-agent state (active task,
-    # recently finished, or idle/ready for new tasks).
     subagent_block: str | None = subagent_context if subagent_context else None
     if subagent_block:
         msgs.append(HumanMessage(content=subagent_block))
-    # ``files_block`` (sub-agent input-ID guidance): an explicit ID->file
-    # lookup table so LLM2 passes the contextMsgId of the message that actually
-    # CONTAINS the file to ``execute_subtask.context_msg_ids`` — instead of the
-    # latest request/mention message's ID (the most common cause of "the file
-    # never reached the sub-agent"). Only injected when the sub-agent is
-    # enabled for this chat and the chat has at least one attachable file.
-    files_block = _files_for_subagent_block(history_list) if allow_subagent else None
+    files_block = (
+        _files_for_subagent_block(history_list) if allow_subagent else None
+    )
     if files_block:
         msgs.append(HumanMessage(content=files_block))
-    # ``subagent_result_block`` is a high-priority slot used by the post-task
-    # re-invoke so the model gets a clear, dedicated "deliver the result now"
-    # signal instead of having to dig the [SUBTASK FINISHED] line out of the
-    # chat transcript. Keeping it as a separate HumanMessage (rather than
-    # smuggling it into history) is what reliably stops the model from
-    # repeating "ok let me check" when it should be delivering the report.
     if subagent_result_block:
         msgs.append(HumanMessage(content=subagent_result_block))
-    # ``scheduled_task_block`` (feature 5): a dedicated high-priority slot used
-    # by the scheduled-task cold fire so the model gets a clear "carry out this
-    # scheduled task now" signal, analogous to ``subagent_result_block``.
     if scheduled_task_block:
         msgs.append(HumanMessage(content=scheduled_task_block))
     msgs.append(HumanMessage(content=messages_content))
-    if env_flag("BRIDGE_LOG_PROMPT_FULL"):
-        first_target = targets[0]
-        logged_messages: list[dict] = [
-            {"role": "system", "content": rendered_system},
-            {"role": "user", "content": f"Group description:\n{group_text}"},
-            {"role": "user", "content": context_injection},
-        ]
-        if subagent_block:
-            logged_messages.append({"role": "user", "content": subagent_block})
-        if files_block:
-            logged_messages.append({"role": "user", "content": files_block})
-        if subagent_result_block:
-            logged_messages.append({"role": "user", "content": subagent_result_block})
-        if scheduled_task_block:
-            logged_messages.append({"role": "user", "content": scheduled_task_block})
-        logged_messages.append(
-            {"role": "user", "content": redact_multimodal_content(messages_content)}
-        )
-        logger.info(
-            "LLM2 prompt full",
-            extra={
-                "chat_id": log_chat_id,
-                "chat_name": log_chat_name,
-                "provider": first_target.name,
-                "model": first_target.model,
-                "endpoint": first_target.base_url,
-                "messages": logged_messages,
-            },
-        )
+
+    # Text-only fallback used when a multimodal invoke fails: identical to the
+    # primary message list but without the visual parts (``messages_content_text``
+    # instead of the multimodal ``messages_content``). NOTE: this mirrors the
+    # long-standing behaviour where the file-ID helper (``files_block``) is not
+    # repeated in the fallback.
+    text_fallback_msgs = [
+        SystemMessage(content=rendered_system),
+        HumanMessage(content=f"Group description:\n{group_text}"),
+        HumanMessage(content=context_injection),
+    ]
+    if subagent_block:
+        text_fallback_msgs.append(HumanMessage(content=subagent_block))
+    if subagent_result_block:
+        text_fallback_msgs.append(HumanMessage(content=subagent_result_block))
+    if scheduled_task_block:
+        text_fallback_msgs.append(HumanMessage(content=scheduled_task_block))
+    text_fallback_msgs.append(HumanMessage(content=messages_content_text))
+
     prompt_preview = trunc(
         (
             group_text
@@ -374,6 +375,142 @@ async def generate_reply(
         ),
         800,
     )
+    return BuiltLlm2Prompt(
+        messages=msgs,
+        text_fallback_messages=text_fallback_msgs,
+        rendered_system=rendered_system,
+        history_list=history_list,
+        prompt_preview=prompt_preview,
+        media_part_count=len(media_parts),
+    )
+
+
+def serialize_llm2_messages(messages: Iterable) -> str:
+    """Render the real LLM2 message list as plain text for ``/dump``.
+
+    Roles are labelled and multimodal image payloads are redacted (the base64
+    blob is replaced with a short marker) so the dump stays readable and small
+    while still reflecting that an image part was present.
+    """
+    sections: list[str] = []
+    for msg in messages:
+        role = "SYSTEM" if isinstance(msg, SystemMessage) else "USER"
+        content = redact_multimodal_content(getattr(msg, "content", ""))
+        if isinstance(content, list):
+            rendered: list[str] = []
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    rendered.append(str(part.get("text", "")))
+                elif isinstance(part, dict) and part.get("type") == "image_url":
+                    url = part.get("image_url")
+                    url_str = url.get("url") if isinstance(url, dict) else ""
+                    rendered.append(f"[image_url: {url_str}]")
+                else:
+                    rendered.append(str(part))
+            content_str = "\n".join(rendered)
+        else:
+            content_str = str(content)
+        sections.append(f"=== {role} ===\n{content_str}")
+    return "\n\n".join(sections)
+
+
+async def generate_reply(
+    history: Iterable[WhatsAppMessage],
+    current: WhatsAppMessage,
+    *,
+    system: str | None = None,
+    tools: Optional[list] = None,
+    current_payload: dict | None = None,
+    group_description: str | None = None,
+    prompt_override: str | None = None,
+    chat_type: str | None = None,
+    bot_is_admin: bool = False,
+    bot_is_super_admin: bool = False,
+    result_validator=None,
+    allow_subagent: bool = False,
+    subagent_context: str | None = None,
+    subagent_result_block: str | None = None,
+    scheduled_task_block: str | None = None,
+):
+    targets = _llm2_targets()
+    payload = current_payload if isinstance(current_payload, dict) else {}
+    log_chat_id = payload.get("chatId") or payload.get("chat_id") or current.sender
+    chat_model_id = get_llm2_model_for_chat(log_chat_id) if log_chat_id else None
+    payload_chat_type = _normalize_chat_type(
+        chat_type
+        or payload.get("chatType")
+        or payload.get("chat_type")
+        or ("group" if bool(payload.get("isGroup")) else "private")
+    )
+    log_chat_name = (
+        (payload.get("chatName") or payload.get("chat_name"))
+        if payload_chat_type == "group"
+        else None
+    )
+    timeout_s = _llm2_timeout()
+    retry_max = _llm2_retry_max()
+    retry_backoff_s = _llm2_retry_backoff_seconds()
+    sdk_max_retries = _llm2_sdk_max_retries()
+    # Permissions gate both the dynamic tool list (here) and the system-prompt
+    # rule injection (inside build_llm2_messages); the shared helper keeps the
+    # two from drifting apart.
+    can_delete, can_mute, can_kick = _compute_llm2_permissions(
+        log_chat_id, bot_is_admin, bot_is_super_admin
+    )
+
+    # Build tools dynamically: base tools always, moderation tools only when permitted
+    if tools is None:
+        tools = build_llm2_tools(
+            allow_delete=can_delete,
+            allow_mute=can_mute,
+            allow_kick=can_kick,
+            allow_subagent=allow_subagent,
+        )
+
+    # Build the EXACT messages sent to the model via the shared builder, so
+    # ``/dump`` (which serialises the same builder output) can never drift from
+    # what LLM2 really sees.
+    built = build_llm2_messages(
+        history,
+        current,
+        system=system,
+        prompt_override=prompt_override,
+        current_payload=current_payload,
+        group_description=group_description,
+        chat_type=chat_type,
+        bot_is_admin=bot_is_admin,
+        bot_is_super_admin=bot_is_super_admin,
+        allow_subagent=allow_subagent,
+        subagent_context=subagent_context,
+        subagent_result_block=subagent_result_block,
+        scheduled_task_block=scheduled_task_block,
+    )
+    msgs = built.messages
+    rendered_system = built.rendered_system
+    history_list = built.history_list
+    prompt_preview = built.prompt_preview
+    media_part_count = built.media_part_count
+
+    if env_flag("BRIDGE_LOG_PROMPT_FULL"):
+        first_target = targets[0]
+        logged_messages = [
+            {
+                "role": "system" if isinstance(m, SystemMessage) else "user",
+                "content": redact_multimodal_content(getattr(m, "content", "")),
+            }
+            for m in msgs
+        ]
+        logger.info(
+            "LLM2 prompt full",
+            extra={
+                "chat_id": log_chat_id,
+                "chat_name": log_chat_name,
+                "provider": first_target.name,
+                "model": first_target.model,
+                "endpoint": first_target.base_url,
+                "messages": logged_messages,
+            },
+        )
 
     total_targets = len(targets)
     for idx, target in enumerate(targets):
@@ -493,9 +630,9 @@ async def generate_reply(
             return None, last_failure_kind
 
         result, failure_kind = await _invoke_with_retry(
-            msgs, mode="multimodal" if media_parts else "text"
+            msgs, mode="multimodal" if media_part_count else "text"
         )
-        if result is None and media_parts:
+        if result is None and media_part_count:
             if failure_kind == "timeout":
                 logger.warning(
                     "LLM2 multimodal timeout; skipping text-only fallback on this provider",
@@ -505,7 +642,7 @@ async def generate_reply(
                         "provider": target.name,
                         "model": resolved_model,
                         "endpoint": target.base_url,
-                        "media_parts": len(media_parts),
+                        "media_parts": media_part_count,
                         "timeout_s": timeout_s,
                         "retry_max": retry_max,
                         "sdk_max_retries": sdk_max_retries,
@@ -521,24 +658,11 @@ async def generate_reply(
                         "provider": target.name,
                         "model": resolved_model,
                         "endpoint": target.base_url,
-                        "media_parts": len(media_parts),
+                        "media_parts": media_part_count,
                     },
                 )
-                fallback_msgs = [
-                    SystemMessage(content=rendered_system),
-                    HumanMessage(content=f"Group description:\n{group_text}"),
-                    HumanMessage(content=context_injection),
-                ]
-                if subagent_block:
-                    fallback_msgs.append(HumanMessage(content=subagent_block))
-                if subagent_result_block:
-                    fallback_msgs.append(HumanMessage(content=subagent_result_block))
-                if scheduled_task_block:
-                    fallback_msgs.append(HumanMessage(content=scheduled_task_block))
-                fallback_msgs.append(HumanMessage(content=messages_content_text))
-
                 result, _ = await _invoke_with_retry(
-                    fallback_msgs, mode="text_fallback"
+                    built.text_fallback_messages, mode="text_fallback"
                 )
 
         if result is not None:

@@ -361,6 +361,12 @@ class BatchProcessor:
 
       history = per_chat[p_chat_id]
 
+      # For /dump we serialise the REAL LLM2 prompt below. The triggering
+      # /dump message is the "current" burst (not part of older history), so
+      # snapshot history BEFORE the command message is appended — mirroring how
+      # process_message_batch builds llm2_history (= history_before_current).
+      dump_history_before = list(history) if cmd_name == "dump" else None
+
       # Add command message to history (for LLM context)
       _append_or_merge_history_payload(history, payload)
 
@@ -370,48 +376,43 @@ class BatchProcessor:
         p_group_description, p_db_prompt = _resolve_group_prompt_context(payload)
         p_chat_type, p_bot_is_admin, p_bot_is_super_admin = _chat_state_from_payload(payload)
         p_reply_to = _normalize_context_msg_id(payload.get("contextMsgId"))
+        # Serialise the SAME messages LLM2 is actually invoked with (via the
+        # shared builder) instead of hand-rebuilding a subset. This makes the
+        # dump reflect the real prompt — including the sub-agent state block and
+        # the execute_subtask file-ID helper — and the real history exactly as
+        # the model sees it (system prompt, group description, context/helper
+        # injection, sub-agent blocks, then older messages + current burst).
         try:
-          from .llm.prompt import _render_system_prompt, _load_system_prompt, _group_description_block, _chat_state_header
-          from .db import get_permission as _get_perm, permission_allows_delete, permission_allows_mute, permission_allows_kick, get_subagent_enabled as _get_subagent
+          from ..llm.llm2 import build_llm2_messages, serialize_llm2_messages
         except ImportError:
-          from bridge.llm.prompt import _render_system_prompt, _load_system_prompt, _group_description_block, _chat_state_header  # type: ignore
-          from bridge.db import get_permission as _get_perm, permission_allows_delete, permission_allows_mute, permission_allows_kick, get_subagent_enabled as _get_subagent  # type: ignore
-        p_perm = _get_perm(p_chat_id)
-        p_admin_ok = p_bot_is_admin or p_bot_is_super_admin
-        p_allow_delete = p_admin_ok and permission_allows_delete(p_perm)
-        p_allow_mute = p_admin_ok and permission_allows_mute(p_perm)
-        p_allow_kick = p_admin_ok and permission_allows_kick(p_perm)
-        p_allow_subagent = _get_subagent(p_chat_id)
-        p_rendered_system = _render_system_prompt(
-          _load_system_prompt(),
+          from bridge.llm.llm2 import build_llm2_messages, serialize_llm2_messages  # type: ignore
+        # The /dump message is the "current" burst; older history is everything
+        # before it (snapshotted pre-append), mirroring process_message_batch.
+        p_history = dump_history_before if dump_history_before is not None else list(history)
+        p_current = _build_burst_current([payload])
+        p_allow_subagent = db_get_subagent_enabled(p_chat_id)
+        # Sub-agent context block: same three-tier fallback the batch flow uses
+        # (active task -> recently finished -> idle), gated by allow_subagent.
+        p_subagent_context = None
+        if p_allow_subagent:
+          p_subagent_context = subagent_tracker.format_context(p_chat_id)
+          if p_subagent_context is None:
+            p_subagent_context = subagent_tracker.format_recent_finished(p_chat_id)
+          if p_subagent_context is None:
+            p_subagent_context = subagent_tracker.format_idle(p_chat_id)
+        p_built = build_llm2_messages(
+          p_history,
+          p_current,
+          current_payload=payload,
+          group_description=p_group_description,
           prompt_override=p_db_prompt,
-          allow_delete=p_allow_delete,
-          allow_mute=p_allow_mute,
-          allow_kick=p_allow_kick,
+          chat_type=p_chat_type,
+          bot_is_admin=p_bot_is_admin,
+          bot_is_super_admin=p_bot_is_super_admin,
           allow_subagent=p_allow_subagent,
+          subagent_context=p_subagent_context,
         )
-        p_hist_text = format_history(list(history), history=list(history)) or "(no messages)"
-        p_current_msg = _payload_to_message(payload)
-        p_current_text = format_history([p_current_msg], history=[p_current_msg])
-        p_group_text = _group_description_block(p_group_description)
-        p_chat_state = _chat_state_header(p_chat_type, p_bot_is_admin, p_bot_is_super_admin)
-        dump_parts = [
-          "=== SYSTEM PROMPT ===",
-          p_rendered_system,
-          "",
-          "=== GROUP DESCRIPTION ===",
-          p_group_text,
-          "",
-          "=== CHAT STATE ===",
-          p_chat_state,
-          "",
-          "=== OLDER MESSAGES ===",
-          p_hist_text,
-          "",
-          "=== CURRENT MESSAGE ===",
-          p_current_text,
-        ]
-        dump_text = "\n".join(dump_parts)
+        dump_text = serialize_llm2_messages(p_built.messages)
         dump_file = None
         try:
           # Write to MEDIA_DIR instead of /tmp to avoid race condition where
