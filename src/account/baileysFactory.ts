@@ -34,7 +34,7 @@ import makeWASocket, {
 } from "baileys";
 import type { WASocket, WAMessage, AuthenticationState } from "baileys";
 import { useCachedAuthState } from "../utils/cachedAuthState.js";
-import logger from "../logger.js";
+import logger, { baileysLogger } from "../logger.js";
 import config from "../config.js";
 import { createAccountContext } from "./accountContext.js";
 import type { AccountContext } from "./accountContext.js";
@@ -97,6 +97,10 @@ const defaultSocketCreator: SocketCreator = async (authState) => {
     browser: ["WazzapAgents", "Chrome", "1.0"],
     markOnlineOnConnect: false,
     defaultQueryTimeoutMs: config.sendTimeoutMs,
+    // Hand Baileys our tamed child logger so its (very chatty) internal logging
+    // is level-filtered (default 'warn') and rendered in the same clean format
+    // as the gateway instead of its own raw-JSON 'info' default.
+    logger: baileysLogger,
   });
 };
 

@@ -79,6 +79,8 @@ export interface Config {
   stickerUploadDir: string;
   stickersDbPath: string;
   logLevel: string;
+  logColor: string;
+  baileysLogLevel: string;
   groupMetadataTimeoutMs: number;
   downloadTimeoutMs: number;
   sendTimeoutMs: number;
@@ -127,6 +129,13 @@ const config: Config = {
   stickerUploadDir: STICKER_UPLOAD_DIR,
   stickersDbPath: STICKERS_DB_PATH,
   logLevel: process.env.LOG_LEVEL || 'info',
+  // Color output: 'auto' (default, color only on a TTY) | 'always' | 'never'.
+  // Shared with the Python bridge (both read LOG_COLOR) and honours NO_COLOR.
+  logColor: process.env.LOG_COLOR || 'auto',
+  // Level for Baileys' own (very chatty) internal logger. Defaults to 'warn'
+  // so its info-level connection/keys chatter is suppressed; raise to 'debug'
+  // /'trace' to diagnose the WhatsApp socket, or 'silent' to mute it entirely.
+  baileysLogLevel: process.env.BAILEYS_LOG_LEVEL || 'warn',
   groupMetadataTimeoutMs: positiveInt(process.env.GROUP_METADATA_TIMEOUT_MS, 8000),
   downloadTimeoutMs: positiveInt(process.env.DOWNLOAD_TIMEOUT_MS, 60000),
   sendTimeoutMs: positiveInt(process.env.SEND_TIMEOUT_MS, 60000),

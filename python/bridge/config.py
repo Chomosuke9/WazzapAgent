@@ -359,11 +359,27 @@ def bridge_log_extras_limit() -> int:
 
 
 def bridge_log_chat_label_width() -> int:
-  return _parse_positive_int(os.getenv("BRIDGE_LOG_CHAT_LABEL_WIDTH"), 24)
+  return _parse_positive_int(os.getenv("BRIDGE_LOG_CHAT_LABEL_WIDTH"), 18)
 
 
 def bridge_log_chat_label_default_raw() -> str:
   return str(os.getenv("BRIDGE_LOG_CHAT_LABEL_DEFAULT", "system"))
+
+
+def bridge_log_color() -> str | None:
+  """Raw ``LOG_COLOR`` value ('auto' | 'always' | 'never' | truthy/falsey).
+
+  Shared with the Node gateway (both read ``LOG_COLOR``) so a single knob
+  controls color on both processes; ``NO_COLOR`` and TTY detection are applied
+  in ``log.py``."""
+  return os.getenv("LOG_COLOR")
+
+
+def bridge_log_quiet_third_party() -> bool:
+  """When true (default) floor noisy third-party loggers (httpx, openai,
+  websockets, aiohttp, …) at WARNING so their per-request INFO chatter does not
+  drown the bridge's own logs."""
+  return env_flag("BRIDGE_LOG_QUIET_THIRD_PARTY", True)
 
 
 # -- Sticker DB --------------------------------------------------------------

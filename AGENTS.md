@@ -497,7 +497,10 @@ single-account fallback.
 `WS_BIND_HOST` (host the WS server binds to, default `127.0.0.1` (loopback); set `0.0.0.0` for cross-host + set `LLM_WS_TOKEN`),
 `WS_MAX_PAYLOAD_BYTES` (max inbound WS frame size, default 8 MiB),
 `DATA_DIR`, `MEDIA_DIR`,
-`STICKERS_DIR`, `LOG_LEVEL`, `WS_RECONNECT_MS`,
+`STICKERS_DIR`, `LOG_LEVEL`,
+`LOG_COLOR` (`auto`|`always`|`never`, also honours `NO_COLOR`; shared with the Python bridge),
+`BAILEYS_LOG_LEVEL` (level for Baileys' own internal logger, default `warn` to suppress its info chatter; `silent` mutes it),
+`WS_RECONNECT_MS`,
 `WS_RECONNECT_MAX_MS` (cap for exponential backoff, default 60000),
 `WS_RECONNECT_JITTER_RATIO` (+/- jitter fraction 0..1, default 0.2),
 `WS_HEARTBEAT_INTERVAL_MS` (ping cadence and detection granularity when connected, default 20000),
@@ -518,7 +521,8 @@ single-account fallback.
 `BRIDGE_REPLY_DEDUP_WINDOW_MS` (default 120000), `BRIDGE_REPLY_DEDUP_MIN_CHARS` (default 24),
 `BRIDGE_ASSISTANT_ECHO_MERGE_WINDOW_MS` (default 180000),
 `BRIDGE_LOG_LEVEL`, `BRIDGE_LOG_PROMPT_FULL`, `BRIDGE_LOG_EXTRAS_LIMIT`,
-`BRIDGE_LOG_INFO_EXTRAS`, `BRIDGE_LOG_CHAT_LABEL_WIDTH`, `BRIDGE_LOG_CHAT_LABEL_DEFAULT`
+`BRIDGE_LOG_INFO_EXTRAS`, `BRIDGE_LOG_CHAT_LABEL_WIDTH` (default 18), `BRIDGE_LOG_CHAT_LABEL_DEFAULT`,
+`BRIDGE_LOG_QUIET_THIRD_PARTY` (default true — floor noisy libs like httpx/openai/websockets at WARNING)
 
 **LLM1 (Router):**
 `LLM1_ENDPOINT`, `LLM1_MODEL`, `LLM1_API_KEY`, `LLM1_FALLBACK_ENDPOINT/MODEL/API_KEY`,
