@@ -96,6 +96,67 @@ def _format_current_window(msg: WhatsAppMessage) -> str:
   return format_history([msg], history=[msg])
 
 
+# Media kinds that are useful as sub-agent inputs. Stickers are intentionally
+# excluded: they are emoji-like reactions, not files a user asks the bot to
+# "process" or "send back", and listing them only adds noise.
+_SUBAGENT_FILE_KINDS = {"image", "video", "audio", "document", "media"}
+
+
+def _files_for_subagent_block(history: Iterable[WhatsAppMessage]) -> str | None:
+  """Build an explicit ID->file lookup table for ``execute_subtask``.
+
+  The model reliably knows *when* to delegate, but it tends to pass the
+  contextMsgId of the latest *request / mention* message to ``context_msg_ids``
+  instead of the message that actually CONTAINS the file. The resolver then
+  finds no attachment for that ID and the sub-agent silently receives nothing
+  (user-visible symptom: "the bot ignored the file I sent").
+
+  Listing the exact ``[#NNNNNN] -> file`` mapping removes the inference the
+  model keeps getting wrong: it can copy the right ID rather than guess. We
+  read ``msg.media`` (the SENDER's own attachment) — never ``quoted_media`` —
+  so a ``REPLYING TO`` line that mentions a file can never be mistaken for the
+  message that holds it. Returns ``None`` when the chat has no attachable file
+  so nothing is injected.
+  """
+  from ..history import _compact, _normalize_context_msg_id
+
+  entries: list[str] = []
+  seen: set[str] = set()
+  for msg in history:
+    media = (msg.media or "").strip().lower()
+    if media not in _SUBAGENT_FILE_KINDS:
+      continue
+    cid = _normalize_context_msg_id(
+      msg.context_msg_id, role=msg.role, media=msg.media
+    )
+    if not (cid.isdigit() and len(cid) == 6) or cid in seen:
+      continue
+    seen.add(cid)
+    sender = assistant_name() if msg.role == "assistant" else (_compact(msg.sender) or "unknown")
+    # For documents the filename / caption is carried in msg.text; surface it
+    # so the model can disambiguate when several files are present.
+    label = media
+    caption = _compact(msg.text)
+    if caption and not (caption.startswith("<media:") and caption.endswith(">")):
+      label = f'{media} "{caption}"'
+    entries.append(f"- [#{cid}] {label} (from {sender})")
+
+  if not entries:
+    return None
+  return (
+    "<files_in_chat>\n"
+    "These are the ONLY messages in this chat that carry a file/attachment.\n"
+    + "\n".join(entries)
+    + "\n\nWhen you call `execute_subtask` to act on a file the user referred "
+    "to (e.g. \"the document earlier\", \"that image\", \"send it back\"), "
+    "`context_msg_ids` MUST be the ID(s) from THIS list — the message that "
+    "actually CONTAINS the file. Do NOT use the latest request/mention "
+    "message's ID, and NEVER take an ID from a `REPLYING TO` line. If the file "
+    "the user means is not in this list, re-read the chat; do not invent an ID.\n"
+    "</files_in_chat>"
+  )
+
+
 def _llm1_history_limit_for_prompt() -> int:
   """Read LLM1 history limit for embedding in system prompt text."""
   return config.llm1_history_limit()
@@ -392,20 +453,27 @@ Never use `execute_subtask` for tasks built-in commands can handle (stickers, st
 
 Rules:
 - Call `execute_subtask` immediately when applicable. Acknowledgement goes in `confirmation_text`, NOT as a separate `reply_message`.
-- Sub-agent has NO chat history. Write `instruction` as a self-contained brief. Pass `context_msg_ids` for needed messages (media or text), or `null`.
-- Text-only messages (e.g. pasted story) are auto-converted to `.txt` for the sub-agent.
-- To revise a previously sent file: pass its `[#NNNNNN]` in `context_msg_ids` — bridge resolves the path automatically.
+- `instruction`: the sub-agent has NO chat history and NO memory of your previous instructions. Write a self-contained brief that states the full goal — assume it knows nothing about this chat.
+- Text-only messages (e.g. a pasted story) are auto-converted to `.txt` for the sub-agent.
 - `high_quality=true` for complex reasoning, image/code gen/editing. `high_quality=false` (default) for routine tasks.
 - NEVER say "I don't know / I can't / I'm not sure" if a sub-agent could find or compute the answer. Uncertainty without attempting a sub-agent is a failure. It's your knowledge and capability extension — use it.
 
-Additionally, you could steer the sub-agent mid task by using `execute_subtask` again.
+Choosing `context_msg_ids` (THE #1 cause of failure — get this right):
+The ID you pass must be the message that ACTUALLY CONTAINS the file, identified by an attachment marker (`[document]`, `[image]`, `[video]`, `[audio]`) on its OWN sender line. It is almost NEVER the user's latest request/mention message — that one usually has no file, and passing its ID sends the sub-agent nothing.
+- If a `<files_in_chat>` list is present, copy the ID from THERE. That list is authoritative.
+- NEVER take an ID from a `REPLYING TO` line — the marker there belongs to the QUOTED message, not the message you're reading.
+- To revise a file you sent earlier: pass that file message's `[#NNNNNN]`.
+Example:
+    [#000196] 21:12
+    Agus (29dry6): [document] laporan.pdf
+    [#000201] 21:12
+    Agus (29dry6): kirim balik dokumen tadi vi
+Here the file lives at #000196. The request at #000201 has NO file. Pass `context_msg_ids=["000196"]`, NOT "000201".
 
-If a sub-agent IS currently running (its memory is alive), the you can steer it mid-task by calling `execute_subtask` again — e.g. if the first instruction said "draw a dog" but the user changes their mind, just say: "Change the dog to a cat but keep everything else the same."
-If this is the LAST chance (re-invoke after sub-agent delivered its result), the you can protest/correct using the same memory — e.g. "The zip you sent shows as a compressed file, not an image. Send the image directly as a PNG, not zipped."
-
-WARNING: DETERMINE THE CORRECT TARGET ID BEFORE USING IT. MOST OF THE TIME, SUB-AGENT ACTIONS FAIL BECAUSE YOU USED THE WRONG TARGET ID AND MAKING SUB-AGENT CONFUSED.
-WARNING: CREATE AN INSTRUCTION THAT DESCRIBES WHAT YOUR GOAL IS, SUB-AGENT HAS NO CHAT HISTORY. WRITE `instruction` AS A SELF-CONTAINED BRIEF. IT HAS NO CONTEXT ABOUT PREVIOUS MESSAGES OR INSTRUCTIONS.
-WARNING: SUB-AGENT HAS NO CLUE ABOUT YOUR PREVIOUS INSTRUCTIONS. IF NO SUB-AGENT RUNNING, THAT MEANS SUB-AGENT'S MEMORY ALREADY DELETED. YOU NEED TO MAKE A VERY CLEAR INSTRUCTION. TREAT IT AS A COMPLETELY NEW MEMORY.
+Steering / correction (re-using the sub-agent's live memory):
+- If a sub-agent IS currently running, you can steer it mid-task by calling `execute_subtask` again — e.g. user changes "draw a dog" to a cat: "Change the dog to a cat, keep everything else the same."
+- You can ALSO attach NEW files while steering: pass their `context_msg_ids` (same rule as above — the ID that holds the file). The running sub-agent receives them mid-task. e.g. user sends a logo and says "add this logo": call `execute_subtask` with the logo's `context_msg_ids`.
+- On the re-invoke AFTER the sub-agent delivered its result (your LAST chance), you can protest/correct using the same memory — e.g. "The zip you sent shows as a compressed file, not an image. Send the image directly as a PNG, not zipped."
 </subagent>"""
 _SUBAGENT_OFF_RULES = """
 Sub-agent isn't allowed.

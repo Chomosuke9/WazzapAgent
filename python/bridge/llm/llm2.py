@@ -30,6 +30,7 @@ from .prompt import (  # noqa: F401
     _chat_state_header,
     _context_injection_block,
     _current_date_str,
+    _files_for_subagent_block,
     _format_current_window,
     _group_description_block,
     _load_system_prompt,
@@ -308,6 +309,15 @@ async def generate_reply(
     subagent_block: str | None = subagent_context if subagent_context else None
     if subagent_block:
         msgs.append(HumanMessage(content=subagent_block))
+    # ``files_block`` (sub-agent input-ID guidance): an explicit ID->file
+    # lookup table so LLM2 passes the contextMsgId of the message that actually
+    # CONTAINS the file to ``execute_subtask.context_msg_ids`` — instead of the
+    # latest request/mention message's ID (the most common cause of "the file
+    # never reached the sub-agent"). Only injected when the sub-agent is
+    # enabled for this chat and the chat has at least one attachable file.
+    files_block = _files_for_subagent_block(history_list) if allow_subagent else None
+    if files_block:
+        msgs.append(HumanMessage(content=files_block))
     # ``subagent_result_block`` is a high-priority slot used by the post-task
     # re-invoke so the model gets a clear, dedicated "deliver the result now"
     # signal instead of having to dig the [SUBTASK FINISHED] line out of the
@@ -331,6 +341,8 @@ async def generate_reply(
         ]
         if subagent_block:
             logged_messages.append({"role": "user", "content": subagent_block})
+        if files_block:
+            logged_messages.append({"role": "user", "content": files_block})
         if subagent_result_block:
             logged_messages.append({"role": "user", "content": subagent_result_block})
         if scheduled_task_block:

@@ -438,8 +438,11 @@ LLM2_SUBAGENT_TOOL = {
                         "List of 6-digit contextMsgIds whose messages contain media attachments "
                         "or text content to provide as input to the sub-agent. The bridge resolves "
                         "each ID to the corresponding file path automatically — for text-only messages, "
-                        "the text is converted to a .txt file. Only include IDs that are explicitly "
-                        "relevant to the instruction. Pass null when no input files are needed."
+                        "the text is converted to a .txt file. CRITICAL: pass the ID of the message "
+                        "that ACTUALLY CONTAINS the file (see the <files_in_chat> list), NOT the latest "
+                        "request/mention message and NOT an ID from a 'REPLYING TO' line. Only include "
+                        "IDs that are explicitly relevant to the instruction. Pass null when no input "
+                        "files are needed."
                     ),
                 },
                 "high_quality": {

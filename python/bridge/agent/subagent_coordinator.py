@@ -80,6 +80,69 @@ logger = setup_logging()
 from ..messaging.gateway import _dispatch_sticker
 
 
+async def _resolve_ctx_ids_to_input_files(
+  ws,
+  chat_id: str,
+  ctx_ids,
+  media_paths_by_chat: dict,
+  history,
+  session_id: str,
+) -> list[str]:
+  """Resolve ``ctx_ids`` to staged sub-agent input file paths.
+
+  Mirrors the primary-submit resolution in :meth:`SubAgentCoordinator.submit_subtask`
+  so steering can carry the SAME files: each contextMsgId can yield a media
+  attachment (copied + extension-preserved) and/or the message text (written
+  to ``user_message<N>.txt``). The collected files are staged into the
+  cross-process exchange dir via :func:`stage_input_files` so the paths
+  resolve on both the bridge and the (possibly containerised) sub-agent side.
+
+  Returns the staged absolute paths (possibly empty). Lazy media is
+  materialized first so non-visual kinds (PDF/docx/…) referenced for the
+  first time during steering are actually on disk before resolution.
+  """
+  if not ctx_ids:
+    return []
+  await materialize_media_for_subagent(ws, chat_id, ctx_ids, media_paths_by_chat)
+  chat_store = media_paths_by_chat.get(chat_id, {})
+  local_input_files: list[str] = []
+  tmp_dir = tempfile.mkdtemp(prefix="subagent_ctx_")
+  try:
+    file_idx = 1
+    for cid in ctx_ids:
+      # --- media resolution ---
+      atts = chat_store.get(cid)
+      media_path = None
+      if isinstance(atts, list) and atts:
+        first = atts[0]
+        p = first.get("path") if isinstance(first, dict) else None
+        if p and os.path.isfile(p):
+          media_path = p
+      elif isinstance(atts, str) and os.path.isfile(atts):
+        media_path = atts
+      if media_path:
+        ext = os.path.splitext(media_path)[1] or ".bin"
+        renamed = os.path.join(tmp_dir, f"media{file_idx}{ext}")
+        shutil.copyfile(media_path, renamed)
+        local_input_files.append(renamed)
+        file_idx += 1
+      # --- text resolution (on-demand scan of history deque) ---
+      msg_text = None
+      for msg in history:
+        if msg.context_msg_id == cid and msg.text:
+          msg_text = msg.text
+          break
+      if msg_text:
+        txt_path = os.path.join(tmp_dir, f"user_message{file_idx}.txt")
+        with open(txt_path, "w", encoding="utf-8") as f:
+          f.write(msg_text)
+        local_input_files.append(txt_path)
+        file_idx += 1
+    return stage_input_files(session_id, local_input_files)
+  finally:
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 async def _deliver_subagent_result(
   *,
   ws,
@@ -588,15 +651,34 @@ class SubAgentCoordinator:
     if existing_task is not None:
       _incoming = str(action.get("instruction") or "").strip()
       if _incoming:
+        # Steering can now carry files too: resolve the same contextMsgIds
+        # the model passed (e.g. a document sent mid-task) and ship them to
+        # the running session. Without this, a file referenced during
+        # steering was silently dropped — only the text reached the agent.
+        _steer_ctx_ids = action.get("contextMsgIds", []) or []
+        _steer_files: list[str] = []
+        try:
+          _steer_files = await _resolve_ctx_ids_to_input_files(
+            ws, chat_id, _steer_ctx_ids, media_paths_by_chat, history,
+            existing_task.session_id,
+          )
+        except Exception as _steer_err:  # pylint: disable=broad-except
+          logger.exception(
+            "execute_subtask: steering file resolution failed chat=%s: %s",
+            chat_id, _steer_err, extra={"chat_id": chat_id},
+          )
         logger.info(
           "execute_subtask: forwarding as steering to running "
-          "sub-agent chat=%s active_session=%s instruction=%s",
+          "sub-agent chat=%s active_session=%s files=%d instruction=%s",
           chat_id,
           existing_task.session_id,
+          len(_steer_files),
           _incoming[:120],
           extra={"chat_id": chat_id},
         )
-        await subagent_client.steer(existing_task.session_id, _incoming)
+        await subagent_client.steer(
+          existing_task.session_id, _incoming, input_files=_steer_files,
+        )
       else:
         logger.warning(
           "execute_subtask: dropped (no instruction) for chat=%s",

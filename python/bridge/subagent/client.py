@@ -48,15 +48,34 @@ class SubAgentClient:
     self._base_url = (base_url or SUBAGENT_URL).rstrip("/")
     self._webhook_url = webhook_url or SUBAGENT_WEBHOOK_URL
 
-  async def steer(self, session_id: str, instruction: str) -> bool:
+  async def steer(
+    self,
+    session_id: str,
+    instruction: str,
+    input_files: list[str] | None = None,
+  ) -> bool:
     """Send a steering instruction to a running sub-agent via POST /steer.
+
+    When ``input_files`` is provided, the files are shipped to the running
+    session the same way :meth:`submit` ships them at task start: by path
+    (single-machine) and base64-inlined under ``input_files_content``
+    (cross-machine). The service re-stages them into the live session's
+    workdir and tells the agent about them. Without this, files referenced
+    mid-task would be silently dropped (only the instruction text reached
+    the sub-agent).
 
     Returns ``True`` if the steering was accepted by the remote (HTTP 200),
     ``False`` if the session was not found (HTTP 404) or any other error.
     Does NOT raise on failure — callers should log and move on.
     """
     url = f"{self._base_url}/steer"
-    payload = {"session_id": session_id, "instruction": instruction}
+    payload: dict = {"session_id": session_id, "instruction": instruction}
+    if input_files:
+      payload["input_files"] = input_files
+      try:
+        payload["input_files_content"] = self._encode_input_files(input_files)
+      except Exception:  # encoding failure must never break steering
+        payload["input_files_content"] = []
     loop = asyncio.get_running_loop()
     try:
       resp = await loop.run_in_executor(
