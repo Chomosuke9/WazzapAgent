@@ -17,83 +17,86 @@ _SYSTEM_PROMPT_CACHE: str | None = None
 
 
 def _truncate_text(text: str | None, max_chars: int) -> str | None:
-  if text is None or len(text) <= max_chars:
-    return text
-  if max_chars <= 3:
-    return text[:max_chars]
-  return f"{text[: max_chars - 3]}..."
+    if text is None or len(text) <= max_chars:
+        return text
+    if max_chars <= 3:
+        return text[:max_chars]
+    return f"{text[: max_chars - 3]}..."
 
 
 def _truncate_burst_text(text: str | None, max_chars: int) -> str | None:
-  if text is None:
-    return None
-  if not text.startswith("Burst messages ("):
-    return _truncate_text(text, max_chars)
-  lines = text.splitlines()
-  if not lines:
-    return text
-  header = lines[0]
-  body = lines[1:]
-  truncated_body = [_truncate_text(line, max_chars) or "" for line in body]
-  return "\n".join([header, *truncated_body])
+    if text is None:
+        return None
+    if not text.startswith("Burst messages ("):
+        return _truncate_text(text, max_chars)
+    lines = text.splitlines()
+    if not lines:
+        return text
+    header = lines[0]
+    body = lines[1:]
+    truncated_body = [_truncate_text(line, max_chars) or "" for line in body]
+    return "\n".join([header, *truncated_body])
 
 
 def _truncate_message(msg: WhatsAppMessage, max_chars: int) -> WhatsAppMessage:
-  return WhatsAppMessage(
-    timestamp_ms=msg.timestamp_ms,
-    sender=msg.sender,
-    context_msg_id=msg.context_msg_id,
-    sender_ref=msg.sender_ref,
-    sender_is_admin=msg.sender_is_admin,
-    sender_is_super_admin=msg.sender_is_super_admin,
-    text=_truncate_burst_text(msg.text, max_chars),
-    media=msg.media,
-    quoted_message_id=msg.quoted_message_id,
-    quoted_sender=msg.quoted_sender,
-    quoted_text=_truncate_text(msg.quoted_text, max_chars),
-    quoted_media=msg.quoted_media,
-    quoted_sender_ref=msg.quoted_sender_ref,
-    quoted_sender_is_admin=msg.quoted_sender_is_admin,
-    quoted_sender_is_super_admin=msg.quoted_sender_is_super_admin,
-    message_id=msg.message_id,
-    role=msg.role,
-  )
+    return WhatsAppMessage(
+        timestamp_ms=msg.timestamp_ms,
+        sender=msg.sender,
+        context_msg_id=msg.context_msg_id,
+        sender_ref=msg.sender_ref,
+        sender_is_admin=msg.sender_is_admin,
+        sender_is_super_admin=msg.sender_is_super_admin,
+        text=_truncate_burst_text(msg.text, max_chars),
+        media=msg.media,
+        quoted_message_id=msg.quoted_message_id,
+        quoted_sender=msg.quoted_sender,
+        quoted_text=_truncate_text(msg.quoted_text, max_chars),
+        quoted_media=msg.quoted_media,
+        quoted_sender_ref=msg.quoted_sender_ref,
+        quoted_sender_is_admin=msg.quoted_sender_is_admin,
+        quoted_sender_is_super_admin=msg.quoted_sender_is_super_admin,
+        message_id=msg.message_id,
+        role=msg.role,
+    )
 
 
 def _render_prompt_override(base_system: str, prompt_override: str | None) -> str:
-  from datetime import datetime as _dt, timezone as _tz, timedelta as _td
-  raw = config.context_time_utc_offset_raw()
-  try:
-    offset_hours = float(raw) if raw and raw.strip() else None
-  except (TypeError, ValueError):
-    offset_hours = None
-  if offset_hours is not None:
-    now = _dt.now(tz=_tz(_td(hours=offset_hours)))
-  else:
-    now = _dt.now()
-  current_date = now.strftime("%A, %d %B %Y")
-  rendered = base_system
-  overide_text = (prompt_override or "").strip()
-  rendered = rendered.replace("{{prompt_override}}", overide_text)
-  rendered = rendered.replace("{{ prompt_override }}", overide_text)
-  rendered = rendered.replace("{{current_date}}", current_date)
-  rendered = rendered.replace("{{ current_date }}", current_date)
-  return rendered
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+    from datetime import timezone as _tz
+
+    raw = config.context_time_utc_offset_raw()
+    try:
+        offset_hours = float(raw) if raw and raw.strip() else None
+    except (TypeError, ValueError):
+        offset_hours = None
+    if offset_hours is not None:
+        now = _dt.now(tz=_tz(_td(hours=offset_hours)))
+    else:
+        now = _dt.now()
+    current_date = now.strftime("%A, %d %B %Y")
+    rendered = base_system
+    overide_text = (prompt_override or "").strip()
+    rendered = rendered.replace("{{prompt_override}}", overide_text)
+    rendered = rendered.replace("{{ prompt_override }}", overide_text)
+    rendered = rendered.replace("{{current_date}}", current_date)
+    rendered = rendered.replace("{{ current_date }}", current_date)
+    return rendered
 
 
 def _group_description_block(group_description: str | None) -> str:
-  cleaned = (group_description or "").strip()
-  if cleaned:
-    return cleaned
-  return "(none)"
+    cleaned = (group_description or "").strip()
+    if cleaned:
+        return cleaned
+    return "(none)"
 
 
 def _format_current_window(msg: WhatsAppMessage) -> str:
-  # Burst windows are already serialized as multi-line chat entries.
-  text = (msg.text or "").strip()
-  if text.startswith("Burst messages ("):
-    return text
-  return format_history([msg], history=[msg])
+    # Burst windows are already serialized as multi-line chat entries.
+    text = (msg.text or "").strip()
+    if text.startswith("Burst messages ("):
+        return text
+    return format_history([msg], history=[msg])
 
 
 # Media kinds that are useful as sub-agent inputs. Stickers are intentionally
@@ -103,109 +106,98 @@ _SUBAGENT_FILE_KINDS = {"image", "video", "audio", "document", "media"}
 
 
 def _files_for_subagent_block(history: Iterable[WhatsAppMessage]) -> str | None:
-  """Build an explicit ID->file lookup table for ``execute_subtask``.
+    """Build an explicit ID->file lookup table for ``execute_subtask``.
 
-  The model reliably knows *when* to delegate, but it tends to pass the
-  contextMsgId of the latest *request / mention* message to ``context_msg_ids``
-  instead of the message that actually CONTAINS the file. The resolver then
-  finds no attachment for that ID and the sub-agent silently receives nothing
-  (user-visible symptom: "the bot ignored the file I sent").
+    The model reliably knows *when* to delegate, but it tends to pass the
+    contextMsgId of the latest *request / mention* message to ``context_msg_ids``
+    instead of the message that actually CONTAINS the file. The resolver then
+    finds no attachment for that ID and the sub-agent silently receives nothing
+    (user-visible symptom: "the bot ignored the file I sent").
 
-  Listing the exact ``[#NNNNNN] -> file`` mapping removes the inference the
-  model keeps getting wrong: it can copy the right ID rather than guess. We
-  read ``msg.media`` (the SENDER's own attachment) — never ``quoted_media`` —
-  so a ``REPLYING TO`` line that mentions a file can never be mistaken for the
-  message that holds it. Returns ``None`` when the chat has no attachable file
-  so nothing is injected.
-  """
-  from ..history import _compact, _normalize_context_msg_id
+    Listing the exact ``[#NNNNNN] -> file`` mapping removes the inference the
+    model keeps getting wrong: it can copy the right ID rather than guess. We
+    read ``msg.media`` (the SENDER's own attachment) — never ``quoted_media`` —
+    so a ``REPLYING TO`` line that mentions a file can never be mistaken for the
+    message that holds it. Returns ``None`` when the chat has no attachable file
+    so nothing is injected.
+    """
+    from ..history import _compact, _normalize_context_msg_id
 
-  entries: list[str] = []
-  seen: set[str] = set()
-  for msg in history:
-    media = (msg.media or "").strip().lower()
-    if media not in _SUBAGENT_FILE_KINDS:
-      continue
-    cid = _normalize_context_msg_id(
-      msg.context_msg_id, role=msg.role, media=msg.media
+    entries: list[str] = []
+    seen: set[str] = set()
+    for msg in history:
+        media = (msg.media or "").strip().lower()
+        if media not in _SUBAGENT_FILE_KINDS:
+            continue
+        cid = _normalize_context_msg_id(msg.context_msg_id, role=msg.role, media=msg.media)
+        if not (cid.isdigit() and len(cid) == 6) or cid in seen:
+            continue
+        seen.add(cid)
+        sender = assistant_name() if msg.role == "assistant" else (_compact(msg.sender) or "unknown")
+        # For documents the filename / caption is carried in msg.text; surface it
+        # so the model can disambiguate when several files are present.
+        label = media
+        caption = _compact(msg.text)
+        if caption and not (caption.startswith("<media:") and caption.endswith(">")):
+            label = f'{media} "{caption}"'
+        entries.append(f"- [#{cid}] {label} (from {sender})")
+
+    if not entries:
+        return None
+    return (
+        "<files_in_chat>\n"
+        "The ONLY messages in this chat that carry a file. When `execute_subtask` "
+        'needs a file the user referred to ("the document earlier", "send it '
+        'back"), `context_msg_ids` MUST be an ID from THIS list:\n'
+        + "\n".join(entries)
+        + "\nNever use the request/mention message's ID or an ID from a `REPLYING "
+        "TO` line. If the file isn't listed, re-read the chat — don't invent an ID.\n"
+        "For optimization purpose, we don't include sticker in here.\n"
+        "</files_in_chat>"
     )
-    if not (cid.isdigit() and len(cid) == 6) or cid in seen:
-      continue
-    seen.add(cid)
-    sender = assistant_name() if msg.role == "assistant" else (_compact(msg.sender) or "unknown")
-    # For documents the filename / caption is carried in msg.text; surface it
-    # so the model can disambiguate when several files are present.
-    label = media
-    caption = _compact(msg.text)
-    if caption and not (caption.startswith("<media:") and caption.endswith(">")):
-      label = f'{media} "{caption}"'
-    entries.append(f"- [#{cid}] {label} (from {sender})")
-
-  if not entries:
-    return None
-  return (
-    "<files_in_chat>\n"
-    "These are the ONLY messages in this chat that carry a file/attachment.\n"
-    + "\n".join(entries)
-    + "\n\nWhen you call `execute_subtask` to act on a file the user referred "
-    "to (e.g. \"the document earlier\", \"that image\", \"send it back\"), "
-    "`context_msg_ids` MUST be the ID(s) from THIS list — the message that "
-    "actually CONTAINS the file. Do NOT use the latest request/mention "
-    "message's ID, and NEVER take an ID from a `REPLYING TO` line. If the file "
-    "the user means is not in this list, re-read the chat; do not invent an ID.\n"
-    "</files_in_chat>"
-  )
 
 
 def _llm1_history_limit_for_prompt() -> int:
-  """Read LLM1 history limit for embedding in system prompt text."""
-  return config.llm1_history_limit()
+    """Read LLM1 history limit for embedding in system prompt text."""
+    return config.llm1_history_limit()
 
 
 def _llm1_message_max_chars_for_prompt() -> int:
-  """Read LLM1 message max chars for embedding in system prompt text."""
-  return config.llm1_message_max_chars()
+    """Read LLM1 message max chars for embedding in system prompt text."""
+    return config.llm1_message_max_chars()
 
 
 def build_llm1_prompt(
-  history: Iterable[WhatsAppMessage],
-  current: WhatsAppMessage,
-  *,
-  history_limit: int,
-  message_max_chars: int,
-  current_media_parts: Optional[list[dict]] = None,
-  current_media_notes: Optional[list[str]] = None,
-  metadata_block: str | None = None,
-  group_description: str | None = None,
-  prompt_override: str | None = None,
-  sticker_catalog: str | None = None,
+    history: Iterable[WhatsAppMessage],
+    current: WhatsAppMessage,
+    *,
+    history_limit: int,
+    message_max_chars: int,
+    current_media_parts: Optional[list[dict]] = None,
+    current_media_notes: Optional[list[str]] = None,
+    metadata_block: str | None = None,
+    group_description: str | None = None,
+    prompt_override: str | None = None,
+    sticker_catalog: str | None = None,
 ):
-  configured_assistant_name = assistant_name()
-  history_list = list(history)[-history_limit:]
-  prompt_history = [_truncate_message(msg, message_max_chars) for msg in history_list]
-  current_prompt_msg = _truncate_message(current, message_max_chars)
-  hist_text = format_history(prompt_history, history=prompt_history) or "(no older messages)"
-  current_line = _format_current_window(current_prompt_msg) or "(no current messages)"
-  group_text = _group_description_block(group_description)
-  context_messages = (
-    "Older messages:\n"
-    f"{hist_text}\n\n"
-    "Current messages (burst):\n"
-    f"{current_line}\n"
-  )
-  current_content: str | list[dict] = context_messages
-  if current_media_notes:
-    current_content += "\nVisual attachments:\n" + "\n".join(
-      f"- {note}" for note in current_media_notes
+    configured_assistant_name = assistant_name()
+    history_list = list(history)[-history_limit:]
+    prompt_history = [_truncate_message(msg, message_max_chars) for msg in history_list]
+    current_prompt_msg = _truncate_message(current, message_max_chars)
+    hist_text = format_history(prompt_history, history=prompt_history) or "(no older messages)"
+    current_line = _format_current_window(current_prompt_msg) or "(no current messages)"
+    group_text = _group_description_block(group_description)
+    context_messages = f"Older messages:\n{hist_text}\n\nCurrent messages (burst):\n{current_line}\n"
+    current_content: str | list[dict] = context_messages
+    if current_media_notes:
+        current_content += "\nVisual attachments:\n" + "\n".join(f"- {note}" for note in current_media_notes)
+    if current_media_parts:
+        current_content = [{"type": "text", "content": current_content}]
+        current_content.extend(current_media_parts)
+    catalog_block = (
+        f"\n\n<sticker_catalog>\nAvailable stickers:\n{sticker_catalog}\n</sticker_catalog>" if sticker_catalog else ""
     )
-  if current_media_parts:
-    current_content = [{"type": "text", "content": current_content}]
-    current_content.extend(current_media_parts)
-  catalog_block = (
-    f"\n\n<sticker_catalog>\nAvailable stickers:\n{sticker_catalog}\n</sticker_catalog>"
-    if sticker_catalog else ""
-  )
-  base_system = f"""
+    base_system = f"""
 You are a WhatsApp router agent ({configured_assistant_name}). Call exactly one tool — `llm_should_response`, `llm_react`, or `llm_sticker`. No other output.
 
 **Default: SILENT.**
@@ -284,132 +276,128 @@ Extra instructions in `<prompt_override>`:
 <prompt_override>
 {{{{prompt_override}}}}
 </prompt_override>""".strip()
-  rendered_system = _render_prompt_override(base_system, prompt_override)
-  return [
-    {
-      "role": "system",
-      "content": rendered_system,
-    },
-    {"role": "user", "content": f"Group description:\n{group_text}"},
-    {"role": "user", "content": metadata_block or _metadata_block(None)},
-    {"role": "user", "content": current_content},
-  ]
+    rendered_system = _render_prompt_override(base_system, prompt_override)
+    return [
+        {
+            "role": "system",
+            "content": rendered_system,
+        },
+        {"role": "user", "content": f"Group description:\n{group_text}"},
+        {"role": "user", "content": metadata_block or _metadata_block(None)},
+        {"role": "user", "content": current_content},
+    ]
 
 
 def _metadata_block(current_payload: dict | None) -> str:
-  payload = current_payload if isinstance(current_payload, dict) else {}
-  bot_mentioned = bool(payload.get("botMentionedInWindow", payload.get("botMentioned")))
-  replied_to_bot = bool(payload.get("repliedToBotInWindow", payload.get("repliedToBot")))
-  bot_name_in_text = bool(payload.get("botNameMentionedInText"))
-  since_assistant = payload.get("messagesSinceAssistantReply")
-  assistant_replies_by_window = payload.get("assistantRepliesByWindow")
-  human_window = payload.get("humanMessagesInWindow")
-  explicit_join_events = payload.get("explicitJoinEventsInWindow")
-  explicit_join_participants = payload.get("explicitJoinParticipantsInWindow")
-  raw_chat_type = str(payload.get("chatType") or "").strip().lower()
-  if raw_chat_type not in {"private", "group"}:
-    raw_chat_type = "group" if bool(payload.get("isGroup")) else "private"
-  if raw_chat_type == "group":
-    scope_line = "This is a group chat. You're in a chat with multiple people at once."
-  else:
-    scope_line = "This is a private chat. You're directly chatting with one other person."
-  if bool(payload.get("botIsSuperAdmin")):
-    role_line = "Bot is a super admin (owner)."
-  elif bool(payload.get("botIsAdmin")):
-    role_line = "Bot is an admin."
-  else:
-    role_line = "Bot is a normal member."
-
-  def _count_phrase(value, singular: str, plural: str) -> str:
-    if value is None:
-      return f"unknown {plural}"
-    if isinstance(value, int):
-      return f"{value} {singular if value == 1 else plural}"
-    return f"{value} {plural}"
-
-  def _is_singular_count(value) -> bool:
-    return isinstance(value, int) and value == 1
-
-  if bot_mentioned:
-    mention_line = "- Bot is mentioned in this current message window."
-  else:
-    mention_line = "- Bot is not mentioned in this current message window."
-
-  if replied_to_bot:
-    reply_line = "- A message in this current message window replies to the bot."
-  else:
-    reply_line = "- No message in this current message window replies to the bot."
-
-  if bot_name_in_text and not bot_mentioned:
-    name_line = "- Bot's name is mentioned in the message text (without explicit @mention). Treat this as a soft mention — the user is likely talking to or about the bot."
-  elif bot_name_in_text and bot_mentioned:
-    name_line = "- Bot's name appears in the message text (already counted as @mention above)."
-  else:
-    name_line = None
-
-  since_assistant_text = _count_phrase(since_assistant, "message", "messages")
-  human_window_text = _count_phrase(human_window, "human message", "human messages")
-
-  assistant_reply_lines: list[str] = []
-  if isinstance(assistant_replies_by_window, dict):
-    assistant_reply_values: list[tuple[int, int | str]] = []
-    for raw_window, raw_count in assistant_replies_by_window.items():
-      try:
-        window = int(raw_window)
-      except (TypeError, ValueError):
-        continue
-      assistant_reply_values.append((window, raw_count))
-    assistant_reply_values.sort(key=lambda item: item[0])
-    for window, count in assistant_reply_values:
-      count_text = _count_phrase(count, "reply", "replies")
-      assistant_reply_lines.append(
-        f"- Assistant has sent {count_text} in the last {window} messages."
-      )
-
-  if not assistant_reply_lines:
-    fallback_recent = payload.get("assistantRepliesInLast20")
-    fallback_text = _count_phrase(fallback_recent, "reply", "replies")
-    assistant_reply_lines.append(
-      f"- Assistant has sent {fallback_text} in the last 20 messages."
-    )
-
-  if _is_singular_count(human_window):
-    human_window_line = f"- There is {human_window_text} in this current message window."
-  else:
-    human_window_line = f"- There are {human_window_text} in this current message window."
-
-  join_event_text = _count_phrase(explicit_join_events, "event", "events")
-  join_participant_text = _count_phrase(explicit_join_participants, "participant", "participants")
-  if isinstance(explicit_join_events, int):
-    if explicit_join_events > 0:
-      join_event_line = (
-        "- Explicit system member-join signals in this current message window: "
-        f"{join_event_text} ({join_participant_text})."
-      )
+    payload = current_payload if isinstance(current_payload, dict) else {}
+    bot_mentioned = bool(payload.get("botMentionedInWindow", payload.get("botMentioned")))
+    replied_to_bot = bool(payload.get("repliedToBotInWindow", payload.get("repliedToBot")))
+    bot_name_in_text = bool(payload.get("botNameMentionedInText"))
+    since_assistant = payload.get("messagesSinceAssistantReply")
+    assistant_replies_by_window = payload.get("assistantRepliesByWindow")
+    human_window = payload.get("humanMessagesInWindow")
+    explicit_join_events = payload.get("explicitJoinEventsInWindow")
+    explicit_join_participants = payload.get("explicitJoinParticipantsInWindow")
+    raw_chat_type = str(payload.get("chatType") or "").strip().lower()
+    if raw_chat_type not in {"private", "group"}:
+        raw_chat_type = "group" if bool(payload.get("isGroup")) else "private"
+    if raw_chat_type == "group":
+        scope_line = "This is a group chat. You're in a chat with multiple people at once."
     else:
-      join_event_line = "- No explicit system member-join signal in this current message window."
-  else:
-    join_event_line = "- Explicit system member-join signal count is unknown for this current message window."
+        scope_line = "This is a private chat. You're directly chatting with one other person."
+    if bool(payload.get("botIsSuperAdmin")):
+        role_line = "Bot is a super admin (owner)."
+    elif bool(payload.get("botIsAdmin")):
+        role_line = "Bot is an admin."
+    else:
+        role_line = "Bot is a normal member."
 
-  assistant_reply_block = "\n".join(assistant_reply_lines)
-  extra_signal_block = ""
-  if name_line:
-    extra_signal_block = f"\n{name_line}"
-  return (
-    "Current message metadata:\n"
-    "Helper:\n"
-    "- `current message window` = only `current messages(burst)` (exclude `older messages`).\n"
-    f"{mention_line}\n"
-    f"{reply_line}\n"
-    f"- The last assistant reply was {since_assistant_text} ago.\n"
-    f"{assistant_reply_block}\n"
-    f"{human_window_line}\n"
-    f"{join_event_line}"
-    f"{extra_signal_block}\n"
-    "Chat state:\n"
-    f"{scope_line}\n"
-    f"{role_line}"
-  )
+    def _count_phrase(value, singular: str, plural: str) -> str:
+        if value is None:
+            return f"unknown {plural}"
+        if isinstance(value, int):
+            return f"{value} {singular if value == 1 else plural}"
+        return f"{value} {plural}"
+
+    def _is_singular_count(value) -> bool:
+        return isinstance(value, int) and value == 1
+
+    if bot_mentioned:
+        mention_line = "- Bot is mentioned in this current message window."
+    else:
+        mention_line = "- Bot is not mentioned in this current message window."
+
+    if replied_to_bot:
+        reply_line = "- A message in this current message window replies to the bot."
+    else:
+        reply_line = "- No message in this current message window replies to the bot."
+
+    if bot_name_in_text and not bot_mentioned:
+        name_line = "- Bot's name is mentioned in the message text (without explicit @mention). Treat this as a soft mention — the user is likely talking to or about the bot."
+    elif bot_name_in_text and bot_mentioned:
+        name_line = "- Bot's name appears in the message text (already counted as @mention above)."
+    else:
+        name_line = None
+
+    since_assistant_text = _count_phrase(since_assistant, "message", "messages")
+    human_window_text = _count_phrase(human_window, "human message", "human messages")
+
+    assistant_reply_lines: list[str] = []
+    if isinstance(assistant_replies_by_window, dict):
+        assistant_reply_values: list[tuple[int, int | str]] = []
+        for raw_window, raw_count in assistant_replies_by_window.items():
+            try:
+                window = int(raw_window)
+            except (TypeError, ValueError):
+                continue
+            assistant_reply_values.append((window, raw_count))
+        assistant_reply_values.sort(key=lambda item: item[0])
+        for window, count in assistant_reply_values:
+            count_text = _count_phrase(count, "reply", "replies")
+            assistant_reply_lines.append(f"- Assistant has sent {count_text} in the last {window} messages.")
+
+    if not assistant_reply_lines:
+        fallback_recent = payload.get("assistantRepliesInLast20")
+        fallback_text = _count_phrase(fallback_recent, "reply", "replies")
+        assistant_reply_lines.append(f"- Assistant has sent {fallback_text} in the last 20 messages.")
+
+    if _is_singular_count(human_window):
+        human_window_line = f"- There is {human_window_text} in this current message window."
+    else:
+        human_window_line = f"- There are {human_window_text} in this current message window."
+
+    join_event_text = _count_phrase(explicit_join_events, "event", "events")
+    join_participant_text = _count_phrase(explicit_join_participants, "participant", "participants")
+    if isinstance(explicit_join_events, int):
+        if explicit_join_events > 0:
+            join_event_line = (
+                "- Explicit system member-join signals in this current message window: "
+                f"{join_event_text} ({join_participant_text})."
+            )
+        else:
+            join_event_line = "- No explicit system member-join signal in this current message window."
+    else:
+        join_event_line = "- Explicit system member-join signal count is unknown for this current message window."
+
+    assistant_reply_block = "\n".join(assistant_reply_lines)
+    extra_signal_block = ""
+    if name_line:
+        extra_signal_block = f"\n{name_line}"
+    return (
+        "Current message metadata:\n"
+        "Helper:\n"
+        "- `current message window` = only `current messages(burst)` (exclude `older messages`).\n"
+        f"{mention_line}\n"
+        f"{reply_line}\n"
+        f"- The last assistant reply was {since_assistant_text} ago.\n"
+        f"{assistant_reply_block}\n"
+        f"{human_window_line}\n"
+        f"{join_event_line}"
+        f"{extra_signal_block}\n"
+        "Chat state:\n"
+        f"{scope_line}\n"
+        f"{role_line}"
+    )
 
 
 def _load_system_prompt() -> str:
@@ -458,17 +446,7 @@ Rules:
 - `high_quality=true` for complex reasoning, image/code gen/editing. `high_quality=false` (default) for routine tasks.
 - NEVER say "I don't know / I can't / I'm not sure" if a sub-agent could find or compute the answer. Uncertainty without attempting a sub-agent is a failure. It's your knowledge and capability extension — use it.
 
-Choosing `context_msg_ids` (THE #1 cause of failure — get this right):
-The ID you pass must be the message that ACTUALLY CONTAINS the file, identified by an attachment marker (`[document]`, `[image]`, `[video]`, `[audio]`) on its OWN sender line. It is almost NEVER the user's latest request/mention message — that one usually has no file, and passing its ID sends the sub-agent nothing.
-- If a `<files_in_chat>` list is present, copy the ID from THERE. That list is authoritative.
-- NEVER take an ID from a `REPLYING TO` line — the marker there belongs to the QUOTED message, not the message you're reading.
-- To revise a file you sent earlier: pass that file message's `[#NNNNNN]`.
-Example:
-    [#000196] 21:12
-    Agus (29dry6): [document] laporan.pdf
-    [#000201] 21:12
-    Agus (29dry6): kirim balik dokumen tadi vi
-Here the file lives at #000196. The request at #000201 has NO file. Pass `context_msg_ids=["000196"]`, NOT "000201".
+Choosing `context_msg_ids`: same target-ID rule as everywhere (see the target-ID WARNING) — the message that HOLDS the file, never the request that refers to it. When any file exists, the `<files_in_chat>` list gives you the exact IDs; copy from there, and reuse a file you sent earlier's ID to revise it.
 
 Steering / correction (re-using the sub-agent's live memory):
 - If a sub-agent IS currently running, you can steer it mid-task by calling `execute_subtask` again — e.g. user changes "draw a dog" to a cat: "Change the dog to a cat, keep everything else the same."
@@ -517,9 +495,7 @@ def _render_system_prompt(
     configured_assistant_name = assistant_name()
     current_date = _current_date_str()
     catalog = (
-        f"<sticker_catalog>\nAvailable stickers:\n{sticker_catalog}\n</sticker_catalog>"
-        if sticker_catalog
-        else ""
+        f"<sticker_catalog>\nAvailable stickers:\n{sticker_catalog}\n</sticker_catalog>" if sticker_catalog else ""
     )
     return (
         base_system.replace("{{prompt_override}}", overide_text)
@@ -566,6 +542,7 @@ def _active_mutes_block(chat_id: str | None) -> str:
         return ""
     try:
         from ..db import list_active_mutes  # local import avoids db↔llm import cycle
+
         mutes = list_active_mutes(chat_id)
     except Exception:
         return ""
@@ -585,18 +562,12 @@ def _active_mutes_block(chat_id: str | None) -> str:
     )
 
 
-def _chat_state_header(
-    chat_type: str, bot_is_admin: bool, bot_is_super_admin: bool
-) -> str:
+def _chat_state_header(chat_type: str, bot_is_admin: bool, bot_is_super_admin: bool) -> str:
     normalized_type = _normalize_chat_type(chat_type)
     if normalized_type == "group":
-        scope_line = (
-            "This is a group chat. You're in a chat with multiple people at once."
-        )
+        scope_line = "This is a group chat. You're in a chat with multiple people at once."
     else:
-        scope_line = (
-            "This is a private chat. You're directly chatting with one other person."
-        )
+        scope_line = "This is a private chat. You're directly chatting with one other person."
     if bot_is_super_admin:
         role_line = "You are a super admin (owner)."
     elif bot_is_admin:
@@ -615,12 +586,8 @@ def _context_injection_block(
     chat_id: str | None = None,
 ) -> str:
     payload = current_payload if isinstance(current_payload, dict) else {}
-    bot_mentioned = bool(
-        payload.get("botMentionedInWindow", payload.get("botMentioned"))
-    )
-    replied_to_bot = bool(
-        payload.get("repliedToBotInWindow", payload.get("repliedToBot"))
-    )
+    bot_mentioned = bool(payload.get("botMentionedInWindow", payload.get("botMentioned")))
+    replied_to_bot = bool(payload.get("repliedToBotInWindow", payload.get("repliedToBot")))
     mention_count = payload.get("botMentionCountInWindow")
     if mention_count is None:
         mentioned = payload.get("mentionedJids")
@@ -660,9 +627,7 @@ def _context_injection_block(
         elif bot_mentioned:
             mention_line = "- You have been mentioned in the current message window."
         else:
-            mention_line = (
-                "- You have not been mentioned in the current message window."
-            )
+            mention_line = "- You have not been mentioned in the current message window."
     elif bot_mentioned:
         mention_line = "- You have been mentioned in the current message window."
     else:
@@ -677,10 +642,7 @@ def _context_injection_block(
         quoted_payload = payload.get("quoted")
         if isinstance(quoted_payload, dict):
             quoted_type = str(quoted_payload.get("type") or "").strip().lower()
-            quoted_has_media = any(
-                token in quoted_type
-                for token in ("sticker", "image", "video", "audio", "document")
-            )
+            quoted_has_media = any(token in quoted_type for token in ("sticker", "image", "video", "audio", "document"))
         else:
             quoted_has_media = False
     else:
@@ -706,30 +668,20 @@ def _context_injection_block(
         assistant_reply_values.sort(key=lambda item: item[0])
         for window, count in assistant_reply_values:
             count_text = _count_phrase(count, "reply", "replies")
-            assistant_reply_lines.append(
-                f"- You have sent {count_text} in the last {window} messages."
-            )
+            assistant_reply_lines.append(f"- You have sent {count_text} in the last {window} messages.")
 
     if not assistant_reply_lines:
         fallback_recent = payload.get("assistantRepliesInLast20")
         fallback_text = _count_phrase(fallback_recent, "reply", "replies")
-        assistant_reply_lines.append(
-            f"- You have sent {fallback_text} in the last 20 messages."
-        )
+        assistant_reply_lines.append(f"- You have sent {fallback_text} in the last 20 messages.")
 
     if _is_singular_count(human_window):
-        human_window_line = (
-            f"- There is {human_window_text} in the current message window."
-        )
+        human_window_line = f"- There is {human_window_text} in the current message window."
     else:
-        human_window_line = (
-            f"- There are {human_window_text} in the current message window."
-        )
+        human_window_line = f"- There are {human_window_text} in the current message window."
 
     join_event_text = _count_phrase(explicit_join_events, "event", "events")
-    join_participant_text = _count_phrase(
-        explicit_join_participants, "participant", "participants"
-    )
+    join_participant_text = _count_phrase(explicit_join_participants, "participant", "participants")
     if isinstance(explicit_join_events, int):
         if explicit_join_events > 0:
             join_event_line = (
@@ -737,9 +689,7 @@ def _context_injection_block(
                 f"{join_event_text} ({join_participant_text})."
             )
         else:
-            join_event_line = (
-                "- No explicit system member-join signal in the current message window."
-            )
+            join_event_line = "- No explicit system member-join signal in the current message window."
     else:
         join_event_line = "- Explicit system member-join signal count is unknown for the current message window."
 

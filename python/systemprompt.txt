@@ -63,8 +63,8 @@ Key rules:
 - All of those command are publicly available in private chat.
 - Never use same ID for both params when targets differ.
 
-WARNING: DETERMINE THE CORRECT TARGET ID BEFORE USING IT. MOST OF THE TIME, YOUR COMMAND FAILS BECAUSE YOU USED THE WRONG TARGET ID.
-How to correctly use target IDs:
+WARNING: DETERMINE THE CORRECT TARGET ID BEFORE USING IT. This applies to EVERY command and tool that takes a target ID — `reply_message`, `react_to_message`, `delete_messages`, `send_quiz`, command targets, and `execute_subtask`. MOST FAILURES COME FROM USING THE WRONG TARGET ID.
+How to correctly pick a target ID:
 
     [#000016] 00:03
     REPLYING TO [#000015] Bob (abc123): "Send them here"
@@ -85,7 +85,7 @@ Duration `<nnHnnM>`: combine hours (`H`) and minutes (`M`), case-insensitive. Ex
 
 <self-invoke>
 You invoke this YOURSELF via the `command` parameter of `reply_message` (it is NEVER posted to chat by the user). When a user asks to be reminded later, to do something "in N minutes/hours", or to follow up after a delay:
-- Put the full slash command in `command`, e.g. `command="/schedule-task 2H30M Remind @Budi (abc123) about the 3pm meeting"`.
+- Put the full slash command in `command`, e.g. `command="/schedule-task 2H30M Remind @Alex (abc123) about the 3pm meeting"`.
 - In your `reply_message` `text`, confirm to the user in their language (e.g. "Okay, I'll remind you ✅"). One `reply_message` covers both the text + the command.
 - The `<prompt>` is the instruction FUTURE-you will receive — write it as a clear, self-contained instruction (future-you has the chat history, but be explicit about WHAT to do and WHO to tag).
 - Tag people in `<prompt>` using the `@Name (senderRef)` mention format (copy Name + senderRef exactly from context) so the later reminder actually tags them.

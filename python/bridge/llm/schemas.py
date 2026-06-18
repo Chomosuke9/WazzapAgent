@@ -81,10 +81,7 @@ LLM1_REACT_TOOL = {
                 },
                 "reason": {
                     "type": "string",
-                    "description": (
-                        "A concise reason for this action. "
-                        "1-2 short sentences (max 320 chars)."
-                    ),
+                    "description": ("A concise reason for this action. 1-2 short sentences (max 320 chars)."),
                     "minLength": 2,
                     "maxLength": 320,
                 },
@@ -139,10 +136,7 @@ def build_llm1_sticker_tool() -> dict:
                     },
                     "reason": {
                         "type": "string",
-                        "description": (
-                            "A concise reason for this action. "
-                            "1-2 short sentences (max 320 chars)."
-                        ),
+                        "description": ("A concise reason for this action. 1-2 short sentences (max 320 chars)."),
                         "minLength": 2,
                         "maxLength": 320,
                     },
@@ -298,8 +292,7 @@ LLM2_DELETE_TOOL = {
     "function": {
         "name": "delete_messages",
         "description": (
-            "Delete one or more messages by their contextMsgId. "
-            "Only use when messages clearly violate rules."
+            "Delete one or more messages by their contextMsgId. Only use when messages clearly violate rules."
         ),
         "parameters": {
             "type": "object",
@@ -357,8 +350,7 @@ LLM2_KICK_TOOL = {
     "function": {
         "name": "kick_members",
         "description": (
-            "Remove members from the group. Cannot kick admins. "
-            "Only use for serious or repeated violations."
+            "Remove members from the group. Cannot kick admins. Only use for serious or repeated violations."
         ),
         "parameters": {
             "type": "object",
@@ -435,14 +427,12 @@ LLM2_SUBAGENT_TOOL = {
                         "maxLength": 6,
                     },
                     "description": (
-                        "List of 6-digit contextMsgIds whose messages contain media attachments "
-                        "or text content to provide as input to the sub-agent. The bridge resolves "
-                        "each ID to the corresponding file path automatically — for text-only messages, "
-                        "the text is converted to a .txt file. CRITICAL: pass the ID of the message "
-                        "that ACTUALLY CONTAINS the file (see the <files_in_chat> list), NOT the latest "
-                        "request/mention message and NOT an ID from a 'REPLYING TO' line. Only include "
-                        "IDs that are explicitly relevant to the instruction. Pass null when no input "
-                        "files are needed."
+                        "6-digit contextMsgIds of the messages whose files (or text) the "
+                        "sub-agent should take as input; text-only messages become a .txt. "
+                        "Pass the ID of the message that CONTAINS the file — use the "
+                        "`<files_in_chat>` list when present — not the request that refers "
+                        "to it. Include only IDs relevant to the instruction; pass null when "
+                        "no input is needed. Pass multiple contextMsgIds just in case the sub-agent need more context."
                     ),
                 },
                 "high_quality": {
@@ -557,11 +547,7 @@ class LLM1Decision(BaseModel):
     should_response: bool = Field(..., description="Whether to respond")
     confidence: int = Field(..., ge=0, le=100)
     reason: str = Field(..., min_length=2, max_length=320)
-    react_expression: str | None = Field(
-        default=None, description="Emoji or sticker name for express-only decisions"
-    )
-    react_context_msg_id: str | None = Field(
-        default=None, description="Target message contextMsgId for react-only"
-    )
+    react_expression: str | None = Field(default=None, description="Emoji or sticker name for express-only decisions")
+    react_context_msg_id: str | None = Field(default=None, description="Target message contextMsgId for react-only")
     input_tokens: int = Field(default=0, description="LLM1 input tokens used")
     output_tokens: int = Field(default=0, description="LLM1 output tokens used")
