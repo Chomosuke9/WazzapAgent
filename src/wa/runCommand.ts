@@ -167,7 +167,7 @@ async function dispatchRunCommand(
   // Compute admin/super-admin flags from the bot's own role in the group.
   // The bot acts as the impersonated sender, so `senderIsAdmin` mirrors
   // `botIsAdmin` and friends — this is what unlocks group-only commands
-  // like `/group-status`.
+  // like `/announcement`.
   let senderIsAdmin = false;
   let senderRole: ParticipantRoleFlags = { isAdmin: false, isSuperAdmin: false };
   if (isGroup && group?.participantRoles) {

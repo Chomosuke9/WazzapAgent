@@ -193,7 +193,7 @@ LLM2_REPLY_TOOL = {
                         "Only use a command when the user explicitly asks for something a command can do "
                         "(see the command list). "
                         "CRITICAL: Always append the required arguments to the command itself — "
-                        "for example '/group-status Hello fellas', not just '/group-status'. "
+                        "for example '/schedule-task 30M ping the group', not just '/schedule-task'. "
                         "A bare command with no arguments will fail."
                     ),
                 },
