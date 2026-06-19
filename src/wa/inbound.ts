@@ -357,8 +357,11 @@ async function handleIncomingMessage(
   // Mark if command was handled by Node.js (for Python to skip processing)
   const commandHandled = slashCommand ? true : false;
 
-  // Activation gate: skip sending to Python if chat is not activated
-  if (isActivationRequired(ctx.repos) && !fromMe) {
+  // Activation gate: skip sending to Python if chat is not activated.
+  // Guarded on `ctx.repos`: it is optional (wired by baileysFactory after the
+  // account is set up), and the gate is DB-backed — without repos we cannot
+  // read/enforce activation state, so skip the gate rather than dereference it.
+  if (ctx.repos && isActivationRequired(ctx.repos) && !fromMe) {
     const isOwner = isOwnerJid(senderId);
     if (!isOwner) {
       const activated = ctx.repos!.activation.isChatActivated(chatId);
