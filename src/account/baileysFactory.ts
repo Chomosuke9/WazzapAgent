@@ -52,6 +52,7 @@ import {
   getGroupContext,
   parseGroupJoinStub,
 } from "../wa/domain/groupContext.js";
+import { cacheSetBounded, MAX_CACHE } from "../wa/domain/caches.js";
 import { parseSlashCommand } from "../wa/commands/index.js";
 import {
   roleFlagsForJid,
@@ -294,6 +295,15 @@ async function buildSocket(
   // socket via `ctx.sock` (Step 33 — replaces the removed global socket accessor).
   // Refreshed here on every (re)build so reconnects rebind the new socket.
   account.sock = sock;
+  // Make every relayed message catchable via `/catch`. Interactive messages
+  // (buttons, carousel, copy-code, rich messages, the /setting & /modelcfg
+  // menus, quiz, …) and Lottie stickers are sent with `relayMessage`, NOT
+  // `sendMessage`, and a bot's own sends are never echoed back to the sending
+  // socket — so without this they'd never land in `ctx.messageCache` and a
+  // reply + `/catch` couldn't resolve them. One interception point here covers
+  // all of them, with no change to the individual senders. Re-applied on every
+  // (re)build so reconnects keep the wrapped socket.
+  installRelayMessageCache(account);
   // Step 07: bind the event forwarder so `wa/` (inbound/events) push Baileys
   // events to the Python client via the AccountForwarder PORT on the context,
   // instead of importing `account/eventForwarder.js` concretely (breaks the
@@ -308,6 +318,43 @@ async function buildSocket(
   attachGroupListeners(sock, account);
   attachCommandListener(sock, entry, account);
   attachChatbotListener(sock, entry, account);
+}
+
+/**
+ * Wrap `account.sock.relayMessage` so every relayed proto is remembered in
+ * `account.messageCache` (keyed by its wamid), making bot-sent interactive
+ * messages resolvable for `/catch` and other reply-target lookups.
+ *
+ * Cache-only (no contextMsgId allocation), so it's harmless next to callers
+ * that ALSO run the full `rememberMessage` afterwards (e.g. text replies via
+ * `sendOutgoing`, `send_quiz`, Lottie stickers): the `messageCache` write is
+ * idempotent and no contextMsgId is burned twice. The reconstructed
+ * `{ key, message }` is exactly what `resolveQuotedMessage` / `/catch` read.
+ *
+ * No-op when the socket has no `relayMessage` (e.g. the test FakeSock).
+ */
+export function installRelayMessageCache(account: AccountContext): void {
+  const sock = account.sock;
+  if (!sock || typeof sock.relayMessage !== "function") return;
+  const relay = sock.relayMessage.bind(sock) as WASocket["relayMessage"];
+  type RelayParams = Parameters<WASocket["relayMessage"]>;
+  sock.relayMessage = (async (
+    jid: RelayParams[0],
+    message: RelayParams[1],
+    options: RelayParams[2],
+  ) => {
+    const result = await relay(jid, message, options);
+    const messageId = (options as { messageId?: string } | undefined)?.messageId;
+    if (messageId && typeof jid === "string") {
+      cacheSetBounded(
+        account.messageCache,
+        messageId,
+        { key: { id: messageId, remoteJid: jid, fromMe: true }, message } as WAMessage,
+        MAX_CACHE,
+      );
+    }
+    return result;
+  }) as WASocket["relayMessage"];
 }
 
 // ---------------------------------------------------------------------------
