@@ -28,6 +28,7 @@ All commands start with `/` (forward slash). In groups, most commands can only b
 | `/modelcfg` | Configure the default model | Bot owner only |
 | `/monitor` | Monitor dashboard across all chats | Bot owner only |
 | `/owner-contact` | Send the bot owner contact card | Everyone |
+| `/memory [add <text>\|delete <index>]` | Save/list/delete the bot's long-term memory for this chat | Everyone |
 | `/permission` | Check/set moderation permission level | Group admin |
 | `/prompt` | View/set/clear the bot prompt | Admin (group), Anyone (private) |
 | `/remove-sticker <name>` | Remove a sticker from the catalog | Admin (group), Anyone (private) |
@@ -373,6 +374,30 @@ Revokes the current **group invite link** and creates a fresh one. Useful when t
 :::warning
 Can only be used by the **bot owner**.
 :::
+
+---
+
+## `/memory`
+
+Gives the bot **long-term memory** for a chat — durable facts and preferences it
+should remember across conversations. The bot also manages this itself, saving
+things you tell it (e.g. "call me Budi", "always reply in English") and recalling
+them on every later turn.
+
+```
+/memory                  # list saved memories
+/memory add <text>       # save a fact / preference
+/memory delete <index>   # remove entry number <index> (from /memory)
+```
+
+Mentions work like `/prompt`: tag someone with `@Name` and the link stays correct
+even if they later change their display name. Saved memory **persists across
+restarts** (max 50 entries per chat, 500 characters each).
+
+Owner-only: `/memory global add|delete …` manages a shared list applied to
+**every** chat.
+
+**Can be used by everyone**, no admin required.
 
 ---
 

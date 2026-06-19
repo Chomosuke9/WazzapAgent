@@ -31,6 +31,7 @@ from ..history import (
   hydrate_quoted_from_history,
 )
 from ..log import setup_logging
+from ..llm.prompt import build_memory_block
 from ..stickers import resolve_sticker
 from ..messaging.processing import (
   _append_history,
@@ -242,6 +243,7 @@ class ScheduledTaskRunner:
             bot_is_super_admin=bot_is_super_admin,
             allow_subagent=False,
             scheduled_task_block=scheduled_task_block,
+            memory_block=build_memory_block(chat_id),
           )
       except Exception as gen_err:  # pylint: disable=broad-except
         logger.exception(

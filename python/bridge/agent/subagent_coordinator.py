@@ -37,6 +37,7 @@ from ..history import (
   hydrate_quoted_from_history,
 )
 from ..log import setup_logging
+from ..llm.prompt import build_memory_block
 from ..stickers import resolve_sticker
 from ..messaging.processing import (
   _append_history,
@@ -294,6 +295,7 @@ async def _deliver_subagent_result(
         bot_is_super_admin=bot_is_super_admin,
         allow_subagent=True,
         subagent_result_block=subagent_result_block,
+        memory_block=build_memory_block(chat_id),
       )
     llm2_reinvoke_ms = int((time.perf_counter() - llm2_reinvoke_started) * 1000)
     logger.info(

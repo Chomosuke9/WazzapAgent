@@ -39,6 +39,7 @@ from ..history import (
 )
 from ..log import setup_logging, set_chat_log_context, reset_chat_log_context
 from ..llm.llm1 import LLM1Decision
+from ..llm.prompt import build_memory_block
 from ..db import (
   get_mode as db_get_mode,
   get_triggers as db_get_triggers,
@@ -411,6 +412,7 @@ class BatchProcessor:
           bot_is_super_admin=p_bot_is_super_admin,
           allow_subagent=p_allow_subagent,
           subagent_context=p_subagent_context,
+          memory_block=build_memory_block(p_chat_id),
         )
         dump_text = serialize_llm2_messages(p_built.messages)
         dump_file = None
@@ -1041,6 +1043,7 @@ class BatchProcessor:
         result_validator=_validate_llm2_result,
         allow_subagent=allow_subagent,
         subagent_context=subagent_context,
+        memory_block=build_memory_block(chat_id),
       )
 
     llm2_ms = int((time.perf_counter() - llm2_started) * 1000)

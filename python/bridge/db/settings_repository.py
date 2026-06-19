@@ -18,6 +18,7 @@ from .core import (
     _mode_cache,
     _triggers_cache,
     _subagent_enabled_cache,
+    _memory_cache,
     _tenant_cache_key,
     _ensure_split_ready,
     _get_settings_conn,
@@ -119,6 +120,41 @@ def set_prompt(chat_id: str, prompt: Optional[str]) -> None:
   with _cache_lock:
     _prompt_cache[_tenant_cache_key(chat_id)] = prompt
   logger.info('DB set_prompt chat_id=%s len=%s', chat_id, len(prompt) if prompt else 0)
+
+@_db_resilient('settings')
+def get_memories(chat_id: str) -> list[str]:
+  """Return the effective long-term memory list for *chat_id*.
+
+  Combines the shared ``__global__`` memories (listed first) with the per-chat
+  memories (listed after), each ordered oldest-first — the same order the
+  ``/memory`` command displays. Written by the Node ``/memory`` handler into the
+  shared ``settings.db`` (CONTRACT §8); read here for the per-turn long-term
+  memory block injected into LLM2.
+
+  Cached per ``(tenant, chat_id)``; the cache is cleared wholesale by
+  :func:`bridge.db.core.reset_settings_connection` on any settings
+  invalidation (a global-memory change affects every chat's effective list).
+  """
+  if not chat_id:
+    return []
+  with _cache_lock:
+    cached = _memory_cache.get(_tenant_cache_key(chat_id), _MISSING)
+  if cached is not _MISSING:
+    return list(cached)  # type: ignore[arg-type]
+  _ensure_split_ready()
+  conn = _get_settings_conn()
+  rows = conn.execute(
+    """
+    SELECT text FROM memories
+    WHERE scope_key IN (?, ?)
+    ORDER BY (scope_key = ?) ASC, id ASC
+    """,
+    (GLOBAL_CHAT_ID, chat_id, chat_id),
+  ).fetchall()
+  values = [row['text'] for row in rows]
+  with _cache_lock:
+    _memory_cache[_tenant_cache_key(chat_id)] = list(values)
+  return values
 
 @_db_resilient('settings')
 def get_permission(chat_id: str) -> int:

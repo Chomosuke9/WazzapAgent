@@ -179,6 +179,39 @@ function initSettingsTables(db: SqliteDb): void {
       expiry_notified INTEGER NOT NULL DEFAULT 0
     )
   `);
+
+  // Long-term memory (the /memory command). One row per saved fact; `scope_key`
+  // is the chat JID for per-chat memory or `__global__` for the shared list
+  // every chat sees. Written by Node (the /memory handler) and read by both
+  // Node (list/delete) and the Python bridge (injected as the per-turn
+  // long-term-memory block), so it lives in the shared settings.db (CONTRACT §8).
+  db.run(`
+    CREATE TABLE IF NOT EXISTS memories (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      scope_key   TEXT NOT NULL,
+      text        TEXT NOT NULL,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories (scope_key, id)`,
+  );
+
+  // Mention bindings for memory text. The LID is the stable source of truth for
+  // each `@Name (senderRef)` mention used inside a memory; storing it lets the
+  // outbound renderer re-register the senderRef->JID mapping deterministically
+  // (zero WhatsApp metadata refetch) after a restart or for a participant who
+  // hasn't spoken yet. Keyed by (scope_key, sender_ref) and UPSERTed so it does
+  // not grow per add.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS memory_mentions (
+      scope_key   TEXT NOT NULL,
+      sender_ref  TEXT NOT NULL,
+      lid         TEXT NOT NULL,
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (scope_key, sender_ref)
+    )
+  `);
 }
 
 function initStatsTables(db: SqliteDb): void {

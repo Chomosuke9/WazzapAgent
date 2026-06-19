@@ -151,6 +151,7 @@ src/                          Node.js gateway runtime (WS SERVER, TypeScript)
       idle.ts                 /idle <min-max> — Configure idle trigger range
       info.ts                 /info — Show bot info
       join.ts                 /join <link> — Join group via invite link
+      memory.ts               /memory — Long-term memory add/delete/list (owner /memory global); mentions kept stable via stored LID
       modelcfg.ts             /modelcfg — Configure default model config
       botConfig.ts (../)      Owner bot-wide config helpers (activation msg, require-activation)
       bot-conf.ts             /bot-conf — Owner-only bot-wide config (activation-msg, prompt-override, require-activation)
@@ -330,7 +331,7 @@ reliable path is used for events that must not be lost:
 - `clear_history` (history invalidation)
 - `set_llm2_model` / `invalidate_llm2_model` (model changes)
 - `invalidate_default_model`
-- `invalidate_chat_settings` (after mode/prompt/permission/trigger change)
+- `invalidate_chat_settings` (after mode/prompt/permission/trigger/memory change)
 - `set_subagent_enabled` (toggle sub-agent per chat)
 
 Regular `incoming_message` events use the best-effort path because they're
@@ -384,7 +385,7 @@ Node→Python frame carries `folderPath` for tenant routing.
 | `set_llm2_model` | reliable | Authoritative model change sync: `{folderPath, chatId, modelId}` (top-level) |
 | `invalidate_llm2_model` | reliable | Invalidate cached model for `chatId` or `"global"` (top-level) |
 | `invalidate_default_model` | reliable | After `/modelcfg` changes: `{folderPath}` (top-level) |
-| `invalidate_chat_settings` | reliable | After `/setting` mode change, `/prompt`, `/permission`, `/trigger`, `/idle`, `/announcement` (top-level) |
+| `invalidate_chat_settings` | reliable | After `/setting` mode change, `/prompt`, `/permission`, `/trigger`, `/idle`, `/announcement`, `/memory` (top-level) |
 | `set_subagent_enabled` | reliable | After `/subagent` toggle: `{folderPath, chatId, enabled}` (top-level) |
 | `schedule_task` | reliable | After `/schedule-task <nnHnnM> <prompt>`: `{folderPath, chatId, taskId, fireAtMs, prompt}` (top-level). Bridge persists + re-arms; on fire re-invokes LLM2 (always responds, no LLM1). |
 
@@ -599,7 +600,14 @@ these for exact cost calculation.
   `renderOutboundMentions()` function resolves these to actual JIDs. Invalid
   senderRef tokens are silently stripped. Use `@all (all)` to tag everyone in a
   group — this sets `nonJidMentions` in the WhatsApp `contextInfo` instead of
-  listing every participant JID individually.
+  listing every participant JID individually. Mentions saved by `/memory`
+  additionally persist the mentioned person's stable **LID** (in the
+  `memory_mentions` table) as the source of truth: on a senderRef registry miss
+  `renderOutboundMentions()` re-registers the `senderRef`→JID mapping from that
+  stored LID *before* falling back to a (ban-risky) group-metadata refetch — so
+  saved mentions keep resolving after a restart or for a participant who hasn't
+  spoken, and a display-name change never breaks the tag (the senderRef is
+  derived from the JID, not the name).
 
 ### WebSocket reconnection
 

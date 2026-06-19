@@ -37,7 +37,7 @@ The system uses four core SQLite databases (WAL mode) to avoid locking contentio
 
 | Database | Tables | Primary writer | Primary reader |
 |----------|--------|---------------|---------------|
-| `settings.db` | `chat_settings`, `llm_models`, `activation_codes`, `chat_activations`, `owner_contact` | Node | Both |
+| `settings.db` | `chat_settings`, `llm_models`, `activation_codes`, `chat_activations`, `owner_contact`, `memories`, `memory_mentions` | Node | Both |
 | `stats.db` | `chat_stats`, `chat_user_stats` | Python | Node |
 | `moderation.db` | `chat_mutes` | Python | Python |
 | `subagent.db` | `subagent_enabled` | Node | Python |

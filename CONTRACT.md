@@ -802,7 +802,7 @@ Every tenant folder (`folderPath`, the account key) has this exact structure:
 <folderPath>/
   auth/                 ← Baileys multi-file auth state (per account)
   db/
-    settings.db         ← chat_settings, llm_models, activation, owner_contact
+    settings.db         ← chat_settings, llm_models, activation, owner_contact, memories, memory_mentions
     stats.db            ← chat_stats, chat_user_stats
     moderation.db       ← chat_mutes
     subagent.db         ← subagent_enabled

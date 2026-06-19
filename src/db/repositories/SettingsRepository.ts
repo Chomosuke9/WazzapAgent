@@ -383,4 +383,101 @@ export class SettingsRepository extends BaseRepository {
     );
     logger.info({ enabled: value }, "DB set_global_announcement_enabled");
   }
+
+  // -------------------------------------------------------------------------
+  // Long-term memory (/memory command)
+  //
+  // Memory is an ordered list per `scope_key` (the chat JID, or __global__ for
+  // the shared list every chat sees). The stored `text` holds mentions in the
+  // canonical `@Name (senderRef)` form; the stable LID behind each senderRef is
+  // persisted separately in `memory_mentions` so the outbound renderer can
+  // re-register the senderRef->JID mapping without a WhatsApp metadata refetch
+  // (see renderOutboundMentions). Both tables live in the shared settings.db.
+  // -------------------------------------------------------------------------
+
+  /** Append a memory entry to a scope. */
+  addMemory(scopeKey: string, text: string): void {
+    this.runSettingsQuery(
+      "INSERT INTO memories (scope_key, text, created_at) VALUES (?, ?, datetime('now'))",
+      scopeKey,
+      text,
+    );
+    logger.info({ scopeKey, len: text.length }, "DB add_memory");
+  }
+
+  /** List a scope's memory entries, oldest first (1-based display order). */
+  listMemories(scopeKey: string): { id: number; text: string }[] {
+    return this.getAllFromState<{ id: number; text: string }>(
+      this.settingsState,
+      initSettingsTables,
+      "SELECT id, text FROM memories WHERE scope_key = ? ORDER BY id ASC",
+      scopeKey,
+    );
+  }
+
+  /** Number of memory entries in a scope. */
+  countMemories(scopeKey: string): number {
+    const row = this.getOneFromState<{ n: number }>(
+      this.settingsState,
+      initSettingsTables,
+      "SELECT COUNT(*) AS n FROM memories WHERE scope_key = ?",
+      scopeKey,
+    );
+    return row?.n ?? 0;
+  }
+
+  /**
+   * Delete the entry at a 1-based index (oldest-first) within a scope.
+   * Returns the deleted entry's text, or null if the index was out of range.
+   */
+  deleteMemoryByIndex(scopeKey: string, index: number): string | null {
+    if (!Number.isInteger(index) || index < 1) return null;
+    const row = this.getOneFromState<{ id: number; text: string }>(
+      this.settingsState,
+      initSettingsTables,
+      "SELECT id, text FROM memories WHERE scope_key = ? ORDER BY id ASC LIMIT 1 OFFSET ?",
+      scopeKey,
+      index - 1,
+    );
+    if (!row) return null;
+    this.runSettingsQuery("DELETE FROM memories WHERE id = ?", row.id);
+    logger.info({ scopeKey, index }, "DB delete_memory");
+    return row.text;
+  }
+
+  /** Persist (UPSERT) the stable LID behind a senderRef used in memory text. */
+  upsertMemoryMention(scopeKey: string, senderRef: string, lid: string): void {
+    if (!senderRef || !lid) return;
+    this.runSettingsQuery(
+      `INSERT INTO memory_mentions (scope_key, sender_ref, lid, updated_at)
+       VALUES (?, ?, ?, datetime('now'))
+       ON CONFLICT(scope_key, sender_ref) DO UPDATE SET
+         lid = excluded.lid, updated_at = excluded.updated_at`,
+      scopeKey,
+      senderRef,
+      lid,
+    );
+  }
+
+  /**
+   * Resolve the stable LID for a senderRef from persisted memory-mention
+   * bindings, preferring the chat-scoped binding over the shared global one.
+   * Returns null if no binding exists.
+   */
+  getMemoryMentionLid(chatId: string, senderRef: string): string | null {
+    if (!chatId || !senderRef) return null;
+    const row = this.getOneFromState<{ lid: string }>(
+      this.settingsState,
+      initSettingsTables,
+      `SELECT lid FROM memory_mentions
+       WHERE sender_ref = ? AND scope_key IN (?, ?)
+       ORDER BY (scope_key = ?) DESC
+       LIMIT 1`,
+      senderRef,
+      chatId,
+      GLOBAL_CHAT_ID,
+      chatId,
+    );
+    return row?.lid ?? null;
+  }
 }

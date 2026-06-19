@@ -95,6 +95,10 @@ _permission_cache: dict[str, int] = {}
 _mode_cache: dict[str, str] = {}
 _triggers_cache: dict[str, str] = {}
 _subagent_enabled_cache: dict[str, bool] = {}
+# Long-term memory cache: {(tenant, chat_id): [text, ...]} — the effective
+# (global + per-chat) memory list injected into LLM2 every turn. Cleared
+# wholesale on any settings invalidation (global memory affects every chat).
+_memory_cache: dict = {}
 # Mute cache: {chat_id: {sender_ref: {"muted_at": str, "duration_m": int, "notified": bool}}}
 _mute_cache: dict[str, dict[str, dict]] = {}
 _cache_lock = threading.Lock()
@@ -517,6 +521,7 @@ def _clear_caches_for(db_kind: str) -> None:
       _mode_cache.clear()
       _triggers_cache.clear()
       _subagent_enabled_cache.clear()
+      _memory_cache.clear()
       _llm2_model_cache.clear()
       _default_llm2_model_cache.clear()
     elif db_kind == 'moderation':
@@ -656,6 +661,23 @@ def _ensure_settings_tables(conn: sqlite3.Connection) -> None:
       fire_at_ms    INTEGER NOT NULL,
       prompt        TEXT NOT NULL,
       created_at_ms INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS memories (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      scope_key   TEXT NOT NULL,
+      text        TEXT NOT NULL,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories (scope_key, id);
+
+    CREATE TABLE IF NOT EXISTS memory_mentions (
+      scope_key   TEXT NOT NULL,
+      sender_ref  TEXT NOT NULL,
+      lid         TEXT NOT NULL,
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (scope_key, sender_ref)
     );
     """
   )
@@ -900,6 +922,7 @@ def reset_settings_connection() -> None:
     _permission_cache.clear()
     _mode_cache.clear()
     _triggers_cache.clear()
+    _memory_cache.clear()
     _llm2_model_cache.clear()
     _subagent_enabled_cache.clear()
   logger.debug('Settings DB connection reset; caches cleared')

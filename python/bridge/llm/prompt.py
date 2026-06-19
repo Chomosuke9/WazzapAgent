@@ -562,6 +562,39 @@ def _active_mutes_block(chat_id: str | None) -> str:
     )
 
 
+def build_memory_block(chat_id: str | None) -> str | None:
+    """Build the long-term memory block injected into LLM2 every turn.
+
+    Reads the effective (shared ``__global__`` + per-chat) memory list saved via
+    the ``/memory`` command and renders it as a standing context block placed
+    right after the helper/context injection. Returns ``None`` when the chat has
+    no saved memory so nothing is injected.
+
+    A local import of ``get_memories`` avoids a db<->llm import cycle (mirrors
+    :func:`_active_mutes_block`).
+    """
+    if not chat_id:
+        return None
+    try:
+        from ..db import get_memories  # local import avoids db↔llm import cycle
+
+        memories = get_memories(chat_id)
+    except Exception:
+        return None
+    if not memories:
+        return None
+    listing = "\n".join(f"- {m}" for m in memories)
+    return (
+        "<long_term_memory>\n"
+        "Durable facts and preferences you have saved for this chat via the "
+        "/memory command. Treat them as long-term context that persists across "
+        "conversations. When an entry tags someone with the `@Name (senderRef)` "
+        "format, reuse that exact token to mention them.\n"
+        f"{listing}\n"
+        "</long_term_memory>"
+    )
+
+
 def _chat_state_header(chat_type: str, bot_is_admin: bool, bot_is_super_admin: bool) -> str:
     normalized_type = _normalize_chat_type(chat_type)
     if normalized_type == "group":

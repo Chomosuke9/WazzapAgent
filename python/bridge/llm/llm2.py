@@ -240,6 +240,7 @@ def build_llm2_messages(
     subagent_context: str | None = None,
     subagent_result_block: str | None = None,
     scheduled_task_block: str | None = None,
+    memory_block: str | None = None,
 ) -> BuiltLlm2Prompt:
     """Build the EXACT message list LLM2 is invoked with.
 
@@ -330,6 +331,11 @@ def build_llm2_messages(
     msgs = [SystemMessage(content=rendered_system)]
     msgs.append(HumanMessage(content=f"Group description:\n{group_text}"))
     msgs.append(HumanMessage(content=context_injection))
+    # Long-term memory (the /memory command): durable per-chat facts injected as
+    # a standing block every turn, right after the helper/context injection so
+    # the model always sees it (independent of the older-messages window).
+    if memory_block:
+        msgs.append(HumanMessage(content=memory_block))
     subagent_block: str | None = subagent_context if subagent_context else None
     if subagent_block:
         msgs.append(HumanMessage(content=subagent_block))
@@ -354,6 +360,8 @@ def build_llm2_messages(
         HumanMessage(content=f"Group description:\n{group_text}"),
         HumanMessage(content=context_injection),
     ]
+    if memory_block:
+        text_fallback_msgs.append(HumanMessage(content=memory_block))
     if subagent_block:
         text_fallback_msgs.append(HumanMessage(content=subagent_block))
     if subagent_result_block:
@@ -431,6 +439,7 @@ async def generate_reply(
     subagent_context: str | None = None,
     subagent_result_block: str | None = None,
     scheduled_task_block: str | None = None,
+    memory_block: str | None = None,
 ):
     targets = _llm2_targets()
     payload = current_payload if isinstance(current_payload, dict) else {}
@@ -484,6 +493,7 @@ async def generate_reply(
         subagent_context=subagent_context,
         subagent_result_block=subagent_result_block,
         scheduled_task_block=scheduled_task_block,
+        memory_block=memory_block,
     )
     msgs = built.messages
     rendered_system = built.rendered_system

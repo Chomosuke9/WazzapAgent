@@ -155,6 +155,18 @@ async function renderOutboundMentions(
       replacement = chatId ? `@${chatId}` : '@admin';
     } else if (normalizedValue) {
       let participantJid = resolveMentionTargetBySenderRef(ctx, chatId, normalizedValue);
+      // Binding fallback (anti-ban + restart-safe): before paying for a live
+      // WhatsApp group-metadata refetch, try to re-register this senderRef from
+      // a persisted /memory mention binding. The stable LID is the source of
+      // truth, so this recovers the senderRef->JID mapping after a restart or
+      // for a participant who hasn't spoken yet — with ZERO network calls.
+      if (!participantJid) {
+        const boundLid = ctx.repos?.settings.getMemoryMentionLid(chatId, normalizedValue) || null;
+        if (boundLid) {
+          rememberSenderRef(ctx, chatId, boundLid, boundLid);
+          participantJid = resolveMentionTargetBySenderRef(ctx, chatId, normalizedValue);
+        }
+      }
       if (!participantJid && !retried && chatId?.endsWith('@g.us')) {
         logger.debug({ chatId, senderRef: normalizedValue }, 'senderRef not found — force-refreshing group metadata');
         resolvedGroup = await getGroupContext(ctx, chatId, { forceRefresh: true });
