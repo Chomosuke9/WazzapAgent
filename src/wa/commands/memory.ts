@@ -8,9 +8,10 @@
 //   /memory global delete <index> → owner-only: delete from the shared list
 //   (`default` is accepted as an alias of `global` for memory.)
 //
-// Anyone may manage this chat's memory (permission: public) — the LLM itself
-// drives it via run_command (e.g. `/memory add Budi prefers Indonesian`). Only
-// the bot owner may touch the shared global list.
+// Usable by the bot itself (its run_command self-trigger), group admins, and the
+// bot owner — NOT regular members. The LLM drives it via run_command (e.g.
+// `/memory add Budi prefers Indonesian`); admins/owner can also manage it
+// manually. Only the bot owner may touch the shared global list.
 //
 // Mentions (feature parity with /prompt + /schedule-task): a memory may tag a
 // person. We store the STABLE LID behind each mention as the source of truth
@@ -37,7 +38,10 @@ import { rewritePromptMentions } from "./prompt.js";
 import { resolveMentionTargetBySenderRef } from "../domain/identifiers.js";
 import { GLOBAL_CHAT_ID } from "../../db/schema/index.js";
 import type { AccountContext } from "../../account/accountContext.js";
-import type { CommandContext, CommandHandler } from "../command/CommandContext.js";
+import type {
+  CommandContext,
+  CommandHandler,
+} from "../command/CommandContext.js";
 
 /** Max entries per scope, and max characters per entry. */
 const MAX_MEMORIES = 50;
@@ -60,7 +64,11 @@ const USAGE =
 
 type Sock = CommandContext["sock"];
 
-async function safeSend(sock: Sock, chatId: string, text: string): Promise<void> {
+async function safeSend(
+  sock: Sock,
+  chatId: string,
+  text: string,
+): Promise<void> {
   try {
     await sock.sendMessage(chatId, { text });
   } catch {
@@ -102,9 +110,15 @@ function captureMentionBindings(
   return bindings;
 }
 
-function renderMemoryList(repos: NonNullable<CommandContext["repos"]>, chatId: string): string {
+function renderMemoryList(
+  repos: NonNullable<CommandContext["repos"]>,
+  chatId: string,
+): string {
   const chatMems = repos.settings.listMemories(chatId);
-  const globalMems = chatId === GLOBAL_CHAT_ID ? [] : repos.settings.listMemories(GLOBAL_CHAT_ID);
+  const globalMems =
+    chatId === GLOBAL_CHAT_ID
+      ? []
+      : repos.settings.listMemories(GLOBAL_CHAT_ID);
 
   const lines: string[] = ["🧠 *Long-term memory*"];
   lines.push("");
@@ -150,7 +164,11 @@ export async function handleMemory(ctx: CommandContext): Promise<void> {
   }
   const isScoped = scope !== "chat";
   if (isScoped && !senderIsOwner) {
-    await safeSend(sock, chatId, "Only the bot owner can manage global/default memory.");
+    await safeSend(
+      sock,
+      chatId,
+      "Only the bot owner can manage global/default memory.",
+    );
     return;
   }
   const scopeKey = scopeKeyFor(scope, chatId);
@@ -178,7 +196,11 @@ export async function handleMemory(ctx: CommandContext): Promise<void> {
   // --- add -----------------------------------------------------------------
   if (sub === "add") {
     if (!rest) {
-      await safeSend(sock, chatId, `Usage: \`/memory${isScoped ? " " + scope : ""} add <text>\``);
+      await safeSend(
+        sock,
+        chatId,
+        `Usage: \`/memory${isScoped ? " " + scope : ""} add <text>\``,
+      );
       return;
     }
 
@@ -268,6 +290,8 @@ export const memoryCommand: CommandHandler = {
   commands: ["memory", "memo"],
   description:
     "Save long-term memory the bot keeps about this chat. /memory lists saved entries, /memory add <text> saves one (mentions like @Name (senderRef) are kept stable), /memory delete <index> removes one. Owner-only /memory global add|delete manages a list shared across all chats.",
-  permission: "public",
+  // The bot itself (its run_command self-trigger sets fromMe), group admins, and
+  // the bot owner — NOT regular members. The LLM manages memory automatically.
+  permission: "fromMe or isAdmin or isOwner or isPrivate",
   run: (_sock, _message, ctx) => handleMemory(ctx),
 };

@@ -1,5 +1,8 @@
 import logger from "../../logger.js";
-import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
+import type {
+  CommandContext,
+  CommandHandler,
+} from "../command/CommandContext.js";
 
 // ---------------------------------------------------------------------------
 // /join command — join a group via invite link
@@ -21,7 +24,8 @@ function errorToken(err: any): { text: string; status: number | null } {
   const parts: string[] = [];
   if (err?.message) parts.push(String(err.message));
   if (err?.data) parts.push(String(err.data));
-  const payloadMsg = err?.output?.payload?.message ?? err?.output?.payload?.error;
+  const payloadMsg =
+    err?.output?.payload?.message ?? err?.output?.payload?.error;
   if (payloadMsg) parts.push(String(payloadMsg));
   const status =
     typeof err?.output?.statusCode === "number"
@@ -41,16 +45,32 @@ function joinErrorMessage(err: any): string {
 
   const has = (...tokens: string[]) => tokens.some((t) => text.includes(t));
 
-  if (has("not-authorized", "not authorized", "forbidden") || status === 401 || status === 403) {
+  if (
+    has("not-authorized", "not authorized", "forbidden") ||
+    status === 401 ||
+    status === 403
+  ) {
     return "Failed to join the group: the bot is not allowed in via this link (it may have been removed before). Ask a group admin to add the bot manually.";
   }
-  if (has("gone", "item-not-found", "not-found", "not found") || status === 404) {
+  if (
+    has("gone", "item-not-found", "not-found", "not found") ||
+    status === 404
+  ) {
     return "Failed to join the group: the link is invalid or has been reset. Make sure the link is correct or ask for a new invite link.";
   }
   if (has("conflict", "already") || status === 409) {
     return "Failed to join the group: the bot is already in this group.";
   }
-  if (has("rate-overlimit", "rate overlimit", "too many", "rate-limit", "rate limit") || status === 429) {
+  if (
+    has(
+      "rate-overlimit",
+      "rate overlimit",
+      "too many",
+      "rate-limit",
+      "rate limit",
+    ) ||
+    status === 429
+  ) {
     return "Failed to join the group: too many requests. Try again in a little while.";
   }
   if (has("timed out", "timeout")) {
@@ -62,7 +82,12 @@ function joinErrorMessage(err: any): string {
   return "Failed to join the group. Make sure the invite link is still valid and try again. If it keeps failing, ask a group admin to add the bot manually.";
 }
 
-async function handleJoinCommand({ chatId, senderId, args, sock }: CommandContext): Promise<void> {
+async function handleJoinCommand({
+  chatId,
+  senderId,
+  args,
+  sock,
+}: CommandContext): Promise<void> {
   const input = (args || "").trim();
   if (!input) {
     try {
@@ -100,7 +125,8 @@ export { handleJoinCommand, joinErrorMessage };
 
 export const joinCommand: CommandHandler = {
   commands: ["join", "joins"],
-  description: "Tell the bot to join a WhatsApp group using an invite link. The bot joins on its own behalf. Example: /join https://chat.whatsapp.com/AbCdEfGhIjK.",
-  permission: "public",
+  description:
+    "Tell the bot to join a WhatsApp group using an invite link. The bot joins on its own behalf. Example: /join https://chat.whatsapp.com/AbCdEfGhIjK.",
+  permission: "isOwner",
   run: (_sock, _message, ctx) => handleJoinCommand(ctx),
 };

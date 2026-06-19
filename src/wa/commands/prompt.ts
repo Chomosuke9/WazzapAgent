@@ -7,11 +7,17 @@ import {
   mentionHandleForJid,
   rememberSenderRef,
 } from "../domain/identifiers.js";
-import { unwrapMessage, extractMentionedJids } from "../domain/messageParser.js";
+import {
+  unwrapMessage,
+  extractMentionedJids,
+} from "../domain/messageParser.js";
 import { resolveParticipantLabel } from "../events.js";
 import { escapeRegex } from "../utils.js";
 import type { AccountContext } from "../../account/accountContext.js";
-import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
+import type {
+  CommandContext,
+  CommandHandler,
+} from "../command/CommandContext.js";
 
 const PROMPT_MAX_CHARS = 4000;
 
@@ -60,7 +66,10 @@ async function rewritePromptMentions(
       const display = name || handle.slice(1);
       // Whole-token match only: the handle must not be a prefix of a longer
       // mention token (e.g. `@628123` must not match inside `@6281234`).
-      const pattern = new RegExp(`${escapeRegex(handle)}(?![0-9A-Za-z._-])`, "g");
+      const pattern = new RegExp(
+        `${escapeRegex(handle)}(?![0-9A-Za-z._-])`,
+        "g",
+      );
       result = result.replace(pattern, `@${display} (${senderRef})`);
     } catch (err) {
       // best-effort: leave this token as-is and continue
@@ -102,7 +111,12 @@ async function handlePrompt({
   const parts = args.trim().split(/\s+/);
   const scope = parseConfigScope(parts[0].toLowerCase());
   const isScoped = scope !== "chat";
-  let newArgs = isScoped ? args.trim().replace(/^\S+\s*/, "").trim() : args.trim();
+  let newArgs = isScoped
+    ? args
+        .trim()
+        .replace(/^\S+\s*/, "")
+        .trim()
+    : args.trim();
 
   if (isScoped && !senderIsOwner) {
     try {
@@ -197,7 +211,8 @@ export { handlePrompt, rewritePromptMentions };
 
 export const promptCommand: CommandHandler = {
   commands: ["prompt", "prompts"],
-  description: "Set a custom instruction or personality for the bot in this chat (system prompt). Without arguments it shows the current prompt. Use /prompt clear to remove it. Example: /prompt Reply concisely, politely, and in English.",
-  permission: "isPrivate or isAdmin or isOwner",
+  description:
+    "Set a custom instruction or personality for the bot in this chat (system prompt). Without arguments it shows the current prompt. Use /prompt clear to remove it. Example: /prompt Reply concisely, politely, and in English.",
+  permission: "isPrivate or fromMe or isAdmin or isOwner",
   run: (_sock, _message, ctx) => handlePrompt(ctx),
 };

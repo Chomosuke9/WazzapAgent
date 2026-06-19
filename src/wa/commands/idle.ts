@@ -1,7 +1,10 @@
 import config from "../../config.js";
 import * as registry from "../../server/accountRegistry.js";
 import { parseConfigScope, scopeSuffix } from "./configScope.js";
-import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
+import type {
+  CommandContext,
+  CommandHandler,
+} from "../command/CommandContext.js";
 
 type TriggerRange = { min: number; max: number };
 
@@ -25,8 +28,14 @@ function formatTrigger(trigger: TriggerRange | null): string {
   return `${trigger.min}-${trigger.max} messages`;
 }
 
-async function handleIdle({ chatId, senderIsOwner, args, folderPath = config.dataDir, sock, repos }: CommandContext): Promise<void> {
-
+async function handleIdle({
+  chatId,
+  senderIsOwner,
+  args,
+  folderPath = config.dataDir,
+  sock,
+  repos,
+}: CommandContext): Promise<void> {
   if (!args) {
     const current = repos!.settings.getIdleTrigger(chatId);
     try {
@@ -116,7 +125,8 @@ export { handleIdle };
 
 export const idleCommand: CommandHandler = {
   commands: ["idle"],
-  description: "Configure the idle trigger: the bot chimes in after a number of messages pass without a reply. Format: /idle <n> (after exactly n messages), /idle <min>-<max> (random within range), /idle off (disable). Example: /idle 5-10.",
-  permission: "isAdmin or isOwner",
+  description:
+    "Configure the idle trigger: the bot chimes in after a number of messages pass without a reply. Format: /idle <n> (after exactly n messages), /idle <min>-<max> (random within range), /idle off (disable). Example: /idle 5-10.",
+  permission: "isGroup and (isAdmin or isOwner)",
   run: (_sock, _message, ctx) => handleIdle(ctx),
 };

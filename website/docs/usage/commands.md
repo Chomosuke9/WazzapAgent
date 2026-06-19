@@ -28,7 +28,7 @@ All commands start with `/` (forward slash). In groups, most commands can only b
 | `/modelcfg` | Configure the default model | Bot owner only |
 | `/monitor` | Monitor dashboard across all chats | Bot owner only |
 | `/owner-contact` | Send the bot owner contact card | Everyone |
-| `/memory [add <text>\|delete <index>]` | Save/list/delete the bot's long-term memory for this chat | Everyone |
+| `/memory [add <text>\|delete <index>]` | Save/list/delete the bot's long-term memory for this chat | Admin/owner (bot self-manages) |
 | `/permission` | Check/set moderation permission level | Group admin |
 | `/prompt` | View/set/clear the bot prompt | Admin (group), Anyone (private) |
 | `/remove-sticker <name>` | Remove a sticker from the catalog | Admin (group), Anyone (private) |
@@ -397,7 +397,8 @@ restarts** (max 50 entries per chat, 500 characters each).
 Owner-only: `/memory global add|delete …` manages a shared list applied to
 **every** chat.
 
-**Can be used by everyone**, no admin required.
+**Usable by group admins and the bot owner** — regular members can't manage it
+manually, but the bot maintains it automatically for the chat.
 
 ---
 

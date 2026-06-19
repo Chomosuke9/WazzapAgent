@@ -1,5 +1,8 @@
 import logger from "../../logger.js";
-import type { CommandContext, CommandHandler } from "../command/CommandContext.js";
+import type {
+  CommandContext,
+  CommandHandler,
+} from "../command/CommandContext.js";
 import { resolveLidForPhone } from "../domain/participants.js";
 
 /**
@@ -17,7 +20,11 @@ import { resolveLidForPhone } from "../domain/participants.js";
  * an arbitrary user escalate, and looking up someone's LID is mildly sensitive.
  * It only REPORTS the LID; it never grants ownership.
  */
-async function handleLid({ chatId, args, sock }: CommandContext): Promise<void> {
+async function handleLid({
+  chatId,
+  args,
+  sock,
+}: CommandContext): Promise<void> {
   const digits = String(args ?? "").replace(/\D/g, "");
 
   if (digits.length < 5) {
@@ -60,5 +67,6 @@ export const lidCommand: CommandHandler = {
   description:
     "Look up a WhatsApp LID from a phone number (to fill in BOT_OWNER_JIDS). Usage: /lid <number>",
   permission: "from_me or isOwner",
+  isHidden: true,
   run: (_sock, _message, ctx) => handleLid(ctx),
 };
