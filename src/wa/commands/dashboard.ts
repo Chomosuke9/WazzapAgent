@@ -215,8 +215,10 @@ async function handleDashboard(ctx: CommandContext): Promise<void> {
   const seenNames = new Set<string>(["Overall"]);
   topUsers.forEach((u, i) => {
     const cleaned =
-      (u.senderName || u.senderRef || "unknown").replace(/\s+/g, " ").trim().slice(0, 24) ||
-      "unknown";
+      (u.senderName || u.senderRef || "unknown")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 24) || "unknown";
     let optionName = `${i + 1}. ${cleaned}`;
     while (seenNames.has(optionName)) optionName += " ";
     seenNames.add(optionName);
@@ -250,8 +252,9 @@ async function handleDashboard(ctx: CommandContext): Promise<void> {
 export { handleDashboard };
 
 export const dashboardCommand: CommandHandler = {
-  commands: ["dashboard", "dashboards"],
-  description: "Show bot usage statistics for this chat: message counts, bot responses, and user activity over a given period.",
+  commands: ["dashboard", "dashboards", "top", "tops"],
+  description:
+    "Show bot usage statistics for this chat: message counts, bot responses, and user activity over a given period.",
   permission: "public",
   run: (_sock, _message, ctx) => handleDashboard(ctx),
 };

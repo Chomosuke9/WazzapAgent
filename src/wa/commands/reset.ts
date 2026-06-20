@@ -1,7 +1,10 @@
 import logger from "../../logger.js";
 import config from "../../config.js";
 import * as registry from "../../server/accountRegistry.js";
-import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
+import type {
+  CommandContext,
+  CommandHandler,
+} from "../command/CommandContext.js";
 
 async function handleReset({
   chatId,
@@ -47,8 +50,9 @@ async function handleReset({
 export { handleReset };
 
 export const resetCommand: CommandHandler = {
-  commands: ["reset", "resets"],
-  description: "Clear the bot's conversation memory in this chat (including message history). The bot starts fresh with no prior context. Use /reset global to clear the memory of all chats at once (owner only).",
+  commands: ["reset", "resets", "clear", "clears"],
+  description:
+    "Clear the bot's conversation memory in this chat (including message history). The bot starts fresh with no prior context. Use /reset global to clear the memory of all chats at once (owner only).",
   permission: "private or (isGroup and isAdmin) or isOwner",
   run: (_sock, _message, ctx) => handleReset(ctx),
 };
