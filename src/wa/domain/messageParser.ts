@@ -64,6 +64,20 @@ function unwrapMessage(message: proto.IMessage | null | undefined): UnwrappedMes
   if (!message) return { contentType: null, message: null };
   let normalized = normalizeMessageContent(message);
 
+  // Baileys (v7) doesn't unwrap `botInvokeMessage` — the envelope WhatsApp puts
+  // around a message that invokes a bot (e.g. tagging Meta AI). Worse,
+  // `getContentType` matches any key containing "Message", so it mislabels the
+  // whole thing as content type 'botInvokeMessage' and we lose the inner text,
+  // mentions and quoted context. The bot then can't tell it was co-mentioned
+  // (so it won't respond) and the prompt text never reaches history. Peel it to
+  // the real inner content. Structure:
+  //   { messageContextInfo: {...}, botInvokeMessage: { message: { <real> } } }
+  const botInvokeInner = (normalized as { botInvokeMessage?: { message?: proto.IMessage } } | undefined)
+    ?.botInvokeMessage?.message;
+  if (botInvokeInner) {
+    normalized = normalizeMessageContent(botInvokeInner) || botInvokeInner;
+  }
+
   // Baileys doesn't unwrap lottieStickerMessage, so we handle it here.
   // Structure: { lottieStickerMessage: { message: { stickerMessage: { ... } } } }
   // The inner stickerMessage already has isLottie=true, so the marker is preserved.
