@@ -279,6 +279,7 @@ async def materialize_media_for_subagent(
   chat_id: str,
   ctx_ids,
   media_paths_by_chat: dict,
+  history=None,
 ) -> None:
   """Ensure the media for ``ctx_ids`` is on disk so it can be sent to the
   sub-agent.
@@ -303,11 +304,40 @@ async def materialize_media_for_subagent(
   resolution loop finds it. Failures degrade gracefully: the ctx_id is
   left unresolved and simply omitted from the sub-agent inputs, exactly as
   before this fix.
+
+  When ``history`` is supplied, ctx_ids that history knows are text-only
+  (their :class:`~bridge.history.WhatsAppMessage` carries no ``media`` kind)
+  are skipped WITHOUT a download attempt: requesting their bytes only makes
+  the gateway reply ``invalid_target: unsupported media type``, which used
+  to surface as a misleading "download failed" log for what is really just
+  an LLM2 reference to a plain-text message (e.g. the user's instruction).
+  ctx_ids absent from history (evicted from the bounded deque) stay eligible
+  so genuinely old media can still be fetched on demand.
   """
   if sock is None or not chat_id or not ctx_ids:
     return
+
+  # ctx_ids that history positively knows are text-only (present in history
+  # but with no ``media`` kind). Only these are skipped — a ctx_id that is
+  # NOT in history is left eligible for a download attempt.
+  text_only_ctx_ids: set = set()
+  if history is not None:
+    seen_ctx_ids: set = set()
+    media_ctx_ids: set = set()
+    for msg in history:
+      cid = getattr(msg, "context_msg_id", None)
+      if not cid:
+        continue
+      seen_ctx_ids.add(cid)
+      if getattr(msg, "media", None):
+        media_ctx_ids.add(cid)
+    text_only_ctx_ids = seen_ctx_ids - media_ctx_ids
+
   for cid in ctx_ids:
     if not cid:
+      continue
+    # History says this message carries no attachment — nothing to download.
+    if cid in text_only_ctx_ids:
       continue
     # Skip ctx_ids whose media is already materialized on disk.
     existing = media_paths_by_chat.get(chat_id, {}).get(cid)

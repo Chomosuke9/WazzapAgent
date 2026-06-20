@@ -81,6 +81,53 @@ logger = setup_logging()
 from ..messaging.gateway import _dispatch_sticker
 
 
+def _build_subtask_finished_lines(
+  *,
+  report: str | None,
+  completed: bool,
+  file_list_text: str,
+  content_dropped: bool,
+  has_staged_files: bool,
+) -> list[str]:
+  """Build the ``[SUBTASK FINISHED]`` block shown to LLM2 on the re-invoke.
+
+  Pure (no I/O) so it can be unit-tested in isolation. The block carries the
+  sub-agent report, the success flag, and any output-file list, plus AT MOST
+  one trailing note:
+
+  * ``content_dropped`` — file(s) were produced but too large to transfer
+    inline; tell the user it could not be sent.
+  * otherwise, a successful task that staged NO file gets a hint that the
+    sub-agent returned no file. Many sub-tasks legitimately produce only a
+    text report, so this is a HINT, not an order: LLM2 (which knows what it
+    asked for) decides whether a file was expected and re-dispatches on THIS
+    turn if so.
+  """
+  lines = [
+    "[SUBTASK FINISHED]",
+    f"Result: {report or 'No report'}",
+    f"Success: {completed}",
+  ]
+  if file_list_text:
+    lines.append("")
+    lines.append(file_list_text)
+  if content_dropped:
+    lines.append("")
+    lines.append(
+      "Note: output file(s) could not be delivered because they were too "
+      "large to transfer inline. Tell the user their file could not be sent."
+    )
+  elif completed and not has_staged_files:
+    lines.append("")
+    lines.append(
+      "Note: the sub-agent did NOT include any file. If you are sure the "
+      "sub-agent should have produced a file for this task, call "
+      "`execute_subtask` AGAIN RIGHT NOW to retry (this is the ONLY turn "
+      "where you can re-dispatch) — otherwise just deliver the report."
+    )
+  return lines
+
+
 async def _resolve_ctx_ids_to_input_files(
   ws,
   chat_id: str,
@@ -104,7 +151,7 @@ async def _resolve_ctx_ids_to_input_files(
   """
   if not ctx_ids:
     return []
-  await materialize_media_for_subagent(ws, chat_id, ctx_ids, media_paths_by_chat)
+  await materialize_media_for_subagent(ws, chat_id, ctx_ids, media_paths_by_chat, history)
   chat_store = media_paths_by_chat.get(chat_id, {})
   local_input_files: list[str] = []
   tmp_dir = tempfile.mkdtemp(prefix="subagent_ctx_")
@@ -222,23 +269,15 @@ async def _deliver_subagent_result(
               ],
             },
           )
-    file_list_text = format_file_list(
-      staged_outputs.staged, staged_outputs.skipped,
+    system_lines = _build_subtask_finished_lines(
+      report=final_task.report,
+      completed=final_task.status == "completed",
+      file_list_text=format_file_list(
+        staged_outputs.staged, staged_outputs.skipped,
+      ),
+      content_dropped=bool(final_task.result.get("output_files_content_dropped")),
+      has_staged_files=bool(staged_outputs.staged),
     )
-    system_lines = [
-      "[SUBTASK FINISHED]",
-      f"Result: {final_task.report or 'No report'}",
-      f"Success: {final_task.status == 'completed'}",
-    ]
-    if file_list_text:
-      system_lines.append("")
-      system_lines.append(file_list_text)
-    if final_task.result.get("output_files_content_dropped"):
-      system_lines.append("")
-      system_lines.append(
-        "Note: output file(s) could not be delivered because they were too "
-        "large to transfer inline. Tell the user their file could not be sent."
-      )
     subtask_finished_text = "\n".join(system_lines)
     history.append(WhatsAppMessage(
       timestamp_ms=int(time.time() * 1000),
@@ -707,7 +746,7 @@ class SubAgentCoordinator:
     # to work on therefore have no bytes on disk yet. Download them now (any
     # kind) so the resolution loop below finds a real file. Without this the
     # sub-agent silently receives no input file.
-    await materialize_media_for_subagent(ws, chat_id, ctx_ids, media_paths_by_chat)
+    await materialize_media_for_subagent(ws, chat_id, ctx_ids, media_paths_by_chat, history)
     chat_store = media_paths_by_chat.get(chat_id, {})
     tmp_dir = tempfile.mkdtemp(prefix="subagent_ctx_")
     try:
@@ -1009,7 +1048,7 @@ context block from ``SubTaskTracker.format_context``).
               # Same lazy-media materialization as the primary dispatch:
               # download any non-visual files the correction references so
               # they actually reach the sub-agent.
-              await materialize_media_for_subagent(ws, chat_id, _ctx_ids, media_paths_by_chat)
+              await materialize_media_for_subagent(ws, chat_id, _ctx_ids, media_paths_by_chat, history)
               _tmp_dir = tempfile.mkdtemp(prefix="subagent_ctx_")
               try:
                 _fidx = 1

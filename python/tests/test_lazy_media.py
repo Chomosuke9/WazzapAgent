@@ -134,3 +134,62 @@ def test_subagent_materialize_noop_without_sock_or_ids():
     asyncio.run(materialize_media_for_subagent(None, "c@g.us", ["x"], media_paths))
     asyncio.run(materialize_media_for_subagent(FakeSock(), "c@g.us", [], media_paths))
     assert media_paths == {}
+
+
+def test_subagent_materialize_skips_text_only_ctx_from_history(tmp_path):
+    """Request-1 regression: a ctx_id that history knows is text-only (no
+    ``media``) is NOT downloaded, so the gateway never replies
+    'unsupported media type' and no misleading 'download failed' log appears.
+    A media-bearing ctx_id in the same call is still downloaded."""
+    from collections import deque
+    from bridge.history import WhatsAppMessage
+
+    doc = tmp_path / "report.pdf"
+    doc.write_bytes(b"%PDF-1.4 fake")
+    history = deque([
+        WhatsAppMessage(timestamp_ms=0, sender="u", context_msg_id="000002",
+                        text="please summarise the file", media=None),
+        WhatsAppMessage(timestamp_ms=0, sender="u", context_msg_id="000003",
+                        text="see attached", media="document"),
+    ])
+    media_paths = {}
+    sock = FakeSock(result={
+        "path": str(doc), "mime": "application/pdf",
+        "kind": "document", "fileName": "report.pdf",
+    })
+    asyncio.run(
+        materialize_media_for_subagent(
+            sock, "c@g.us", ["000002", "000003"], media_paths, history
+        )
+    )
+    # Only the document (000003) is downloaded; text-only 000002 is skipped.
+    assert [c["context_msg_id"] for c in sock.calls] == ["000003"]
+    assert media_paths.get("c@g.us", {}).get("000003")
+    assert media_paths.get("c@g.us", {}).get("000002") is None
+
+
+def test_subagent_materialize_attempts_ctx_absent_from_history(tmp_path):
+    """A ctx_id NOT present in history (e.g. evicted from the bounded deque)
+    stays eligible for a download attempt — only ctx_ids history positively
+    knows are text-only are skipped."""
+    from collections import deque
+    from bridge.history import WhatsAppMessage
+
+    doc = tmp_path / "old.pdf"
+    doc.write_bytes(b"%PDF-1.4 fake")
+    history = deque([
+        WhatsAppMessage(timestamp_ms=0, sender="u", context_msg_id="000009",
+                        text="unrelated text", media=None),
+    ])
+    media_paths = {}
+    sock = FakeSock(result={
+        "path": str(doc), "mime": "application/pdf",
+        "kind": "document", "fileName": "old.pdf",
+    })
+    asyncio.run(
+        materialize_media_for_subagent(
+            sock, "c@g.us", ["000500"], media_paths, history
+        )
+    )
+    assert [c["context_msg_id"] for c in sock.calls] == ["000500"]
+    assert media_paths.get("c@g.us", {}).get("000500")
