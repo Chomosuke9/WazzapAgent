@@ -157,6 +157,33 @@ def get_memories(chat_id: str) -> list[str]:
   return values
 
 @_db_resilient('settings')
+def get_participant_name(chat_id: str, sender_ref: str) -> Optional[str]:
+  """Return the CURRENT display name for *sender_ref* in *chat_id*, or None.
+
+  Backs the live re-rendering of ``@Name (senderRef)`` mention tokens in stored
+  /memory & /prompt text. The Node gateway keeps this roster fresh (it UPSERTs
+  the sender's latest pushName on every inbound message), so a name that was
+  unknown when a memory was saved — the bot baked the bare LID number then —
+  resolves once that person has spoken, and a rename tracks automatically.
+
+  No caching: the lookup is tiny and freshness matters for renames. The table is
+  owned/created by Node (settings.db); tolerate it being absent (return None) so
+  a bridge that connects before the gateway has created it never crashes.
+  """
+  if not chat_id or not sender_ref:
+    return None
+  _ensure_split_ready()
+  conn = _get_settings_conn()
+  try:
+    row = conn.execute(
+      'SELECT name FROM participant_names WHERE chat_id = ? AND sender_ref = ?',
+      (chat_id, sender_ref),
+    ).fetchone()
+  except Exception:
+    return None  # table not created yet (Node owns the settings.db schema)
+  return row['name'] if row is not None and row['name'] else None
+
+@_db_resilient('settings')
 def get_permission(chat_id: str) -> int:
   """Return the permission level (0-3) for *chat_id*. Default ``0``."""
   with _cache_lock:

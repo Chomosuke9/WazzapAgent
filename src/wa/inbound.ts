@@ -231,6 +231,18 @@ async function handleIncomingMessage(
   perf.groupMs = Date.now() - groupStartMs;
   const senderRole = isGroup ? roleFlagsForJid(group?.participantRoles, senderId) : { isAdmin: false, isSuperAdmin: false };
   const senderRef = rememberSenderRef(ctx, chatId, senderId, msg.key.participant || senderId) || 'unknown';
+  // Keep the live name roster fresh so stored `@Name (senderRef)` mentions in
+  // /memory & /prompt re-render with this sender's CURRENT display name (read by
+  // the Python bridge). Only persist a real name — never the bare JID/number
+  // fallback — so the roster never resolves a mention back to a number.
+  if (
+    senderRef !== 'unknown'
+    && senderDisplay
+    && senderDisplay !== senderId
+    && /\p{L}/u.test(senderDisplay)
+  ) {
+    ctx.repos?.settings.upsertParticipantName(chatId, senderRef, senderDisplay);
+  }
   const contextMsgId = normalizeContextMsgId(precomputedContextMsgId) || ensureContextMsgId(ctx, chatId, msg.key.id);
   const chatName = isGroup ? (group?.name || chatId) : chatId;
 

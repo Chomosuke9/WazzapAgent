@@ -78,6 +78,37 @@ async function rewritePromptMentions(
   return result;
 }
 
+/** A stored mention token: `@<baked name> (<senderRef>)`; the senderRef is the
+ * 6-char base-36 token derived from the JID (see makeSenderRef). */
+const STORED_MENTION_RE = /@([^@()\r\n]+?)\s*\(([0-9a-z]{6})\)/g;
+
+/** Minimal structural view of the settings repo this renderer needs. */
+type ParticipantNameLookup = {
+  getParticipantName(chatId: string, senderRef: string): string | null;
+};
+
+/**
+ * Re-resolve the display name in each stored `@Name (senderRef)` mention to the
+ * participant's CURRENT name, looked up by senderRef in the live roster the
+ * gateway keeps fresh, while keeping the senderRef untouched. This is the Node
+ * twin of the Python `render_stored_mentions` used for the LLM-facing surfaces,
+ * so the command displays (`/memory` list, `/prompt` show) present the SAME live
+ * names the model sees — a name unknown when the entry was saved (baked as the
+ * bare number) resolves once that person has spoken, and renames track. A miss
+ * leaves the token exactly as stored.
+ */
+function renderStoredMentions(
+  settings: ParticipantNameLookup,
+  chatId: string,
+  text: string,
+): string {
+  if (!text || !chatId || !text.includes("(")) return text;
+  return text.replace(STORED_MENTION_RE, (whole, _name: string, ref: string) => {
+    const fresh = settings.getParticipantName(chatId, ref);
+    return fresh ? `@${fresh} (${ref})` : whole;
+  });
+}
+
 async function handlePrompt({
   chatId,
   senderIsOwner,
@@ -91,8 +122,9 @@ async function handlePrompt({
   if (!args) {
     const current = repos!.settings.getPrompt(chatId);
     if (current) {
+      const shown = renderStoredMentions(repos!.settings, chatId, current);
       try {
-        await sock.sendMessage(chatId, { text: `Current prompt:\n${current}` });
+        await sock.sendMessage(chatId, { text: `Current prompt:\n${shown}` });
       } catch (err) {
         /* ignore */
       }
@@ -207,7 +239,7 @@ async function handlePrompt({
   }
 }
 
-export { handlePrompt, rewritePromptMentions };
+export { handlePrompt, rewritePromptMentions, renderStoredMentions };
 
 export const promptCommand: CommandHandler = {
   commands: ["prompt", "prompts"],

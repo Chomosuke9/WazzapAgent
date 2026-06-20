@@ -26,6 +26,7 @@ import assert from 'node:assert/strict';
 const { Database } = await import('../../src/db/Database.ts');
 const { createRepositories } = await import('../../src/db/repositories/index.ts');
 const { handleMemory } = await import('../../src/wa/commands/memory.ts');
+const { renderStoredMentions } = await import('../../src/wa/commands/prompt.ts');
 const { renderOutboundMentions } = await import('../../src/wa/outbound.ts');
 const { createAccountContext } = await import('../../src/account/accountContext.ts');
 const { makeSenderRef, rememberSenderRef, normalizeJid } = await import(
@@ -130,6 +131,75 @@ test('memory_mentions: upsert + scoped lookup prefers chat over global', () => {
     // upsert replaces (does not duplicate)
     repos.settings.upsertMemoryMention('c@g.us', 'abc123', '222@lid');
     assert.equal(repos.settings.getMemoryMentionLid('c@g.us', 'abc123'), '222@lid');
+  } finally {
+    db.close();
+    rmParent(dbDir);
+  }
+});
+
+test('participant_names: upsert is idempotent, scoped per chat, latest name wins', () => {
+  const dbDir = tmpTenant('wazzap-pname-');
+  const db = new Database(dbDir);
+  try {
+    db.open();
+    const repos = createRepositories(db);
+    repos.settings.upsertParticipantName('c@g.us', '8wopaq', 'Andi');
+    assert.equal(repos.settings.getParticipantName('c@g.us', '8wopaq'), 'Andi');
+    // Scoped by chat: a different chat does not see this senderRef.
+    assert.equal(repos.settings.getParticipantName('other@g.us', '8wopaq'), null);
+    // Unknown senderRef → null.
+    assert.equal(repos.settings.getParticipantName('c@g.us', 'nope12'), null);
+    // Rename: UPSERT replaces in place (no duplicate row), latest name wins —
+    // this is what lets the LLM-facing render track display-name changes.
+    repos.settings.upsertParticipantName('c@g.us', '8wopaq', 'Andi Wijaya');
+    assert.equal(repos.settings.getParticipantName('c@g.us', '8wopaq'), 'Andi Wijaya');
+  } finally {
+    db.close();
+    rmParent(dbDir);
+  }
+});
+
+test('renderStoredMentions swaps the baked name for the live roster name (Node twin)', () => {
+  const dbDir = tmpTenant('wazzap-render-fn-');
+  const db = new Database(dbDir);
+  try {
+    db.open();
+    const repos = createRepositories(db);
+    repos.settings.upsertParticipantName('c@g.us', '8wopaq', 'Andi');
+    // Baked as the bare LID number at save time → now renders the live name.
+    assert.equal(
+      renderStoredMentions(repos.settings, 'c@g.us', '@41314028625930 (8wopaq) is dev'),
+      '@Andi (8wopaq) is dev',
+    );
+    // Miss leaves the token untouched; `@all (all)` never matches (3-char value).
+    assert.equal(
+      renderStoredMentions(repos.settings, 'c@g.us', 'ping @all (all) and @x (zzzzzz)'),
+      'ping @all (all) and @x (zzzzzz)',
+    );
+  } finally {
+    db.close();
+    rmParent(dbDir);
+  }
+});
+
+test('handleMemory list renders stored mentions with the live name', async () => {
+  const dbDir = tmpTenant('wazzap-mem-render-');
+  const folderPath = '/tenants/mem-render';
+  registry.getOrCreate(folderPath);
+  const db = new Database(dbDir);
+  try {
+    db.open();
+    const repos = createRepositories(db);
+    // That person has spoken since → the roster holds their current name.
+    repos.settings.upsertParticipantName('c@g.us', '8wopaq', 'Andi');
+    // A memory saved earlier baked the bare LID number (name unknown then).
+    repos.settings.addMemory('c@g.us', '@41314028625930 (8wopaq) adalah developer');
+
+    const listed = makeCtx({ args: '', folderPath, repos });
+    await handleMemory(listed.ctx);
+    const listText = listed.sent.map((m) => m.text).join('\n');
+    assert.ok(/@Andi \(8wopaq\)/.test(listText), 'list shows the live name');
+    assert.ok(!/41314028625930/.test(listText), 'the stale bare number is gone');
   } finally {
     db.close();
     rmParent(dbDir);

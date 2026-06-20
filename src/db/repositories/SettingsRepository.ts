@@ -480,4 +480,39 @@ export class SettingsRepository extends BaseRepository {
     );
     return row?.lid ?? null;
   }
+
+  // -------------------------------------------------------------------------
+  // Live participant-name roster (participant_names) — keyed by
+  // (chat_id, sender_ref). Backs live re-rendering of `@Name (senderRef)`
+  // mentions in stored /memory & /prompt text: the gateway keeps the name
+  // current on every inbound message, and the Python bridge swaps the baked
+  // name for this one at prompt-build time.
+  // -------------------------------------------------------------------------
+
+  /** UPSERT the current display name for a (chat, senderRef). */
+  upsertParticipantName(chatId: string, senderRef: string, name: string): void {
+    if (!chatId || !senderRef || !name) return;
+    this.runSettingsQuery(
+      `INSERT INTO participant_names (chat_id, sender_ref, name, updated_at)
+       VALUES (?, ?, ?, datetime('now'))
+       ON CONFLICT(chat_id, sender_ref) DO UPDATE SET
+         name = excluded.name, updated_at = excluded.updated_at`,
+      chatId,
+      senderRef,
+      name,
+    );
+  }
+
+  /** Current display name for a (chat, senderRef), or null if not yet known. */
+  getParticipantName(chatId: string, senderRef: string): string | null {
+    if (!chatId || !senderRef) return null;
+    const row = this.getOneFromState<{ name: string }>(
+      this.settingsState,
+      initSettingsTables,
+      "SELECT name FROM participant_names WHERE chat_id = ? AND sender_ref = ?",
+      chatId,
+      senderRef,
+    );
+    return row?.name ?? null;
+  }
 }

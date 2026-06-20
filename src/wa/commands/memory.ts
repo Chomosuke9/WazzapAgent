@@ -34,7 +34,7 @@ import config from "../../config.js";
 import * as registry from "../../server/accountRegistry.js";
 import { parseConfigScope, scopeSuffix } from "./configScope.js";
 import type { ConfigScope } from "./configScope.js";
-import { rewritePromptMentions } from "./prompt.js";
+import { rewritePromptMentions, renderStoredMentions } from "./prompt.js";
 import { resolveMentionTargetBySenderRef } from "../domain/identifiers.js";
 import { GLOBAL_CHAT_ID } from "../../db/schema/index.js";
 import type { AccountContext } from "../../account/accountContext.js";
@@ -124,14 +124,18 @@ function renderMemoryList(
   lines.push("");
   if (chatMems.length) {
     lines.push("*This chat:*");
-    chatMems.forEach((m, i) => lines.push(`${i + 1}. ${m.text}`));
+    chatMems.forEach((m, i) =>
+      lines.push(`${i + 1}. ${renderStoredMentions(repos.settings, chatId, m.text)}`),
+    );
   } else {
     lines.push("_Nothing saved for this chat yet._");
   }
   if (globalMems.length) {
     lines.push("");
     lines.push("*Global (all chats):*");
-    globalMems.forEach((m, i) => lines.push(`${i + 1}. ${m.text}`));
+    globalMems.forEach((m, i) =>
+      lines.push(`${i + 1}. ${renderStoredMentions(repos.settings, chatId, m.text)}`),
+    );
   }
   lines.push("");
   lines.push("Use `/memory add <text>` or `/memory delete <index>`.");
@@ -248,7 +252,7 @@ export async function handleMemory(ctx: CommandContext): Promise<void> {
     await safeSend(
       sock,
       chatId,
-      `🧠 Saved${scopeSuffix(scope)} (#${count + 1}):\n${previewText(text)}`,
+      `🧠 Saved${scopeSuffix(scope)} (#${count + 1}):\n${previewText(renderStoredMentions(repos.settings, chatId, text))}`,
     );
     return;
   }
@@ -277,7 +281,7 @@ export async function handleMemory(ctx: CommandContext): Promise<void> {
     await safeSend(
       sock,
       chatId,
-      `🗑️ Deleted memory #${index}${scopeSuffix(scope)}:\n${previewText(deleted)}`,
+      `🗑️ Deleted memory #${index}${scopeSuffix(scope)}:\n${previewText(renderStoredMentions(repos.settings, chatId, deleted))}`,
     );
     return;
   }

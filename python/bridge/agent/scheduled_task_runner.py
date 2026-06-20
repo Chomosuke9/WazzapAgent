@@ -31,7 +31,7 @@ from ..history import (
   hydrate_quoted_from_history,
 )
 from ..log import setup_logging
-from ..llm.prompt import build_memory_block
+from ..llm.prompt import build_memory_block, render_stored_mentions
 from ..stickers import resolve_sticker
 from ..messaging.processing import (
   _append_history,
@@ -183,7 +183,7 @@ class ScheduledTaskRunner:
     lock = self._per_chat_lock[chat_id]
     async with lock:
       history = self._per_chat[chat_id]
-      scheduled_text = f"[SCHEDULED TASK]\n{task.prompt}"
+      scheduled_text = f"[SCHEDULED TASK]\n{render_stored_mentions(task.prompt, chat_id)}"
       # Append the scheduled instruction to history as a system turn so the
       # model sees it as the latest context (mirrors [SUBTASK FINISHED]).
       history.append(WhatsAppMessage(
@@ -198,7 +198,7 @@ class ScheduledTaskRunner:
       db_prompt = None
       if self._get_prompt is not None:
         try:
-          db_prompt = self._get_prompt(chat_id)
+          db_prompt = render_stored_mentions(self._get_prompt(chat_id), chat_id)
         except Exception:  # pylint: disable=broad-except
           db_prompt = None
       group_description = None

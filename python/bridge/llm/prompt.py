@@ -1,6 +1,7 @@
 # File: python/bridge/llm/prompt.py
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -562,6 +563,41 @@ def _active_mutes_block(chat_id: str | None) -> str:
     )
 
 
+# A stored mention is `@<baked name> (<senderRef>)`. The senderRef is a 6-char
+# base-36 token (see Node makeSenderRef); the name part is whatever was baked at
+# save time (a real name, or — when it was unknown then — the bare LID number).
+_STORED_MENTION_RE = re.compile(r"@([^@()\n]+?)\s*\(([0-9a-z]{6})\)")
+
+
+def render_stored_mentions(text: str | None, chat_id: str | None) -> str | None:
+    """Re-resolve the display name in every ``@Name (senderRef)`` mention LIVE.
+
+    The ``/memory`` and ``/prompt`` text persists mentions as
+    ``@<name> (<senderRef>)`` where the name was baked at save time — so a person
+    who hadn't spoken yet was frozen as their bare LID number. Here we swap that
+    baked name for the participant's CURRENT name (looked up by senderRef in the
+    roster Node keeps fresh), while keeping the senderRef — the stable anchor the
+    model reuses to mention them — untouched.
+
+    A miss (senderRef unknown, or that person has never been seen) leaves the
+    token EXACTLY as stored, so nothing is ever lost. Reserved ``@all``/``@bot``/
+    ``@admin`` tokens never match (their value is not a 6-char senderRef).
+    """
+    if not text or not chat_id or "(" not in text:
+        return text
+    from ..db import get_participant_name  # local import avoids db<->llm cycle
+
+    def _swap(match: "re.Match[str]") -> str:
+        sender_ref = match.group(2)
+        try:
+            fresh = get_participant_name(chat_id, sender_ref)
+        except Exception:
+            fresh = None
+        return f"@{fresh} ({sender_ref})" if fresh else match.group(0)
+
+    return _STORED_MENTION_RE.sub(_swap, text)
+
+
 def build_memory_block(chat_id: str | None) -> str | None:
     """Build the long-term memory block injected into LLM2 every turn.
 
@@ -583,7 +619,7 @@ def build_memory_block(chat_id: str | None) -> str | None:
         return None
     if not memories:
         return None
-    listing = "\n".join(f"- {m}" for m in memories)
+    listing = "\n".join(f"- {render_stored_mentions(m, chat_id)}" for m in memories)
     return (
         "<long_term_memory>\n"
         "Durable facts and preferences you have saved for this chat via the "

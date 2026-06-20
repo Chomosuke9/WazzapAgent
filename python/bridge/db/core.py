@@ -679,6 +679,14 @@ def _ensure_settings_tables(conn: sqlite3.Connection) -> None:
       updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (scope_key, sender_ref)
     );
+
+    CREATE TABLE IF NOT EXISTS participant_names (
+      chat_id     TEXT NOT NULL,
+      sender_ref  TEXT NOT NULL,
+      name        TEXT NOT NULL,
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (chat_id, sender_ref)
+    );
     """
   )
 

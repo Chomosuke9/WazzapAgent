@@ -188,4 +188,10 @@ def _resolve_group_prompt_context(payload: dict) -> tuple[str | None, str | None
   description = _clean_text(raw_description) or None
 
   db_prompt = db_get_prompt(chat_id) if chat_id else None
+  if db_prompt and chat_id:
+    # Swap baked `@Name (senderRef)` names for the current ones, same as the
+    # memory block. Local import avoids an llm<->metadata import cycle.
+    from .prompt import render_stored_mentions
+
+    db_prompt = render_stored_mentions(db_prompt, chat_id)
   return description, db_prompt

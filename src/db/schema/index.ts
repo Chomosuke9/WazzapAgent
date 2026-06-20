@@ -212,6 +212,24 @@ function initSettingsTables(db: SqliteDb): void {
       PRIMARY KEY (scope_key, sender_ref)
     )
   `);
+
+  // Live display-name roster, keyed by (chat_id, sender_ref). The gateway
+  // UPSERTs the sender's most recent pushName on every inbound message; the
+  // Python bridge reads it to re-render `@Name (senderRef)` mention tokens in
+  // stored /memory & /prompt text with the CURRENT name. This is why a name
+  // that was unknown when a memory was saved (so the bot baked the bare LID
+  // number) resolves once that person speaks, and a display-name change tracks
+  // automatically — the senderRef is the stable join key. Lives in the shared
+  // settings.db (CONTRACT §8).
+  db.run(`
+    CREATE TABLE IF NOT EXISTS participant_names (
+      chat_id     TEXT NOT NULL,
+      sender_ref  TEXT NOT NULL,
+      name        TEXT NOT NULL,
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (chat_id, sender_ref)
+    )
+  `);
 }
 
 function initStatsTables(db: SqliteDb): void {
