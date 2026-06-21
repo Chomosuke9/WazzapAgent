@@ -70,10 +70,7 @@ import { runWithConcurrency } from "../wa/utils.js";
 import { GROUP_JOIN_STUB_TYPES } from "../wa/domain/caches.js";
 import type { GroupContextValue } from "../wa/domain/caches.js";
 import { dispatchCommand } from "../wa/command/CommandRegistry.js";
-import {
-  handleButtonResponse,
-  printQrInTerminal,
-} from "../wa/connection.js";
+import { handleButtonResponse, printQrInTerminal } from "../wa/connection.js";
 import { handlePendingModelForm } from "../wa/commands/modelcfg.js";
 import {
   handleIncomingMessage,
@@ -96,7 +93,7 @@ const defaultSocketCreator: SocketCreator = async (authState) => {
     auth: authState,
     syncFullHistory: false,
     browser: ["WazzapAgents", "Chrome", "1.0"],
-    markOnlineOnConnect: false,
+    markOnlineOnConnect: true,
     defaultQueryTimeoutMs: config.sendTimeoutMs,
     // Hand Baileys our tamed child logger so its (very chatty) internal logging
     // is level-filtered (default 'warn') and rendered in the same clean format
@@ -199,7 +196,10 @@ function normalizeWaStatus(connection: string | undefined | null): WaStatus {
  * Ownership is the `AccountEntry`: there is NO global registry of `Database`s
  * keyed by `folderPath`, so two tenants can never share connections.
  */
-export function openAccountPersistence(entry: AccountEntry, dbDir: string): void {
+export function openAccountPersistence(
+  entry: AccountEntry,
+  dbDir: string,
+): void {
   if (entry.database) return;
   const database = new Database(dbDir);
   database.open();
@@ -215,10 +215,15 @@ export function openAccountPersistence(entry: AccountEntry, dbDir: string): void
 // ever turn it ON — never off — so an explicit `/subagent default on` (or the
 // legacy `/subagent global on`) is never clobbered. Runtime
 // `/subagent default on|off` overrides it afterwards.
-export function seedSubagentDefault(repos: ReturnType<typeof createRepositories>): void {
+export function seedSubagentDefault(
+  repos: ReturnType<typeof createRepositories>,
+): void {
   const SEED_MARKER = "subagent_default_seeded";
   if (repos.settings.getBotConfig(SEED_MARKER) !== null) return;
-  if (config.subagentEnabledDefault && !repos.settings.getSubagentEnabled("__global__")) {
+  if (
+    config.subagentEnabledDefault &&
+    !repos.settings.getSubagentEnabled("__global__")
+  ) {
     repos.settings.setDefaultSubagentEnabled(true);
   }
   repos.settings.setBotConfig(SEED_MARKER, "1");
@@ -344,12 +349,16 @@ export function installRelayMessageCache(account: AccountContext): void {
     options: RelayParams[2],
   ) => {
     const result = await relay(jid, message, options);
-    const messageId = (options as { messageId?: string } | undefined)?.messageId;
+    const messageId = (options as { messageId?: string } | undefined)
+      ?.messageId;
     if (messageId && typeof jid === "string") {
       cacheSetBounded(
         account.messageCache,
         messageId,
-        { key: { id: messageId, remoteJid: jid, fromMe: true }, message } as WAMessage,
+        {
+          key: { id: messageId, remoteJid: jid, fromMe: true },
+          message,
+        } as WAMessage,
         MAX_CACHE,
       );
     }
@@ -592,7 +601,10 @@ function attachGroupListeners(sock: WASocket, account: AccountContext): void {
  * Fails OPEN: a message with no usable `messageTimestamp` (0/missing/invalid) is
  * kept. Set `STALE_MESSAGE_MAX_AGE_MS=0` to disable the gate entirely.
  */
-export function isStaleMessage(msg: WAMessage, nowMs: number = Date.now()): boolean {
+export function isStaleMessage(
+  msg: WAMessage,
+  nowMs: number = Date.now(),
+): boolean {
   const maxAgeMs = config.staleMessageMaxAgeMs;
   if (maxAgeMs <= 0) return false;
   const tsMs = Number(msg?.messageTimestamp) * 1000;
@@ -652,7 +664,16 @@ function attachCommandListener(
         const { message: innerMessage } = unwrapMessage(msg.message);
         const text = extractText(innerMessage);
 
-        if (await handlePendingModelForm(account, sock, folderPath, chatId, senderId, text)) {
+        if (
+          await handlePendingModelForm(
+            account,
+            sock,
+            folderPath,
+            chatId,
+            senderId,
+            text,
+          )
+        ) {
           continue;
         }
         if (!text || typeof text !== "string") continue;

@@ -24,16 +24,19 @@
  *   relayMessage so the Lottie animation is preserved.
  */
 
-import path from 'path';
-import fs from 'fs-extra';
-import Database from 'better-sqlite3';
-import { randomUUID } from 'crypto';
-import logger from '../../logger.js';
-import { unwrapMessage } from '../domain/messageParser.js';
-import { downloadMediaToFile } from '../../mediaHandler.js';
-import config from '../../config.js';
-import { withTimeout } from '../utils.js';
-import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
+import path from "path";
+import fs from "fs-extra";
+import Database from "better-sqlite3";
+import { randomUUID } from "crypto";
+import logger from "../../logger.js";
+import { unwrapMessage } from "../domain/messageParser.js";
+import { downloadMediaToFile } from "../../mediaHandler.js";
+import config from "../../config.js";
+import { withTimeout } from "../utils.js";
+import type {
+  CommandContext,
+  CommandHandler,
+} from "../command/CommandContext.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -42,7 +45,7 @@ import type { CommandContext, CommandHandler } from '../command/CommandContext.j
 const STICKER_NAME_RE = /^[a-z0-9_\-]{1,64}$/;
 
 // Must match GLOBAL_STICKER_CHAT_ID in Python's sticker_db.py
-const GLOBAL_STICKER_CHAT_ID = '__global__';
+const GLOBAL_STICKER_CHAT_ID = "__global__";
 
 // DB path mirrors what Python's sticker_db.py resolves to
 const STICKERS_DB_PATH = config.stickersDbPath;
@@ -60,10 +63,10 @@ function getDb(): any {
   if (_db) return _db;
   fs.ensureDirSync(path.dirname(STICKERS_DB_PATH));
   _db = new Database(STICKERS_DB_PATH, { timeout: 30000 });
-  _db.pragma('journal_mode = WAL');
-  _db.pragma('synchronous = FULL');
-  _db.pragma('busy_timeout = 30000');
-  _db.pragma('foreign_keys = ON');
+  _db.pragma("journal_mode = WAL");
+  _db.pragma("synchronous = FULL");
+  _db.pragma("busy_timeout = 30000");
+  _db.pragma("foreign_keys = ON");
   _db.exec(`
     CREATE TABLE IF NOT EXISTS stickers (
       id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -80,8 +83,12 @@ function getDb(): any {
   `);
   // Migration: add lottie_payload column for existing installs
   try {
-    _db.exec(`ALTER TABLE stickers ADD COLUMN lottie_payload TEXT DEFAULT NULL`);
-  } catch { /* column already exists */ }
+    _db.exec(
+      `ALTER TABLE stickers ADD COLUMN lottie_payload TEXT DEFAULT NULL`,
+    );
+  } catch {
+    /* column already exists */
+  }
   return _db;
 }
 
@@ -98,7 +105,8 @@ function isLottieSticker(msgObj: any): boolean {
   if (!msgObj) return false;
   if (msgObj.lottieStickerMessage) return true;
   const sc = msgObj.stickerMessage;
-  if (sc && (sc.isLottie === true || sc.mimetype === 'application/was')) return true;
+  if (sc && (sc.isLottie === true || sc.mimetype === "application/was"))
+    return true;
   return false;
 }
 
@@ -125,30 +133,46 @@ function serializeLottiePayload(msgObj: any, stickerContent: any): string {
  * Download the sticker from a WhatsApp message to a temp file.
  * Returns the temp file path, or null on failure.
  */
-async function downloadStickerToTemp(stickerContent: any, messageId: string, mediaDir: string = config.mediaDir): Promise<string | null> {
+async function downloadStickerToTemp(
+  stickerContent: any,
+  messageId: string,
+  mediaDir: string = config.mediaDir,
+): Promise<string | null> {
   if (!stickerContent) return null;
   try {
     await fs.ensureDir(mediaDir);
     const tempPath = path.join(mediaDir, `addsticker_tmp_${messageId}.webp`);
 
     try {
-      await downloadMediaToFile(stickerContent, 'sticker', tempPath, withTimeout);
+      await downloadMediaToFile(
+        stickerContent,
+        "sticker",
+        tempPath,
+        withTimeout,
+      );
     } catch (firstErr: any) {
-      const msg = String(firstErr?.message || '').toLowerCase();
-      const isDecryptError = msg.includes('bad decrypt')
-        || msg.includes('unable to authenticate')
-        || msg.includes('wrong final block')
-        || msg.includes('mac check failed')
-        || msg.includes('failed to decrypt');
+      const msg = String(firstErr?.message || "").toLowerCase();
+      const isDecryptError =
+        msg.includes("bad decrypt") ||
+        msg.includes("unable to authenticate") ||
+        msg.includes("wrong final block") ||
+        msg.includes("mac check failed") ||
+        msg.includes("failed to decrypt");
       if (!isDecryptError) throw firstErr;
-      logger.warn({ err: firstErr, messageId }, 'addsticker: sticker decrypt failed, retrying as image');
+      logger.warn(
+        { err: firstErr, messageId },
+        "addsticker: sticker decrypt failed, retrying as image",
+      );
       await fs.remove(tempPath).catch(() => {});
-      await downloadMediaToFile(stickerContent, 'image', tempPath, withTimeout);
+      await downloadMediaToFile(stickerContent, "image", tempPath, withTimeout);
     }
 
     return tempPath;
   } catch (err) {
-    logger.warn({ err, messageId }, 'addsticker: failed to download sticker media');
+    logger.warn(
+      { err, messageId },
+      "addsticker: failed to download sticker media",
+    );
     return null;
   }
 }
@@ -157,10 +181,15 @@ async function downloadStickerToTemp(stickerContent: any, messageId: string, med
  * Persist the sticker file to the upload directory.
  * Returns the persistent path.
  */
-async function persistStickerFile(tempPath: string, chatId: string, name: string, uploadDir: string = STICKER_UPLOAD_DIR): Promise<string> {
+async function persistStickerFile(
+  tempPath: string,
+  chatId: string,
+  name: string,
+  uploadDir: string = STICKER_UPLOAD_DIR,
+): Promise<string> {
   await fs.ensureDir(uploadDir);
-  const { createHash } = await import('crypto');
-  const chatHash = createHash('md5').update(chatId).digest('hex').slice(0, 8);
+  const { createHash } = await import("crypto");
+  const chatHash = createHash("md5").update(chatId).digest("hex").slice(0, 8);
   const destFilename = `${chatHash}_${name}.webp`;
   const destPath = path.join(uploadDir, destFilename);
   await fs.copy(tempPath, destPath, { overwrite: true });
@@ -172,11 +201,16 @@ async function persistStickerFile(tempPath: string, chatId: string, name: string
 // ---------------------------------------------------------------------------
 
 /** Register a regular (WebP) sticker. */
-function upsertWebpSticker(chatId: string, name: string, filePath: string, addedBy: string): string {
+function upsertWebpSticker(
+  chatId: string,
+  name: string,
+  filePath: string,
+  addedBy: string,
+): string {
   const db = getDb();
-  const existing = db.prepare(
-    'SELECT id FROM stickers WHERE chat_id = ? AND name = ?',
-  ).get(chatId, name);
+  const existing = db
+    .prepare("SELECT id FROM stickers WHERE chat_id = ? AND name = ?")
+    .get(chatId, name);
 
   if (existing) {
     db.prepare(
@@ -184,21 +218,26 @@ function upsertWebpSticker(chatId: string, name: string, filePath: string, added
        SET file_path = ?, lottie_payload = NULL, added_by = ?, added_at = datetime('now')
        WHERE chat_id = ? AND name = ?`,
     ).run(filePath, addedBy, chatId, name);
-    return 'updated';
+    return "updated";
   }
   db.prepare(
     `INSERT INTO stickers (chat_id, name, file_path, lottie_payload, added_by)
      VALUES (?, ?, ?, NULL, ?)`,
   ).run(chatId, name, filePath, addedBy);
-  return 'added';
+  return "added";
 }
 
 /** Register a Lottie sticker using its JSON payload (no file). */
-function upsertLottieSticker(chatId: string, name: string, lottiePayloadJson: string, addedBy: string): string {
+function upsertLottieSticker(
+  chatId: string,
+  name: string,
+  lottiePayloadJson: string,
+  addedBy: string,
+): string {
   const db = getDb();
-  const existing = db.prepare(
-    'SELECT id FROM stickers WHERE chat_id = ? AND name = ?',
-  ).get(chatId, name);
+  const existing = db
+    .prepare("SELECT id FROM stickers WHERE chat_id = ? AND name = ?")
+    .get(chatId, name);
 
   if (existing) {
     db.prepare(
@@ -206,13 +245,13 @@ function upsertLottieSticker(chatId: string, name: string, lottiePayloadJson: st
        SET file_path = '', lottie_payload = ?, added_by = ?, added_at = datetime('now')
        WHERE chat_id = ? AND name = ?`,
     ).run(lottiePayloadJson, addedBy, chatId, name);
-    return 'updated';
+    return "updated";
   }
   db.prepare(
     `INSERT INTO stickers (chat_id, name, file_path, lottie_payload, added_by)
      VALUES (?, ?, '', ?, ?)`,
   ).run(chatId, name, lottiePayloadJson, addedBy);
-  return 'added';
+  return "added";
 }
 
 // ---------------------------------------------------------------------------
@@ -228,7 +267,6 @@ async function handleAddSticker({
   sock,
   account,
 }: CommandContext): Promise<void> {
-
   // Per-tenant media / sticker-upload dirs (CONTRACT.md §8): the staged temp
   // file and the persisted catalog sticker must live under THIS account's
   // folder so the outbound allowlist (now tenant-scoped) accepts the path the
@@ -240,24 +278,24 @@ async function handleAddSticker({
     try {
       await sock.sendMessage(chatId, { text });
     } catch (err) {
-      logger.warn({ err, chatId }, 'addsticker: failed to send reply');
+      logger.warn({ err, chatId }, "addsticker: failed to send reply");
     }
   }
 
   // ------------------------------------------------------------------
   // 1. Parse global flag
   // ------------------------------------------------------------------
-  const rawArgs = (args || '').trim();
+  const rawArgs = (args || "").trim();
   const parts = rawArgs.split(/\s+/);
-  const isGlobal = parts[0]?.toLowerCase() === 'global';
-  const nameArg = isGlobal ? parts.slice(1).join(' ').trim() : rawArgs;
+  const isGlobal = parts[0]?.toLowerCase() === "global";
+  const nameArg = isGlobal ? parts.slice(1).join(" ").trim() : rawArgs;
   const targetChatId = isGlobal ? GLOBAL_STICKER_CHAT_ID : chatId;
 
   // ------------------------------------------------------------------
   // 2. Permission check
   // ------------------------------------------------------------------
   if (isGlobal && !senderIsOwner) {
-    await reply('Only the bot owner can add global stickers. ❌');
+    await reply("Only the bot owner can add global stickers. ❌");
     return;
   }
 
@@ -267,19 +305,19 @@ async function handleAddSticker({
   const rawName = nameArg.toLowerCase();
   if (!rawName) {
     await reply(
-      'Usage: `/add-sticker <name>`\n'
-      + 'Send/reply to a sticker with that caption.\n\n'
-      + 'The name must be lowercase letters, digits, underscore or minus (max 64 characters).\n'
-      + 'Example: `/add-sticker smile`\n\n'
-      + '_Owner only:_ `/add-sticker global <name>` — add to the global catalog (all chats).',
+      "Usage: `/add-sticker <name>`\n" +
+        "Send/reply to a sticker with that caption.\n\n" +
+        "The name must be lowercase letters, digits, underscore or minus (max 64 characters).\n" +
+        "Example: `/add-sticker smile`\n\n" +
+        "_Owner only:_ `/add-sticker global <name>` — add to the global catalog (all chats).",
     );
     return;
   }
 
   if (!STICKER_NAME_RE.test(rawName)) {
     await reply(
-      `Invalid sticker name: *${rawName}*\n`
-      + 'Use lowercase letters, digits, underscore (_) or minus (-), 1–64 characters.',
+      `Invalid sticker name: *${rawName}*\n` +
+        "Use lowercase letters, digits, underscore (_) or minus (-), 1–64 characters.",
     );
     return;
   }
@@ -296,8 +334,8 @@ async function handleAddSticker({
   //    For regular: we download and store the .webp file.
   // ------------------------------------------------------------------
   const { message: innerMessage } = unwrapMessage(msg!.message) || {};
-  let stickerContent: any = null;       // the stickerMessage proto object
-  let sourceMsgObj: any = null;         // the raw message object containing the sticker
+  let stickerContent: any = null; // the stickerMessage proto object
+  let sourceMsgObj: any = null; // the raw message object containing the sticker
   let messageIdForFile: string = msg!.key?.id || randomUUID();
 
   /**
@@ -305,7 +343,8 @@ async function handleAddSticker({
    */
   function extractSticker(msgObj: any): { content: any; msgObj: any } | null {
     if (!msgObj) return null;
-    if (msgObj.stickerMessage) return { content: msgObj.stickerMessage, msgObj };
+    if (msgObj.stickerMessage)
+      return { content: msgObj.stickerMessage, msgObj };
     const lottie = msgObj.lottieStickerMessage;
     if (lottie?.message?.stickerMessage) {
       return { content: lottie.message.stickerMessage, msgObj };
@@ -324,10 +363,12 @@ async function handleAddSticker({
 
   // Quoted message fallback
   if (!stickerContent) {
-    const ctx = (innerMessage as any)?.extendedTextMessage?.contextInfo
-      || (innerMessage as any)?.stickerMessage?.contextInfo
-      || (innerMessage as any)?.lottieStickerMessage?.message?.stickerMessage?.contextInfo
-      || null;
+    const ctx =
+      (innerMessage as any)?.extendedTextMessage?.contextInfo ||
+      (innerMessage as any)?.stickerMessage?.contextInfo ||
+      (innerMessage as any)?.lottieStickerMessage?.message?.stickerMessage
+        ?.contextInfo ||
+      null;
     if (ctx?.quotedMessage) {
       const { message: qMsg } = unwrapMessage(ctx.quotedMessage) || {};
       const extracted = extractSticker(qMsg || ctx.quotedMessage);
@@ -341,8 +382,8 @@ async function handleAddSticker({
 
   if (!stickerContent) {
     await reply(
-      'No sticker found.\n'
-      + 'Send a sticker with the caption `/addsticker <name>`, or reply to a sticker with that command.',
+      "No sticker found.\n" +
+        "Send a sticker with the caption `/addsticker <name>`, or reply to a sticker with that command.",
     );
     return;
   }
@@ -351,29 +392,50 @@ async function handleAddSticker({
   // 5. Save — Lottie: store JSON payload; regular: download file
   // ------------------------------------------------------------------
   const lottie = isLottieSticker(sourceMsgObj);
-  const globalLabel = isGlobal ? ' global' : '';
+  const globalLabel = isGlobal ? " global" : "";
 
   if (lottie) {
     // --- Lottie path: serialise payload JSON, no file download ---
     try {
-      const lottiePayloadJson = serializeLottiePayload(sourceMsgObj, stickerContent);
-      const action = upsertLottieSticker(targetChatId, rawName, lottiePayloadJson, senderId || '');
-
-      logger.info(
-        { chatId, targetChatId, name: rawName, senderId, action, type: 'lottie', isGlobal },
-        'addsticker: lottie sticker registered (payload saved, no file download)',
+      const lottiePayloadJson = serializeLottiePayload(
+        sourceMsgObj,
+        stickerContent,
+      );
+      const action = upsertLottieSticker(
+        targetChatId,
+        rawName,
+        lottiePayloadJson,
+        senderId || "",
       );
 
-      if (action === 'updated') {
-        await reply(`Lottie sticker${globalLabel} *${rawName}* updated successfully! ✨✅`);
+      logger.info(
+        {
+          chatId,
+          targetChatId,
+          name: rawName,
+          senderId,
+          action,
+          type: "lottie",
+          isGlobal,
+        },
+        "addsticker: lottie sticker registered (payload saved, no file download)",
+      );
+
+      if (action === "updated") {
+        await reply(
+          `Lottie sticker${globalLabel} *${rawName}* updated successfully! ✨✅`,
+        );
       } else {
         await reply(
-          `Lottie sticker${globalLabel} *${rawName}* added successfully! ✨✅\n`
-          + 'The bot can use this animated sticker fully.',
+          `Lottie sticker${globalLabel} *${rawName}* added successfully! ✨✅\n` +
+            "The bot can use this animated sticker fully.",
         );
       }
     } catch (err: any) {
-      logger.error({ err, chatId, name: rawName }, 'addsticker: lottie save failed');
+      logger.error(
+        { err, chatId, name: rawName },
+        "addsticker: lottie save failed",
+      );
       await reply(`Failed to save Lottie sticker: ${err.message} ❌`);
     }
     return;
@@ -382,31 +444,61 @@ async function handleAddSticker({
   // --- Regular / animated WebP path: download file ---
   let tempPath: string | null = null;
   try {
-    tempPath = await downloadStickerToTemp(stickerContent, messageIdForFile, mediaDir);
+    tempPath = await downloadStickerToTemp(
+      stickerContent,
+      messageIdForFile,
+      mediaDir,
+    );
     if (!tempPath) {
-      await reply('Failed to download the sticker. Try again later. ❌');
+      await reply("Failed to download the sticker. Try again later. ❌");
       return;
     }
 
-    const destPath = await persistStickerFile(tempPath, targetChatId, rawName, uploadDir);
-    const action = upsertWebpSticker(targetChatId, rawName, destPath, senderId || '');
-
-    logger.info(
-      { chatId, targetChatId, name: rawName, senderId, action, type: 'webp', isGlobal },
-      'addsticker: webp sticker registered',
+    const destPath = await persistStickerFile(
+      tempPath,
+      targetChatId,
+      rawName,
+      uploadDir,
+    );
+    const action = upsertWebpSticker(
+      targetChatId,
+      rawName,
+      destPath,
+      senderId || "",
     );
 
-    if (action === 'updated') {
-      await reply(`Sticker${globalLabel} *${rawName}* updated successfully! ✅`);
+    logger.info(
+      {
+        chatId,
+        targetChatId,
+        name: rawName,
+        senderId,
+        action,
+        type: "webp",
+        isGlobal,
+      },
+      "addsticker: webp sticker registered",
+    );
+
+    if (action === "updated") {
+      await reply(
+        `Sticker${globalLabel} *${rawName}* updated successfully! ✅`,
+      );
     } else {
-      await reply(`Sticker${globalLabel} *${rawName}* added successfully! ✅\nThe bot can now use this sticker.`);
+      await reply(
+        `Sticker${globalLabel} *${rawName}* added successfully! ✅\nThe bot can now use this sticker.`,
+      );
     }
   } catch (err: any) {
-    logger.error({ err, chatId, name: rawName }, 'addsticker: failed');
+    logger.error({ err, chatId, name: rawName }, "addsticker: failed");
     await reply(`Failed to save sticker: ${err.message} ❌`);
   } finally {
     if (tempPath) {
-      try { await fs.remove(tempPath); } catch { /* ignore */ }
+      try {
+        await fs.remove(tempPath);
+      } catch {
+        /* ignore */
+      }
     }
   }
 }
@@ -415,7 +507,8 @@ export { handleAddSticker };
 
 export const addStickerCommand: CommandHandler = {
   commands: ["add-sticker", "addsticker", "addstickers", "add-stickers"],
-  description: "Add a sticker to the bot's catalog by replying to a sticker and naming it. The bot can send stickers from this catalog using the send_sticker tool. Use /add-sticker global <name> to add it to the global catalog for all chats (owner only). Example: /add-sticker funny cat.",
+  description:
+    "Add a sticker to the bot's catalog by replying to a sticker and naming it. The bot can send stickers from this catalog using the send_sticker tool. Use /add-sticker global <name> to add it to the global catalog for all chats (owner only). Example: /add-sticker funny_cat.",
   permission: "isPrivate or isAdmin or isOwner",
   run: (_sock, _message, ctx) => handleAddSticker(ctx),
 };

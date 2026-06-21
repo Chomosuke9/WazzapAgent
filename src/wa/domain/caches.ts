@@ -86,6 +86,19 @@ export interface GroupMetadataCacheEntry {
 const MAX_CACHE = 1000;
 const MAX_KEY_INDEX = 12_000;
 const GROUP_METADATA_TTL_MS = 60_000;
+// After a failed `groupMetadata` fetch (notably WhatsApp `rate-overlimit`),
+// suppress further fetches for this group for this long and serve the freshest
+// cached snapshot (or default) instead. Without this, every subsequent message
+// for the group re-fires a doomed query, which both spams the logs and deepens
+// the rate limit (group-metadata refetch is ban-risky — see AGENTS.md).
+const GROUP_METADATA_FAILURE_COOLDOWN_MS = 30_000;
+// How long an UNRESOLVABLE participant name is remembered as a miss. While set,
+// `getGroupParticipantName` skips the (rate-limit-prone) forced metadata
+// refetch for that participant — re-forcing it on every message for an
+// unnameable `@lid` sender is a primary trigger of the `rate-overlimit` storm.
+// A name learned meanwhile via an inbound pushName or a join hydrate still
+// resolves immediately (that lookup runs before this negative cache).
+const GROUP_PARTICIPANT_NAME_MISS_TTL_MS = 5 * 60_000;
 const GROUP_JOIN_DEDUP_TTL_MS = 15_000;
 // Shorter window for cross-source coalescing of the SAME join reported by both
 // the `messages.upsert` system stub and the `group-participants.update` event.
@@ -124,6 +137,8 @@ export {
   MAX_CACHE,
   MAX_KEY_INDEX,
   GROUP_METADATA_TTL_MS,
+  GROUP_METADATA_FAILURE_COOLDOWN_MS,
+  GROUP_PARTICIPANT_NAME_MISS_TTL_MS,
   GROUP_JOIN_DEDUP_TTL_MS,
   GROUP_JOIN_CROSS_SOURCE_DEDUP_TTL_MS,
   MAX_QUIZ_IDS,

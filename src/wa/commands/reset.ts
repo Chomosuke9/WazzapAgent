@@ -51,8 +51,7 @@ export { handleReset };
 
 export const resetCommand: CommandHandler = {
   commands: ["reset", "resets", "clear", "clears"],
-  description:
-    "Clear the bot's conversation memory in this chat (including message history). The bot starts fresh with no prior context. Use /reset global to clear the memory of all chats at once (owner only).",
+  description: "Clear the bot's conversation memory in this chat.",
   permission: "private or (isGroup and isAdmin) or isOwner",
   run: (_sock, _message, ctx) => handleReset(ctx),
 };

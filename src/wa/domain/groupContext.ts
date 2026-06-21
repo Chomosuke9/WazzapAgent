@@ -4,6 +4,8 @@ import logger from '../../logger.js';
 import config from '../../config.js';
 import {
   GROUP_METADATA_TTL_MS,
+  GROUP_METADATA_FAILURE_COOLDOWN_MS,
+  GROUP_PARTICIPANT_NAME_MISS_TTL_MS,
   GROUP_JOIN_DEDUP_TTL_MS,
   GROUP_JOIN_CROSS_SOURCE_DEDUP_TTL_MS,
   GROUP_JOIN_STUB_TYPES,
@@ -141,6 +143,19 @@ function invalidateGroupMetadata(ctx: AccountContext, jid: string | null | undef
   ctx.groupMetadataCache.delete(jid);
 }
 
+/**
+ * Serve the freshest snapshot we have for a group WITHOUT fetching: the
+ * TTL-valid cache if present, otherwise any stale entry (better than nothing),
+ * otherwise an empty default. Used when a fetch is suppressed by the cooldown
+ * or has just failed.
+ */
+function freshestGroupSnapshot(ctx: AccountContext, jid: string): GroupContextValue {
+  const fresh = getCachedGroupMetadata(ctx, jid);
+  if (fresh) return fresh;
+  const stale = ctx.groupMetadataCache.get(jid);
+  return stale ? stale.value : defaultGroupContext(jid);
+}
+
 async function getGroupContext(
   ctx: AccountContext,
   jid: string | null | undefined,
@@ -155,26 +170,61 @@ async function getGroupContext(
     if (cached) return cached;
   }
 
+  // Negative cache / backoff: a recent fetch failed (e.g. WhatsApp
+  // `rate-overlimit`). Re-firing now only deepens the rate limit (and ban
+  // risk — group-metadata refetch is ban-risky, see AGENTS.md), so serve the
+  // freshest snapshot we have instead. Applies to forceRefresh too: during an
+  // active rate limit a forced query would just fail and extend the cooldown.
+  const cooldownUntil = ctx.groupMetadataCooldownUntil.get(jid);
+  if (cooldownUntil !== undefined) {
+    if (Date.now() < cooldownUntil) return freshestGroupSnapshot(ctx, jid);
+    ctx.groupMetadataCooldownUntil.delete(jid);
+  }
+
+  // In-flight dedup: coalesce concurrent callers for the same group (a burst
+  // of messages) into ONE underlying `sock.groupMetadata` call so they don't
+  // stampede WhatsApp. Registration below is synchronous — the worker only
+  // yields at its first `await` — so no concurrent caller can miss it.
+  const inflight = ctx.groupMetadataInflight.get(jid);
+  if (inflight) return inflight;
+
+  const fetchPromise = (async (): Promise<GroupContextValue> => {
+    try {
+      const { withTimeout } = await import('../index.js');
+      const meta: any = await withTimeout(
+        sock.groupMetadata(jid),
+        config.groupMetadataTimeoutMs,
+        `groupMetadata(${jid})`
+      );
+      hydrateGroupParticipantCaches(ctx, jid, meta?.participants);
+      const normalized = normalizeGroupMetadata(ctx, meta, jid);
+      rememberGroupMetadata(ctx, jid, normalized);
+      ctx.groupMetadataCooldownUntil.delete(jid);
+      return normalized;
+    } catch (err) {
+      logger.warn({
+        err,
+        jid,
+        timeoutMs: config.groupMetadataTimeoutMs,
+      }, 'failed to fetch group metadata');
+      // Back off so the next message for this group doesn't immediately
+      // re-fire a doomed query — that is the stampede behind the
+      // rate-overlimit storm.
+      cacheSetBounded(
+        ctx.groupMetadataCooldownUntil,
+        jid,
+        Date.now() + GROUP_METADATA_FAILURE_COOLDOWN_MS,
+        2000,
+      );
+      return freshestGroupSnapshot(ctx, jid);
+    }
+  })();
+
+  ctx.groupMetadataInflight.set(jid, fetchPromise);
   try {
-    const { withTimeout } = await import('../index.js');
-    const meta: any = await withTimeout(
-      sock.groupMetadata(jid),
-      config.groupMetadataTimeoutMs,
-      `groupMetadata(${jid})`
-    );
-    hydrateGroupParticipantCaches(ctx, jid, meta?.participants);
-    const normalized = normalizeGroupMetadata(ctx, meta, jid);
-    rememberGroupMetadata(ctx, jid, normalized);
-    return normalized;
-  } catch (err) {
-    logger.warn({
-      err,
-      jid,
-      timeoutMs: config.groupMetadataTimeoutMs,
-    }, 'failed to fetch group metadata');
-    const cached = getCachedGroupMetadata(ctx, jid);
-    if (cached) return cached;
-    return defaultGroupContext(jid);
+    return await fetchPromise;
+  } finally {
+    ctx.groupMetadataInflight.delete(jid);
   }
 }
 
@@ -189,10 +239,25 @@ async function getGroupParticipantName(
   const cached = ctx.groupParticipantNameCache.get(key);
   if (cached) return cached;
 
+  // Cheap, in-memory roster lookup runs on EVERY call (before the negative
+  // cache) so a name learned since the last miss — via an inbound pushName or a
+  // join-event hydrate — is reflected immediately.
   const fallback = lookupParticipantName(ctx, participantJid);
   if (fallback) {
     cacheSetBounded(ctx.groupParticipantNameCache, key, fallback);
+    ctx.groupParticipantNameMissUntil.delete(key);
     return fallback;
+  }
+
+  // Negative cache: we recently fetched fresh metadata and STILL couldn't name
+  // this participant. Skip the rate-limit-prone forced refetch — re-firing it
+  // on every message for an unnameable `@lid` sender is what trips
+  // `rate-overlimit`. (The roster lookup above already covers names learned
+  // since, so this only suppresses the doomed WhatsApp fetch.)
+  const missUntil = ctx.groupParticipantNameMissUntil.get(key);
+  if (missUntil !== undefined) {
+    if (Date.now() < missUntil) return null;
+    ctx.groupParticipantNameMissUntil.delete(key);
   }
 
   const hadCachedMetadata = Boolean(getCachedGroupMetadata(ctx, chatId));
@@ -206,8 +271,19 @@ async function getGroupParticipantName(
 
   if (resolved) {
     cacheSetBounded(ctx.groupParticipantNameCache, key, resolved);
+    ctx.groupParticipantNameMissUntil.delete(key);
+    return resolved;
   }
-  return resolved || null;
+
+  // Confirmed unnameable (even a fresh fetch didn't have them) → arm the
+  // negative cache so the next message doesn't force another refetch.
+  cacheSetBounded(
+    ctx.groupParticipantNameMissUntil,
+    key,
+    Date.now() + GROUP_PARTICIPANT_NAME_MISS_TTL_MS,
+    2000,
+  );
+  return null;
 }
 
 function normalizeGroupJoinAction(action: unknown): string {

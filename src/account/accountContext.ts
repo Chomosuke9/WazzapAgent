@@ -23,6 +23,7 @@ import type {
   MessageIndexEntry,
   SenderRefRegistry,
   GroupMetadataCacheEntry,
+  GroupContextValue,
 } from '../wa/domain/caches.js';
 import type { AccountRepositories } from '../db/repositories/index.js';
 import type { AccountForwarder, WaSocketLike } from '../protocol/ports.js';
@@ -98,10 +99,29 @@ export interface AccountContext {
   messageCache: Map<string, WAMessage>;
   /** Group-metadata cache keyed by group JID, TTL-wrapped. */
   groupMetadataCache: Map<string, GroupMetadataCacheEntry>;
+  /**
+   * In-flight `groupMetadata` fetches keyed by group JID. Coalesces concurrent
+   * callers (a burst of messages for the same group) into ONE underlying
+   * `sock.groupMetadata` call so they don't stampede WhatsApp.
+   */
+  groupMetadataInflight: Map<string, Promise<GroupContextValue>>;
+  /**
+   * Per-group backoff: epoch-ms until which `groupMetadata` fetches are
+   * suppressed after a failure (e.g. `rate-overlimit`). While set, the freshest
+   * cached snapshot (or default) is served instead of re-firing a query.
+   */
+  groupMetadataCooldownUntil: Map<string, number>;
   /** Participant display-name cache keyed by JID. */
   participantNameCache: Map<string, string>;
   /** Per-group participant display-name cache keyed by `chatId::jid`. */
   groupParticipantNameCache: Map<string, string>;
+  /**
+   * Negative cache for UNRESOLVABLE participant names, keyed by `chatId::jid` →
+   * epoch-ms until which the miss stands. Stops `getGroupParticipantName` from
+   * forcing a metadata refetch on every message for a name that can't be
+   * resolved (e.g. an `@lid` sender absent from group metadata).
+   */
+  groupParticipantNameMissUntil: Map<string, number>;
   /** Group-join dedup cache keyed by `chatId::action::participants`. */
   groupJoinDedupCache: Map<string, number>;
   /** Message index keyed by `chatId::contextMsgId`. */
@@ -136,8 +156,11 @@ export function createAccountContext(folderPath: string): AccountContext {
     repos: undefined,
     messageCache: new Map<string, WAMessage>(),
     groupMetadataCache: new Map<string, GroupMetadataCacheEntry>(),
+    groupMetadataInflight: new Map<string, Promise<GroupContextValue>>(),
+    groupMetadataCooldownUntil: new Map<string, number>(),
     participantNameCache: new Map<string, string>(),
     groupParticipantNameCache: new Map<string, string>(),
+    groupParticipantNameMissUntil: new Map<string, number>(),
     groupJoinDedupCache: new Map<string, number>(),
     messageKeyIndex: new Map<string, MessageIndexEntry>(),
     messageIdToContextId: new Map<string, string>(),
