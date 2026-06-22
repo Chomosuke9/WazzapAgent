@@ -99,11 +99,19 @@ try:
   from .config import (
     REPLY_DEDUP_WINDOW_MS,
     REPLY_DEDUP_MIN_CHARS,
+    direct_invoke_api_key,
+    direct_invoke_host,
+    direct_invoke_max_chars,
+    direct_invoke_port as _direct_invoke_base_port,
   )
 except ImportError:
   from bridge.config import (  # type: ignore
     REPLY_DEDUP_WINDOW_MS,
     REPLY_DEDUP_MIN_CHARS,
+    direct_invoke_api_key,
+    direct_invoke_host,
+    direct_invoke_max_chars,
+    direct_invoke_port as _direct_invoke_base_port,
   )
 
 logger = setup_logging()
@@ -113,6 +121,24 @@ from .agent.event_router import EventRouter
 from .agent.ack_hydrator import AckHydrator
 from .agent.subagent_coordinator import SubAgentCoordinator
 from .agent.scheduled_task_runner import ScheduledTaskRunner
+from .agent.chat_reinvoker import ChatReinvoker
+from .agent.direct_invoke import DirectInvokeServer
+
+
+# Direct-invoke re-invoke instruction block (counterpart of the scheduled-task
+# block in scheduled_task_runner.py). Frames the injected ``#system`` turn as an
+# external trigger the bot must act on NOW by sending a message in the chat.
+_DIRECT_INVOKE_BLOCK_TITLE = "Direct instruction firing now"
+_DIRECT_INVOKE_BLOCK_INSTRUCTIONS = (
+  "Instructions for this re-invoke:\n"
+  "- An external trigger just sent the bot the instruction above to act on in "
+  "this chat NOW.\n"
+  "- Carry it out and respond in this chat: send the appropriate reply_message "
+  "(and/or tools) in the chat's language and WhatsApp formatting.\n"
+  "- If the instruction names someone to tag, use the `@Name (senderRef)` "
+  "mention format so they get tagged.\n"
+  "- Do not ask for confirmation — just perform the instruction."
+)
 
 
 def _compute_idle_trigger(min_val: int, max_val: int, msg_count: int) -> bool:
@@ -132,7 +158,7 @@ class AgentSession:
   lifecycle (the former ``handle_socket`` tail).
   """
 
-  def __init__(self, sock, *, webhook_port: int | None = None, webhook_url: str | None = None, assistant_name: str | None = None) -> None:
+  def __init__(self, sock, *, webhook_port: int | None = None, webhook_url: str | None = None, assistant_name: str | None = None, direct_invoke_port: int | None = None) -> None:
     self.sock = sock
     # Tenant key for per-account DB routing (Step 33 / CONTRACT.md §8). The
     # WaSocket carries its ``folder_path``; ``run()`` binds it so every DB
@@ -219,10 +245,22 @@ class AgentSession:
     )
     self._subagent = SubAgentCoordinator(self)
     self._batch = BatchProcessor(self)
+    # --- Shared cold re-invoke engine (scheduled tasks + direct invoke) ---
+    # ONE instance reused by the scheduled-task runner and the direct-invoke
+    # HTTP endpoint: append a [LABEL] #system turn to the chat history, re-invoke
+    # LLM2 (always responds — no LLM1 gating), and dispatch the reply.
+    self._reinvoker = ChatReinvoker(
+      ws=self.sock,
+      responder=self._llm2,
+      per_chat=self.per_chat,
+      per_chat_lock=self.per_chat_lock,
+      get_prompt=db_get_prompt,
+      record_stat=self._dashboard.record_stat,
+    )
     # --- Feature 5: scheduled-task runner (one-shot timers + re-invoke) ---
     # Persists `/schedule-task` rows in this tenant's settings.db and re-invokes
     # LLM2 in the target chat when each fires. Dependencies are injected so the
-    # runner stays INSTANCE-scoped and unit-testable.
+    # runner stays INSTANCE-scoped and unit-testable; it shares the reinvoker above.
     self._scheduled = ScheduledTaskRunner(
       repository=ScheduledTasksRepository(),
       ws=self.sock,
@@ -232,6 +270,18 @@ class AgentSession:
       track_task=self._track_task,
       get_prompt=db_get_prompt,
       record_stat=self._dashboard.record_stat,
+      reinvoker=self._reinvoker,
+    )
+    # --- Direct-invoke HTTP endpoint (make the bot send a message FIRST) ---
+    # Authenticated /post endpoint; binds (in run()) ONLY when DIRECT_INVOKE_API_KEY
+    # is set (fail-closed). Per-account port = base + index (resolved by main.py);
+    # falls back to the configured base for single-account / tests.
+    self._direct_invoke = DirectInvokeServer(
+      submit=self._submit_direct_invoke,
+      api_key=direct_invoke_api_key(),
+      host=direct_invoke_host(),
+      port=direct_invoke_port if direct_invoke_port is not None else _direct_invoke_base_port(),
+      max_chars=direct_invoke_max_chars(),
     )
     # The webhook server's queue handler (was wired inside _register_handlers).
     self._queue_handler = self._subagent.queue_event
@@ -239,6 +289,33 @@ class AgentSession:
   def _track_task(self, task: asyncio.Task) -> None:
     self.tasks.add(task)
     task.add_done_callback(self.tasks.discard)
+
+  def _submit_direct_invoke(self, chat_id: str, prompt: str) -> None:
+    """Schedule a direct-invoke re-invoke as a tracked background task.
+
+    Called by :class:`~bridge.agent.direct_invoke.DirectInvokeServer` from its
+    (already-authenticated) HTTP handler. The actual LLM2 work runs in the
+    background so a slow model never blocks the HTTP response. It is wrapped in
+    ``tenant_db()`` so it runs under THIS session's per-tenant DB dir + assistant
+    identity — the aiohttp request task does not otherwise inherit ``run()``'s
+    ContextVars, so without this a multi-account deploy could touch the wrong
+    tenant's DB.
+    """
+    async def _run() -> None:
+      with self.tenant_db():
+        try:
+          await self._reinvoker.reinvoke(
+            chat_id,
+            prompt,
+            system_label="DIRECT INVOKE",
+            block_title=_DIRECT_INVOKE_BLOCK_TITLE,
+            block_instructions=_DIRECT_INVOKE_BLOCK_INSTRUCTIONS,
+            log_kind="direct invoke",
+          )
+        except Exception:  # pylint: disable=broad-except
+          logger.exception("direct invoke failed chat_id=%s", chat_id)
+
+    self._track_task(asyncio.create_task(_run()))
 
   def register(self) -> None:
     """Wire the WaSocket event handlers for this session (Step 10).
@@ -284,11 +361,21 @@ class AgentSession:
     # settings.db; armed timers inherit the context for their own DB access.
     self._scheduled.rearm_pending()
 
+    # Direct-invoke HTTP endpoint: bind now (no-op unless DIRECT_INVOKE_API_KEY
+    # is set). Shares the session run lifecycle; its background re-invokes bind
+    # the tenant context themselves (see _submit_direct_invoke).
+    await self._direct_invoke.start()
+
     try:
       await ws.connect(node_url)
       logger.info("Connected to Node gateway at %s", node_url)
       await stop_event.wait()
     finally:
+      # Stop accepting new direct-invoke requests before tearing down state.
+      try:
+        await self._direct_invoke.stop()
+      except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("Direct-invoke endpoint stop failed: %s", exc)
       # Flush dashboard stats and checkpoint DBs before shutting down
       self._dashboard.flush_to_db()
       db_checkpoint_all_dbs()

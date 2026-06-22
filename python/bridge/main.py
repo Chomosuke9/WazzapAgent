@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from wasocket import make_wa_socket
 
 from .accounts import load_accounts
-from .config import ws_transport_options
+from .config import ws_transport_options, direct_invoke_port as direct_invoke_base_port_cfg
 from .db import (
     checkpoint_all_dbs as db_checkpoint_all_dbs,
 )
@@ -74,7 +74,16 @@ def build_session(
     sock = make_wa_socket(account.folder_path, **ws_transport_options())
     webhook_port = base_webhook_port + index
     webhook_url = _resolve_webhook_url(webhook_port)
-    session = AgentSession(sock, webhook_port=webhook_port, webhook_url=webhook_url)
+    # Direct-invoke endpoint port mirrors the webhook per-account offset
+    # (base + index) so N accounts don't collide; index 0 keeps the configured
+    # base. Disabled entirely unless DIRECT_INVOKE_API_KEY is set (start() no-op).
+    direct_invoke_port = direct_invoke_base_port_cfg() + index
+    session = AgentSession(
+        sock,
+        webhook_port=webhook_port,
+        webhook_url=webhook_url,
+        direct_invoke_port=direct_invoke_port,
+    )
     session.register()
     return session
 

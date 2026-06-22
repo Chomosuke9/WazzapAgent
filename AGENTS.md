@@ -201,6 +201,9 @@ python/                       Python bridge + WaSocket SDK (WS CLIENTS)
       reply_dedup.py          ReplyDedup — duplicate/near-duplicate reply suppression
       ack_hydrator.py         AckHydrator — hydrate provisional history on action_ack
       event_router.py         EventRouter — control-event (clear_history/invalidate_*) handling
+      chat_reinvoker.py       ChatReinvoker — shared "inject a #system turn + re-invoke LLM2 (always responds) + dispatch reply" engine
+      scheduled_task_runner.py ScheduledTaskRunner — /schedule-task persistence + one-shot timers (delegates the fire to ChatReinvoker)
+      direct_invoke.py        DirectInvokeServer — authenticated HTTP /post endpoint that makes the bot send a message first (re-invokes via ChatReinvoker)
     db/                       Per-domain repositories over the shared per-tenant core
       core.py                 Per-tenant connection routing (ContextVar) + tenant-keyed caches
       settings_repository.py / models_repository.py / moderation_repository.py
@@ -556,6 +559,14 @@ single-account is unchanged),
 `SUBAGENT_MAX_WAIT_S` (default 1800), `SUBAGENT_ENABLED_DEFAULT` (default false),
 `SUBAGENT_INPUT_STAGING_DIR`, `SUBAGENT_MAX_INLINE_FILE_BYTES`, `SUBAGENT_WEBHOOK_MAX_BODY_BYTES`
 
+**Direct-invoke endpoint (bot-first messaging):**
+`DIRECT_INVOKE_API_KEY` (shared secret; the endpoint stays DISABLED until set —
+fail-closed), `DIRECT_INVOKE_PORT` (BASE port, default 8090; multi-account:
+account N binds `DIRECT_INVOKE_PORT + N`, index 0 keeps the base),
+`DIRECT_INVOKE_HOST` (bind host, default `127.0.0.1` (loopback); set `0.0.0.0`
+only to reach it from another device, and keep the key secret + firewall it),
+`DIRECT_INVOKE_MAX_CHARS` (max `q` length, default `PROMPT_MAX_CHARS`)
+
 ### Docker
 
 The project doesn't currently include a Dockerfile. To containerize:
@@ -729,6 +740,35 @@ Messages from muted users are completely invisible to LLM1/LLM2.
   and current message into a .txt file. It's sent as a document attachment
   via `send_attachment`. The file is written to `MEDIA_DIR/dump_context/`
   to avoid race conditions with /tmp cleanup.
+
+### Direct-invoke endpoint (bot-first messaging)
+
+- `python/bridge/agent/direct_invoke.py` (`DirectInvokeServer`) is a small
+  authenticated HTTP server, one per account, that makes the bot **send a
+  message first**. Use case: trigger the bot from an external device (e.g. a
+  smartwatch) so a WhatsApp notification arrives.
+- Request: `GET`/`POST` `/post?q=<prompt>&jid=<chat jid>&key=<api key>`. `q` is
+  injected as a **`#system` history turn** (role `system`, rendered as
+  `[#system] … SYSTEM: …` by `history.py`), then LLM2 is re-invoked and the
+  reply is dispatched to `jid`. A bare phone number for `jid` is normalised to
+  `<digits>@s.whatsapp.net`. The key may also be sent via `X-Api-Key` or
+  `Authorization: Bearer` (preferred — keeps it out of URLs/logs). Returns
+  `202 Accepted`; the LLM call runs in a background task so a slow model never
+  blocks the HTTP response.
+- The re-invoke itself is the shared `ChatReinvoker` (same engine
+  `ScheduledTaskRunner` uses on a timer fire): inject the system turn, call
+  `responder.generate(...)` with **no LLM1 gating** (always responds), dispatch
+  the actions. `AgentSession._submit_direct_invoke` wraps it in `tenant_db()`
+  so the background task runs under the right tenant's DB + assistant identity
+  (the aiohttp request task does not inherit `run()`'s ContextVars).
+- **Security / fail-closed**: the server does **not** start unless
+  `DIRECT_INVOKE_API_KEY` is set, every request is checked with a constant-time
+  comparison, it binds `127.0.0.1` by default, and the aiohttp access log is
+  disabled so a key passed in the query string is never logged. It can make the
+  bot send arbitrary messages, so expose it beyond loopback only behind a
+  firewall / reverse proxy. Config: `DIRECT_INVOKE_API_KEY`,
+  `DIRECT_INVOKE_PORT` (base; account N binds `base + N`), `DIRECT_INVOKE_HOST`,
+  `DIRECT_INVOKE_MAX_CHARS` (see `.env.example`).
 
 ### Sub-agent integration
 

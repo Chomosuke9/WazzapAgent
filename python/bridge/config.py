@@ -403,3 +403,44 @@ def stickers_db_path_raw() -> str | None:
 def sticker_upload_dir_raw() -> str | None:
   return os.getenv("STICKER_UPLOAD_DIR")
 
+
+# ---------------------------------------------------------------------------
+# Direct-invoke HTTP endpoint (make the bot send a message FIRST).
+#
+# A small authenticated HTTP server, one per account, that injects a ``#system``
+# turn into a target chat's history and re-invokes LLM2 so the bot proactively
+# sends a message (e.g. triggered from a smartwatch so a WhatsApp notification
+# arrives). It can make the bot send arbitrary messages, so it is FAIL-CLOSED:
+# disabled unless ``DIRECT_INVOKE_API_KEY`` is set, binds loopback by default,
+# and authenticates every request with a constant-time key compare.
+# ---------------------------------------------------------------------------
+
+def direct_invoke_api_key() -> str | None:
+  """Shared secret required on every ``/post`` request. The endpoint is
+  DISABLED unless this resolves to a non-empty value (fail-closed: an
+  unauthenticated endpoint that can make the bot send arbitrary messages must
+  never run)."""
+  return _clean_env(os.getenv("DIRECT_INVOKE_API_KEY"))
+
+
+def direct_invoke_port() -> int:
+  """Base TCP port for the direct-invoke HTTP server. In multi-account mode
+  account N binds ``base + N`` (mirrors ``SUBAGENT_WEBHOOK_PORT``), so the
+  first/only account keeps the configured base. Default 8090."""
+  return _parse_non_negative_int(os.getenv("DIRECT_INVOKE_PORT"), 8090)
+
+
+def direct_invoke_host() -> str:
+  """Bind host for the direct-invoke HTTP server. Defaults to loopback
+  (127.0.0.1) so the endpoint is not exposed on all interfaces. Set
+  ``0.0.0.0`` (or a specific LAN IP) ONLY when you must reach it from another
+  device (e.g. a smartwatch) — keep ``DIRECT_INVOKE_API_KEY`` secret and prefer
+  a firewall / reverse proxy in front of it."""
+  return os.getenv("DIRECT_INVOKE_HOST", "127.0.0.1")
+
+
+def direct_invoke_max_chars() -> int:
+  """Maximum length of the ``q`` prompt accepted by the direct-invoke endpoint
+  (requests above this are rejected). Defaults to ``PROMPT_MAX_CHARS``."""
+  return _parse_positive_int(os.getenv("DIRECT_INVOKE_MAX_CHARS"), PROMPT_MAX_CHARS)
+

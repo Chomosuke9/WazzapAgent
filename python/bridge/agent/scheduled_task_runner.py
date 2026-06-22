@@ -8,6 +8,12 @@ it appends a ``[SCHEDULED TASK]`` system message to the chat history deque, call
 ``responder.generate(...)`` (always responding — no LLM1 gating), and dispatches
 the resulting actions through the gateway ``send_*`` helpers.
 
+The re-invoke + dispatch machinery itself lives in the shared
+:class:`~bridge.agent.chat_reinvoker.ChatReinvoker` (also used by the
+direct-invoke HTTP endpoint); this runner owns ONLY the scheduling concern
+(persist / arm timers / one-shot fire) and delegates the actual LLM2 re-invoke
+to it with the scheduled-task label + instruction block.
+
 Scheduled tasks survive a gateway/bridge restart: rows are persisted, and
 :meth:`rearm_pending` re-arms every stored row on session start (firing
 immediately for any already past due). Each fire is ONE-SHOT — the row is
@@ -24,38 +30,25 @@ import asyncio
 import time
 from typing import Callable, Optional
 
-from ..history import (
-  WhatsAppMessage,
-  assistant_name,
-  assistant_sender_ref,
-  hydrate_quoted_from_history,
-)
 from ..log import setup_logging
-from ..llm.prompt import build_memory_block, render_stored_mentions
-from ..stickers import resolve_sticker
-from ..messaging.processing import (
-  _append_history,
-  _collect_context_ids,
-  _make_request_id,
-  _normalize_context_msg_id,
-  _normalize_preview_text,
-  extract_first_code_block,
-)
-from ..messaging.actions import (
-  _extract_actions,
-  _extract_actions_from_tool_calls,
-)
-from ..messaging.gateway import (
-  _dispatch_sticker,
-  send_copy_code,
-  send_delete_message,
-  send_kick_member,
-  send_message,
-  send_react_message,
-  typing_indicator,
-)
+from .chat_reinvoker import ChatReinvoker
 
 logger = setup_logging()
+
+
+# Scheduled-task re-invoke instruction block (the slot LLM2 sees right before
+# the message window). Kept module-level so the wording is stable + greppable.
+_SCHEDULED_BLOCK_TITLE = "Scheduled task firing now"
+_SCHEDULED_BLOCK_INSTRUCTIONS = (
+  "Instructions for this re-invoke:\n"
+  "- A previously scheduled task is firing NOW. Carry it out and respond "
+  "in this chat.\n"
+  "- Send the appropriate reply_message (and/or tools) to fulfil the "
+  "task in the chat's language and WhatsApp formatting.\n"
+  "- If the task names someone to remind/tag, use the "
+  "`@Name (senderRef)` mention format so they get tagged.\n"
+  "- Do not ask for confirmation — just perform the task."
+)
 
 
 class ScheduledTaskRunner:
@@ -72,15 +65,22 @@ class ScheduledTaskRunner:
     track_task: Callable[[asyncio.Task], None],
     get_prompt: Optional[Callable[[str], Optional[str]]] = None,
     record_stat: Optional[Callable[..., None]] = None,
+    reinvoker: Optional[ChatReinvoker] = None,
   ) -> None:
     self._repository = repository
-    self._ws = ws
-    self._responder = responder
-    self._per_chat = per_chat
-    self._per_chat_lock = per_chat_lock
     self._track_task = track_task
-    self._get_prompt = get_prompt
-    self._record_stat = record_stat
+    # The shared re-invoke engine. A caller (the session) may inject ONE shared
+    # instance so the scheduled-task and direct-invoke paths reuse it; if not
+    # provided we build our own from the same deps (keeps the legacy
+    # constructor signature working for existing unit tests).
+    self._reinvoker = reinvoker or ChatReinvoker(
+      ws=ws,
+      responder=responder,
+      per_chat=per_chat,
+      per_chat_lock=per_chat_lock,
+      get_prompt=get_prompt,
+      record_stat=record_stat,
+    )
 
   # ------------------------------------------------------------------ #
   # Public API
@@ -167,7 +167,14 @@ class ScheduledTaskRunner:
     is still deleted to avoid an infinite retry loop.
     """
     try:
-      await self._execute(task)
+      await self._reinvoker.reinvoke(
+        task.chat_id,
+        task.prompt,
+        system_label="SCHEDULED TASK",
+        block_title=_SCHEDULED_BLOCK_TITLE,
+        block_instructions=_SCHEDULED_BLOCK_INSTRUCTIONS,
+        log_kind="scheduled task",
+      )
     except asyncio.CancelledError:
       raise
     except Exception as err:  # pylint: disable=broad-except
@@ -177,183 +184,3 @@ class ScheduledTaskRunner:
       self._repository.delete(task.id)
     except Exception as err:  # pylint: disable=broad-except
       logger.warning("scheduled task delete failed id=%s: %s", task.id, err)
-
-  async def _execute(self, task) -> None:
-    chat_id = task.chat_id
-    lock = self._per_chat_lock[chat_id]
-    async with lock:
-      history = self._per_chat[chat_id]
-      scheduled_text = f"[SCHEDULED TASK]\n{render_stored_mentions(task.prompt, chat_id)}"
-      # Append the scheduled instruction to history as a system turn so the
-      # model sees it as the latest context (mirrors [SUBTASK FINISHED]).
-      history.append(WhatsAppMessage(
-        timestamp_ms=int(time.time() * 1000),
-        sender="system",
-        text=scheduled_text,
-        role="system",
-      ))
-
-      # Reconstruct a MINIMAL context for this cold (timer) fire.
-      chat_type = "group" if chat_id.endswith("@g.us") else "private"
-      db_prompt = None
-      if self._get_prompt is not None:
-        try:
-          db_prompt = render_stored_mentions(self._get_prompt(chat_id), chat_id)
-        except Exception:  # pylint: disable=broad-except
-          db_prompt = None
-      group_description = None
-      bot_is_admin = False
-      bot_is_super_admin = False
-
-      current = WhatsAppMessage(
-        timestamp_ms=int(time.time() * 1000),
-        sender="system",
-        context_msg_id="system",
-        sender_ref=assistant_sender_ref(),
-        text=scheduled_text,
-        role="system",
-      )
-      scheduled_task_block = (
-        "## Scheduled task firing now\n"
-        f"{scheduled_text}\n\n"
-        "Instructions for this re-invoke:\n"
-        "- A previously scheduled task is firing NOW. Carry it out and respond "
-        "in this chat.\n"
-        "- Send the appropriate reply_message (and/or tools) to fulfil the "
-        "task in the chat's language and WhatsApp formatting.\n"
-        "- If the task names someone to remind/tag, use the "
-        "`@Name (senderRef)` mention format so they get tagged.\n"
-        "- Do not ask for confirmation — just perform the task."
-      )
-
-      allowed_context_ids = _collect_context_ids(history)
-      fallback_reply_to = None
-      reinvoke_history = list(history)
-      reply_msg = None
-      try:
-        async with typing_indicator(self._ws, chat_id):
-          reply_msg = await self._responder.generate(
-            reinvoke_history,
-            current,
-            current_payload={"chatId": chat_id, "chatType": chat_type},
-            group_description=group_description,
-            prompt_override=db_prompt,
-            chat_type=chat_type,
-            bot_is_admin=bot_is_admin,
-            bot_is_super_admin=bot_is_super_admin,
-            allow_subagent=False,
-            scheduled_task_block=scheduled_task_block,
-            memory_block=build_memory_block(chat_id),
-          )
-      except Exception as gen_err:  # pylint: disable=broad-except
-        logger.exception(
-          "scheduled task: LLM2 re-invoke failed id=%s: %s", task.id, gen_err,
-          extra={"chat_id": chat_id},
-        )
-        reply_msg = None
-
-      if reply_msg is None:
-        logger.warning(
-          "scheduled task: LLM2 produced no reply id=%s",
-          task.id, extra={"chat_id": chat_id},
-        )
-        return
-
-      tool_calls = getattr(reply_msg, "tool_calls", None) or []
-      if tool_calls:
-        actions = _extract_actions_from_tool_calls(
-          tool_calls,
-          fallback_reply_to=fallback_reply_to,
-          allowed_context_ids=allowed_context_ids,
-        )
-      else:
-        actions = _extract_actions(
-          reply_msg,
-          fallback_reply_to=fallback_reply_to,
-          allowed_context_ids=allowed_context_ids,
-        )
-
-      await self._dispatch_actions(chat_id, history, actions)
-
-  async def _dispatch_actions(self, chat_id: str, history, actions: list) -> None:
-    """Dispatch the LLM2 actions from a scheduled fire (subset mirror of the
-    sub-agent re-invoke dispatch)."""
-    for action in actions:
-      action_type = action.get("type")
-      if action_type == "send_message":
-        text = action.get("text") or ""
-        request_id = _make_request_id("send")
-        await send_message(
-          self._ws, chat_id, text, action.get("replyTo"), request_id=request_id,
-        )
-        if self._record_stat is not None:
-          self._record_stat(chat_id, "responses_sent")
-        _prov = WhatsAppMessage(
-          timestamp_ms=int(time.time() * 1000),
-          sender=assistant_name(),
-          context_msg_id="pending",
-          sender_ref=assistant_sender_ref(),
-          sender_is_admin=False,
-          text=text or None,
-          media=None,
-          quoted_message_id=_normalize_context_msg_id(action.get("replyTo")),
-          quoted_sender=None,
-          quoted_text=None,
-          quoted_media=None,
-          quoted_sender_ref=None,
-          quoted_sender_is_admin=False,
-          quoted_sender_is_super_admin=False,
-          message_id=f"local-send-{request_id}",
-          role="assistant",
-        )
-        hydrate_quoted_from_history(_prov, history)
-        _append_history(history, _prov)
-        _code = extract_first_code_block(text)
-        if _code:
-          await send_copy_code(
-            self._ws, chat_id, _code,
-            quoted_preview_text=_normalize_preview_text(_code, limit=120),
-            request_id=_make_request_id("copy"),
-          )
-      elif action_type == "react_message":
-        await send_react_message(
-          self._ws, chat_id,
-          action.get("contextMsgId"), action.get("emoji"),
-          request_id=_make_request_id("react"),
-        )
-      elif action_type in ("express_message", "send_sticker"):
-        expression = str(
-          action.get("expression") or action.get("stickerName") or ""
-        ).strip()
-        target = action.get("contextMsgId") or action.get("replyTo")
-        if not expression:
-          continue
-        sticker_info = resolve_sticker(expression, chat_id=chat_id)
-        if sticker_info:
-          await _dispatch_sticker(
-            self._ws, chat_id, sticker_info, target,
-            request_id=_make_request_id("sticker"),
-          )
-          if self._record_stat is not None:
-            self._record_stat(chat_id, "stickers_sent")
-        elif action_type == "express_message":
-          await send_react_message(
-            self._ws, chat_id, action.get("contextMsgId"), expression,
-            request_id=_make_request_id("react"),
-          )
-      elif action_type == "delete_message":
-        await send_delete_message(
-          self._ws, chat_id, action.get("contextMsgId"),
-          request_id=_make_request_id("delete"),
-        )
-      elif action_type == "kick_member":
-        await send_kick_member(
-          self._ws, chat_id, action.get("targets") or [],
-          request_id=_make_request_id("kick"),
-          mode=action.get("mode") or "partial_success",
-        )
-      else:
-        logger.debug(
-          "scheduled task: ignoring unsupported action type=%s", action_type,
-          extra={"chat_id": chat_id},
-        )
