@@ -162,7 +162,7 @@ src/                          Node.js gateway runtime (WS SERVER, TypeScript)
       prompt.ts               /prompt <text> — Set per-chat system prompt override
       removesticker.ts        /remove-sticker <name> — Remove sticker from catalog
       reset.ts                /reset — Clear chat memory (/reset global = all chats)
-      revoke.ts               /revoke — Revoke group invite link (owner only)
+      revoke.ts               /revoke — Revoke activation code(s) from /generate: single id, list (1,2,3), or 'unused' (owner only)
       setting.ts              /setting — Show/edit per-chat settings
       sticker.ts              /sticker [upper#lower] — Create meme sticker (ffmpeg/sharp)
       subagent.ts             /subagent <on|off> — Toggle sub-agent per chat

@@ -373,6 +373,150 @@ describe('activation extension (re-activate with new code)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Batch + unused revocation (repository)
+// ---------------------------------------------------------------------------
+
+describe('revokeActivationCodes (batch)', () => {
+  it('revokes multiple ids and reports not-found ones', () => {
+    const c1 = db.generateActivationCode('private', 30, 'owner@test');
+    const c2 = db.generateActivationCode('private', 30, 'owner@test');
+    const c3 = db.generateActivationCode('private', 30, 'owner@test');
+
+    const result = db.revokeActivationCodes([c1.id, c3.id, 987654]);
+    assert.equal(result.revoked.length, 2);
+    assert.deepEqual(result.revoked.map((r) => r.id).sort((a, b) => a - b), [c1.id, c3.id].sort((a, b) => a - b));
+    assert.deepEqual(result.notFound, [987654]);
+
+    const ids = db.getAllActivationCodes().map((c) => c.id);
+    assert.ok(!ids.includes(c1.id), 'c1 should be gone');
+    assert.ok(ids.includes(c2.id), 'c2 should remain');
+    assert.ok(!ids.includes(c3.id), 'c3 should be gone');
+  });
+
+  it('cascades chat deactivation for a used code in the batch', () => {
+    const used = db.generateActivationCode('private', 30, 'owner@test');
+    db.activateChat('batchrevoke@s.whatsapp.net', used.code, 'private');
+    const unused = db.generateActivationCode('private', 30, 'owner@test');
+
+    const result = db.revokeActivationCodes([used.id, unused.id]);
+    const usedEntry = result.revoked.find((r) => r.id === used.id);
+    assert.ok(usedEntry);
+    assert.equal(usedEntry.wasUsed, true);
+    assert.equal(usedEntry.usedBy, 'batchrevoke@s.whatsapp.net');
+    assert.equal(db.isChatActivated('batchrevoke@s.whatsapp.net'), false);
+  });
+});
+
+describe('revokeUnusedActivationCodes', () => {
+  it('removes every unused code but keeps used ones', () => {
+    const u1 = db.generateActivationCode('private', 30, 'owner@test');
+    const u2 = db.generateActivationCode('group', 0, 'owner@test');
+    const usedCode = db.generateActivationCode('private', 30, 'owner@test');
+    db.activateChat('keepme@s.whatsapp.net', usedCode.code, 'private');
+
+    db.revokeUnusedActivationCodes();
+
+    const codes = db.getAllActivationCodes();
+    const ids = codes.map((c) => c.id);
+    assert.ok(!ids.includes(u1.id), 'unused u1 should be gone');
+    assert.ok(!ids.includes(u2.id), 'unused u2 should be gone');
+    assert.ok(ids.includes(usedCode.id), 'used code should remain');
+    // Global invariant: no unused codes remain anywhere.
+    assert.equal(codes.filter((c) => !c.used).length, 0, 'no unused codes should remain');
+    // The used chat keeps access.
+    assert.equal(db.isChatActivated('keepme@s.whatsapp.net'), true);
+  });
+
+  it('is a no-op (empty revoked) when there are no unused codes', () => {
+    // Previous test already cleared unused codes; ensure idempotency.
+    db.revokeUnusedActivationCodes();
+    const result = db.revokeUnusedActivationCodes();
+    assert.equal(result.revoked.length, 0);
+    assert.deepEqual(result.notFound, []);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// /revoke command handler (single / multiple / unused / invalid)
+// ---------------------------------------------------------------------------
+
+describe('/revoke command handler', () => {
+  async function runRevoke(args) {
+    const sent = [];
+    const sock = {
+      sendMessage: async (_chatId, msg) => {
+        sent.push(msg.text);
+      },
+    };
+    const { handleRevoke } = await import('../../src/wa/commands/revoke.ts');
+    await handleRevoke({ chatId: 'owner@test', args, sock, repos: { activation: db } });
+    return sent.join('\n');
+  }
+
+  it('shows usage when no args are given', async () => {
+    const out = await runRevoke('');
+    assert.ok(out.toLowerCase().includes('usage'), `expected usage text, got: ${out}`);
+    assert.ok(out.includes('unused'), 'usage should mention the unused form');
+  });
+
+  it('revokes a single id', async () => {
+    const c = db.generateActivationCode('private', 30, 'owner@test');
+    const out = await runRevoke(String(c.id));
+    assert.ok(out.includes(`#${c.id}`), `reply should mention #${c.id}, got: ${out}`);
+    assert.ok(out.toLowerCase().includes('revoked'), 'reply should confirm revocation');
+    assert.ok(!db.getAllActivationCodes().some((x) => x.id === c.id), 'code should be gone');
+  });
+
+  it('revokes multiple comma-separated ids', async () => {
+    const a = db.generateActivationCode('private', 30, 'owner@test');
+    const b = db.generateActivationCode('private', 30, 'owner@test');
+    const c = db.generateActivationCode('private', 30, 'owner@test');
+    const out = await runRevoke(`${a.id},${b.id},${c.id}`);
+    assert.ok(out.includes('Revoked 3 activation codes'), `got: ${out}`);
+    for (const code of [a, b, c]) {
+      assert.ok(out.includes(`#${code.id}`), `reply should mention #${code.id}`);
+      assert.ok(!db.getAllActivationCodes().some((x) => x.id === code.id), `#${code.id} should be gone`);
+    }
+  });
+
+  it('revokes space-separated ids too', async () => {
+    const a = db.generateActivationCode('private', 30, 'owner@test');
+    const b = db.generateActivationCode('private', 30, 'owner@test');
+    const out = await runRevoke(`${a.id} ${b.id}`);
+    assert.ok(out.includes('Revoked 2 activation codes'), `got: ${out}`);
+  });
+
+  it('handles /revoke unused', async () => {
+    const u1 = db.generateActivationCode('private', 30, 'owner@test');
+    const u2 = db.generateActivationCode('private', 30, 'owner@test');
+    const out = await runRevoke('unused');
+    assert.ok(out.toLowerCase().includes('unused'), `got: ${out}`);
+    assert.ok(!db.getAllActivationCodes().some((x) => x.id === u1.id), 'u1 gone');
+    assert.ok(!db.getAllActivationCodes().some((x) => x.id === u2.id), 'u2 gone');
+    assert.equal(db.getAllActivationCodes().filter((c) => !c.used).length, 0);
+  });
+
+  it('reports when unused has nothing to revoke', async () => {
+    await runRevoke('unused');
+    const out = await runRevoke('unused');
+    assert.ok(out.toLowerCase().includes('no unused'), `got: ${out}`);
+  });
+
+  it('mixes valid ids and reports invalid + not-found', async () => {
+    const c = db.generateActivationCode('private', 30, 'owner@test');
+    const out = await runRevoke(`${c.id},abc,987654`);
+    assert.ok(out.includes(`#${c.id}`), 'should revoke the valid id');
+    assert.ok(out.includes('Not found: #987654'), `should report not-found, got: ${out}`);
+    assert.ok(out.toLowerCase().includes('abc'), `should report invalid token, got: ${out}`);
+  });
+
+  it('rejects when no valid ids are given', async () => {
+    const out = await runRevoke('abc,xyz');
+    assert.ok(out.toLowerCase().includes('no valid id'), `got: ${out}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Config tests
 // ---------------------------------------------------------------------------
 

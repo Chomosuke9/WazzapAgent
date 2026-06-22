@@ -84,7 +84,7 @@ The following commands are restricted to JIDs listed in `BOT_OWNER_JIDS`:
 |---------|--------|
 | `/broadcast` | Sends a message to every group — destructive if abused |
 | `/generate` | Generates activation codes for chat activation |
-| `/revoke` | Revokes an activation code by ID |
+| `/revoke` | Revokes activation code(s) by ID, a comma list (`1,2,3`), or `unused` |
 | `/monitor` | Shows sensitive dashboard data |
 | `/modelcfg` | Manages the global model registry |
 | `/debug` | Sends test interactive payloads; exposes internal state |

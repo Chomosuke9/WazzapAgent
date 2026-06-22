@@ -67,6 +67,18 @@ interface RevokeActivationCodeResult {
   usedBy?: string | null;
 }
 
+interface RevokedCode {
+  id: number;
+  code: string;
+  wasUsed: boolean;
+  usedBy: string | null;
+}
+
+interface BatchRevokeResult {
+  revoked: RevokedCode[];
+  notFound: number[];
+}
+
 export class ActivationRepository extends BaseRepository {
   generateActivationCode(
     type: string,
@@ -268,24 +280,71 @@ export class ActivationRepository extends BaseRepository {
   }
 
   revokeActivationCode(id: number): RevokeActivationCodeResult {
-    this.ensureSettingsDbReady();
-    const rows = queryRows<Pick<ActivationCodeRow, "id" | "code" | "used" | "used_by">>(
-      this.settingsState.db!,
-      "SELECT id, code, used, used_by FROM activation_codes WHERE id = ?",
-      id,
-    );
-    if (rows.length === 0) {
+    const { revoked, notFound } = this.revokeActivationCodes([id]);
+    if (notFound.length > 0 || revoked.length === 0) {
       return { success: false, message: "Activation code not found." };
     }
-    const codeRow = rows[0];
-    const wasUsed = codeRow.used === 1;
-    const usedBy = codeRow.used_by;
-    this.runSettingsQuery("DELETE FROM activation_codes WHERE id = ?", id);
-    if (wasUsed) {
-      this.runSettingsQuery("DELETE FROM chat_activations WHERE code = ?", codeRow.code);
+    const r = revoked[0];
+    return {
+      success: true,
+      message: "Activation code revoked.",
+      wasUsed: r.wasUsed,
+      usedBy: r.usedBy,
+    };
+  }
+
+  /**
+   * Revoke several activation codes at once (e.g. `/revoke 1,2,3`). Each id is
+   * deleted; a used code additionally drops its `chat_activations` row so the
+   * chat loses access (same cascade as the single-id path). Ids with no
+   * matching row are returned in `notFound` rather than aborting the batch.
+   */
+  revokeActivationCodes(ids: number[]): BatchRevokeResult {
+    this.ensureSettingsDbReady();
+    const revoked: RevokedCode[] = [];
+    const notFound: number[] = [];
+    for (const id of ids) {
+      const rows = queryRows<
+        Pick<ActivationCodeRow, "id" | "code" | "used" | "used_by">
+      >(
+        this.settingsState.db!,
+        "SELECT id, code, used, used_by FROM activation_codes WHERE id = ?",
+        id,
+      );
+      if (rows.length === 0) {
+        notFound.push(id);
+        continue;
+      }
+      const codeRow = rows[0];
+      const wasUsed = codeRow.used === 1;
+      this.runSettingsQuery("DELETE FROM activation_codes WHERE id = ?", id);
+      if (wasUsed) {
+        this.runSettingsQuery(
+          "DELETE FROM chat_activations WHERE code = ?",
+          codeRow.code,
+        );
+      }
+      revoked.push({ id, code: codeRow.code, wasUsed, usedBy: codeRow.used_by });
     }
-    logger.info({ id, code: codeRow.code, wasUsed, usedBy }, "DB revoke_activation_code");
-    return { success: true, message: "Activation code revoked.", wasUsed, usedBy };
+    logger.info(
+      { revoked: revoked.map((r) => r.id), notFound },
+      "DB revoke_activation_codes",
+    );
+    return { revoked, notFound };
+  }
+
+  /**
+   * Revoke every activation code that has not yet been used (`used = 0`). Used
+   * codes are left untouched so no activated chat loses access. Returns the
+   * same {@link BatchRevokeResult} shape (`notFound` is always empty here).
+   */
+  revokeUnusedActivationCodes(): BatchRevokeResult {
+    this.ensureSettingsDbReady();
+    const unusedIds = queryRows<Pick<ActivationCodeRow, "id">>(
+      this.settingsState.db!,
+      "SELECT id FROM activation_codes WHERE used = 0 ORDER BY id ASC",
+    ).map((r) => r.id);
+    return this.revokeActivationCodes(unusedIds);
   }
 
   markExpiryNotified(chatId: string): void {

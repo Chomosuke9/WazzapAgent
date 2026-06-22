@@ -33,7 +33,7 @@ All commands start with `/` (forward slash). In groups, most commands can only b
 | `/prompt` | View/set/clear the bot prompt | Admin (group), Anyone (private) |
 | `/remove-sticker <name>` | Remove a sticker from the catalog | Admin (group), Anyone (private) |
 | `/reset` | Reset bot memory | Admin (group), Anyone (private) |
-| `/revoke [n]` | Revoke the group invite link | Bot owner only |
+| `/revoke <id\|ids\|unused>` | Revoke activation code(s) from /generate | Bot owner only |
 | `/schedule-task <nnHnnM> <prompt>` | Schedule the bot to run a prompt later | Everyone |
 | `/setting` | View/edit per-chat settings (incl. response mode) | Admin (group), Anyone (private) |
 | `/sticker [bottom#top]` | Create a sticker from an image/video | Everyone |
@@ -365,11 +365,15 @@ Use `/reset global` to clear memory across all chats at once (owner only).
 
 ## `/revoke`
 
-Revokes the current **group invite link** and creates a fresh one. Useful when the old link has leaked. Optionally repeat several times.
+Revokes activation codes created by [`/generate`](#generate). Run [`/monitor`](#monitor) to see the list of code IDs.
 
 ```
-/revoke 3
+/revoke 5            # revoke a single code
+/revoke 1,2,3        # revoke several codes at once
+/revoke unused       # revoke every code that hasn't been used yet
 ```
+
+Revoking a code that was **already used** also removes the activation from the chat that used it, so that chat loses access. `/revoke unused` only touches codes that were never used, so no active chat is affected.
 
 :::warning
 Can only be used by the **bot owner**.
