@@ -64,7 +64,7 @@ Adds a sticker to the **bot catalog** by replying to a sticker and naming it. Th
 /add-sticker cute cat
 ```
 
-Use `/add-sticker global <name>` to add to the global catalog for all chats (owner only).
+Use `/add-sticker default <name>` (or `global`) to add to the shared catalog for all chats (owner only).
 
 ---
 
@@ -342,7 +342,7 @@ Removes a sticker from the **bot catalog** by name.
 /remove-sticker cute cat
 ```
 
-Use `/remove-sticker global <name>` to remove from the global catalog (owner only).
+Use `/remove-sticker default <name>` (or `global`) to remove from the shared catalog (owner only).
 
 ---
 

@@ -172,6 +172,17 @@ User-uploaded sticker catalog (5th separate DB to isolate from settings):
 Primary key: `(chat_id, name)`.
 
 ## Environment variable paths
+
+> **Per-tenant layout (CONTRACT.md §8).** In normal operation every tenant's
+> SQLite DBs live under `<folder_path>/db/` — e.g. `<folder_path>/db/stickers.db`,
+> `<folder_path>/db/settings.db`. Both the Node gateway (`src/db/Database.ts`,
+> `src/wa/commands/stickerStore.ts`) and the Python bridge
+> (`python/bridge/db/core.py`, `sticker_db.py`) resolve this same per-tenant path,
+> so the two processes always read/write the same files. The `*_DB_PATH` env
+> vars below are the **legacy no-tenant fallback** (used only when no tenant is
+> bound); they are ignored once a tenant is bound, which is always the case for
+> the running bridge.
+
 - `DATA_DIR` — Runtime data directory (default: `./data`)
 - `MEDIA_DIR` — Downloaded media directory (default: `./data/media`)
 - `STICKERS_DIR` — Sticker catalog directory (default: `./data/stickers`)
@@ -179,7 +190,7 @@ Primary key: `(chat_id, name)`.
 - `STATS_DB_PATH` — Path to `stats.db` (default: `data/stats.db`)
 - `MODERATION_DB_PATH` — Path to `moderation.db` (default: `data/moderation.db`)
 - `SUBAGENT_DB_PATH` — Path to `subagent.db` (default: `data/subagent.db`)
-- `STICKERS_DB_PATH` — Path to `stickers.db` (default: `data/stickers.db`)
+- `STICKERS_DB_PATH` — Legacy fallback for `stickers.db` (per-tenant: `<folder_path>/db/stickers.db`)
 - `STICKER_UPLOAD_DIR` — User-uploaded sticker directory (default: `data/stickers_user`)
 - `BOT_SETTINGS_DB_PATH` — Override for Python's `settings.db` path
 - `BOT_STATS_DB_PATH` — Override for Python's `stats.db` path

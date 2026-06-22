@@ -12,53 +12,13 @@
  *   `/remove-sticker global <name>` — remove from the global catalog (owner only)
  */
 
-import path from 'path';
-import fs from 'fs-extra';
-import Database from 'better-sqlite3';
 import logger from '../../logger.js';
-import config from '../../config.js';
+import {
+  STICKER_NAME_RE,
+  parseStickerScope,
+  deleteSticker,
+} from './stickerStore.js';
 import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
-
-// ---------------------------------------------------------------------------
-// Constants (must mirror addsticker.js and sticker_db.py)
-// ---------------------------------------------------------------------------
-
-const STICKER_NAME_RE = /^[a-z0-9_\-]{1,64}$/;
-const GLOBAL_STICKER_CHAT_ID = '__global__';
-
-const STICKERS_DB_PATH = config.stickersDbPath;
-
-// ---------------------------------------------------------------------------
-// DB helper (lazy-open, shared WAL config)
-// ---------------------------------------------------------------------------
-
-let _db: any = null;
-
-function getDb(): any {
-  if (_db) return _db;
-  fs.ensureDirSync(path.dirname(STICKERS_DB_PATH));
-  _db = new Database(STICKERS_DB_PATH, { timeout: 30000 });
-  _db.pragma('journal_mode = WAL');
-  _db.pragma('synchronous = FULL');
-  _db.pragma('busy_timeout = 30000');
-  _db.pragma('foreign_keys = ON');
-  return _db;
-}
-
-// ---------------------------------------------------------------------------
-// DB write helper
-// ---------------------------------------------------------------------------
-
-/**
- * Delete a sticker row. Returns true if a row was deleted.
- */
-function deleteSticker(chatId: string, name: string): boolean {
-  const db = getDb();
-  const result = db.prepare(
-    'DELETE FROM stickers WHERE chat_id = ? AND name = ?',
-  ).run(chatId, name);
-  return result.changes > 0;
-}
 
 // ---------------------------------------------------------------------------
 // Command handler
@@ -69,6 +29,7 @@ async function handleRemoveSticker({
   senderIsOwner,
   args,
   sock,
+  folderPath,
 }: CommandContext): Promise<void> {
 
   async function reply(text: string): Promise<void> {
@@ -80,19 +41,16 @@ async function handleRemoveSticker({
   }
 
   // ------------------------------------------------------------------
-  // 1. Parse global flag
+  // 1. Parse scope (`global` | `default` → shared catalog; else per-chat)
   // ------------------------------------------------------------------
-  const rawArgs = (args || '').trim();
-  const parts = rawArgs.split(/\s+/);
-  const isGlobal = parts[0]?.toLowerCase() === 'global';
-  const nameArg = isGlobal ? parts.slice(1).join(' ').trim() : rawArgs;
-  const targetChatId = isGlobal ? GLOBAL_STICKER_CHAT_ID : chatId;
+  const { isShared, targetChatId, name: nameArg, label: scopeLabel } =
+    parseStickerScope(args, chatId);
 
   // ------------------------------------------------------------------
   // 2. Permission check
   // ------------------------------------------------------------------
-  if (isGlobal && !senderIsOwner) {
-    await reply('Only the bot owner can remove global stickers. ❌');
+  if (isShared && !senderIsOwner) {
+    await reply('Only the bot owner can remove shared stickers. ❌');
     return;
   }
 
@@ -105,7 +63,7 @@ async function handleRemoveSticker({
       'Usage: `/remove-sticker <name>`\n\n'
       + 'The name must be lowercase letters, digits, underscore or minus (max 64 characters).\n'
       + 'Example: `/remove-sticker smile`\n\n'
-      + '_Owner only:_ `/remove-sticker global <name>` — remove from the global catalog.',
+      + '_Owner only:_ `/remove-sticker default <name>` (or `global`) — remove from the shared catalog.',
     );
     return;
   }
@@ -121,11 +79,10 @@ async function handleRemoveSticker({
   // ------------------------------------------------------------------
   // 4. Delete from DB
   // ------------------------------------------------------------------
-  const globalLabel = isGlobal ? ' global' : '';
   let deleted = false;
 
   try {
-    deleted = deleteSticker(targetChatId, rawName);
+    deleted = deleteSticker(folderPath, targetChatId, rawName);
   } catch (err: any) {
     logger.error({ err, chatId, targetChatId, name: rawName }, 'remove-sticker: db delete failed');
     await reply(`Failed to remove sticker: ${err.message} ❌`);
@@ -133,23 +90,23 @@ async function handleRemoveSticker({
   }
 
   if (!deleted) {
-    await reply(`Sticker${globalLabel} *${rawName}* not found. ❌`);
+    await reply(`Sticker${scopeLabel} *${rawName}* not found. ❌`);
     return;
   }
 
   logger.info(
-    { chatId, targetChatId, name: rawName, isGlobal },
+    { chatId, targetChatId, name: rawName, isShared },
     'remove-sticker: sticker removed',
   );
 
-  await reply(`Sticker${globalLabel} *${rawName}* removed successfully. ✅`);
+  await reply(`Sticker${scopeLabel} *${rawName}* removed successfully. ✅`);
 }
 
 export { handleRemoveSticker };
 
 export const removeStickerCommand: CommandHandler = {
   commands: ["remove-sticker", "remove-stickers", "removesticker", "removestickers"],
-  description: "Remove a sticker from the bot's catalog by its name. Use /remove-sticker global <name> to remove it from the global catalog (owner only). Example: /remove-sticker funny cat.",
+  description: "Remove a sticker from the bot's catalog by its name. Use /remove-sticker default <name> (or global) to remove it from the shared catalog (owner only). Example: /remove-sticker funny_cat.",
   permission: "isPrivate or isAdmin or isOwner",
   run: (_sock, _message, ctx) => handleRemoveSticker(ctx),
 };

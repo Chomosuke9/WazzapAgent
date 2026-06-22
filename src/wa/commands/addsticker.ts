@@ -26,71 +26,22 @@
 
 import path from "path";
 import fs from "fs-extra";
-import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
 import logger from "../../logger.js";
 import { unwrapMessage } from "../domain/messageParser.js";
 import { downloadMediaToFile } from "../../mediaHandler.js";
 import config from "../../config.js";
 import { withTimeout } from "../utils.js";
+import {
+  STICKER_NAME_RE,
+  parseStickerScope,
+  upsertWebpSticker,
+  upsertLottieSticker,
+} from "./stickerStore.js";
 import type {
   CommandContext,
   CommandHandler,
 } from "../command/CommandContext.js";
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const STICKER_NAME_RE = /^[a-z0-9_\-]{1,64}$/;
-
-// Must match GLOBAL_STICKER_CHAT_ID in Python's sticker_db.py
-const GLOBAL_STICKER_CHAT_ID = "__global__";
-
-// DB path mirrors what Python's sticker_db.py resolves to
-const STICKERS_DB_PATH = config.stickersDbPath;
-
-// Directory where uploaded sticker files are stored persistently
-const STICKER_UPLOAD_DIR = config.stickerUploadDir;
-
-// ---------------------------------------------------------------------------
-// DB helpers (lazy-open, WAL mode)
-// ---------------------------------------------------------------------------
-
-let _db: any = null;
-
-function getDb(): any {
-  if (_db) return _db;
-  fs.ensureDirSync(path.dirname(STICKERS_DB_PATH));
-  _db = new Database(STICKERS_DB_PATH, { timeout: 30000 });
-  _db.pragma("journal_mode = WAL");
-  _db.pragma("synchronous = FULL");
-  _db.pragma("busy_timeout = 30000");
-  _db.pragma("foreign_keys = ON");
-  _db.exec(`
-    CREATE TABLE IF NOT EXISTS stickers (
-      id             INTEGER PRIMARY KEY AUTOINCREMENT,
-      chat_id        TEXT    NOT NULL,
-      name           TEXT    NOT NULL,
-      file_path      TEXT    NOT NULL DEFAULT '',
-      lottie_payload TEXT    DEFAULT NULL,
-      added_by       TEXT    NOT NULL DEFAULT '',
-      added_at       TEXT    NOT NULL DEFAULT (datetime('now')),
-      UNIQUE(chat_id, name)
-    );
-    CREATE INDEX IF NOT EXISTS idx_stickers_chat
-      ON stickers (chat_id, name);
-  `);
-  // Migration: add lottie_payload column for existing installs
-  try {
-    _db.exec(
-      `ALTER TABLE stickers ADD COLUMN lottie_payload TEXT DEFAULT NULL`,
-    );
-  } catch {
-    /* column already exists */
-  }
-  return _db;
-}
 
 // ---------------------------------------------------------------------------
 // Sticker type detection
@@ -185,7 +136,7 @@ async function persistStickerFile(
   tempPath: string,
   chatId: string,
   name: string,
-  uploadDir: string = STICKER_UPLOAD_DIR,
+  uploadDir: string = config.stickerUploadDir,
 ): Promise<string> {
   await fs.ensureDir(uploadDir);
   const { createHash } = await import("crypto");
@@ -194,64 +145,6 @@ async function persistStickerFile(
   const destPath = path.join(uploadDir, destFilename);
   await fs.copy(tempPath, destPath, { overwrite: true });
   return destPath;
-}
-
-// ---------------------------------------------------------------------------
-// DB write helpers
-// ---------------------------------------------------------------------------
-
-/** Register a regular (WebP) sticker. */
-function upsertWebpSticker(
-  chatId: string,
-  name: string,
-  filePath: string,
-  addedBy: string,
-): string {
-  const db = getDb();
-  const existing = db
-    .prepare("SELECT id FROM stickers WHERE chat_id = ? AND name = ?")
-    .get(chatId, name);
-
-  if (existing) {
-    db.prepare(
-      `UPDATE stickers
-       SET file_path = ?, lottie_payload = NULL, added_by = ?, added_at = datetime('now')
-       WHERE chat_id = ? AND name = ?`,
-    ).run(filePath, addedBy, chatId, name);
-    return "updated";
-  }
-  db.prepare(
-    `INSERT INTO stickers (chat_id, name, file_path, lottie_payload, added_by)
-     VALUES (?, ?, ?, NULL, ?)`,
-  ).run(chatId, name, filePath, addedBy);
-  return "added";
-}
-
-/** Register a Lottie sticker using its JSON payload (no file). */
-function upsertLottieSticker(
-  chatId: string,
-  name: string,
-  lottiePayloadJson: string,
-  addedBy: string,
-): string {
-  const db = getDb();
-  const existing = db
-    .prepare("SELECT id FROM stickers WHERE chat_id = ? AND name = ?")
-    .get(chatId, name);
-
-  if (existing) {
-    db.prepare(
-      `UPDATE stickers
-       SET file_path = '', lottie_payload = ?, added_by = ?, added_at = datetime('now')
-       WHERE chat_id = ? AND name = ?`,
-    ).run(lottiePayloadJson, addedBy, chatId, name);
-    return "updated";
-  }
-  db.prepare(
-    `INSERT INTO stickers (chat_id, name, file_path, lottie_payload, added_by)
-     VALUES (?, ?, '', ?, ?)`,
-  ).run(chatId, name, lottiePayloadJson, addedBy);
-  return "added";
 }
 
 // ---------------------------------------------------------------------------
@@ -266,6 +159,7 @@ async function handleAddSticker({
   msg,
   sock,
   account,
+  folderPath,
 }: CommandContext): Promise<void> {
   // Per-tenant media / sticker-upload dirs (CONTRACT.md §8): the staged temp
   // file and the persisted catalog sticker must live under THIS account's
@@ -283,19 +177,16 @@ async function handleAddSticker({
   }
 
   // ------------------------------------------------------------------
-  // 1. Parse global flag
+  // 1. Parse scope (`global` | `default` → shared catalog; else per-chat)
   // ------------------------------------------------------------------
-  const rawArgs = (args || "").trim();
-  const parts = rawArgs.split(/\s+/);
-  const isGlobal = parts[0]?.toLowerCase() === "global";
-  const nameArg = isGlobal ? parts.slice(1).join(" ").trim() : rawArgs;
-  const targetChatId = isGlobal ? GLOBAL_STICKER_CHAT_ID : chatId;
+  const { isShared, targetChatId, name: nameArg, label: scopeLabel } =
+    parseStickerScope(args, chatId);
 
   // ------------------------------------------------------------------
   // 2. Permission check
   // ------------------------------------------------------------------
-  if (isGlobal && !senderIsOwner) {
-    await reply("Only the bot owner can add global stickers. ❌");
+  if (isShared && !senderIsOwner) {
+    await reply("Only the bot owner can add shared stickers. ❌");
     return;
   }
 
@@ -309,7 +200,7 @@ async function handleAddSticker({
         "Send/reply to a sticker with that caption.\n\n" +
         "The name must be lowercase letters, digits, underscore or minus (max 64 characters).\n" +
         "Example: `/add-sticker smile`\n\n" +
-        "_Owner only:_ `/add-sticker global <name>` — add to the global catalog (all chats).",
+        "_Owner only:_ `/add-sticker default <name>` (or `global`) — add to the shared catalog (all chats).",
     );
     return;
   }
@@ -392,7 +283,6 @@ async function handleAddSticker({
   // 5. Save — Lottie: store JSON payload; regular: download file
   // ------------------------------------------------------------------
   const lottie = isLottieSticker(sourceMsgObj);
-  const globalLabel = isGlobal ? " global" : "";
 
   if (lottie) {
     // --- Lottie path: serialise payload JSON, no file download ---
@@ -402,6 +292,7 @@ async function handleAddSticker({
         stickerContent,
       );
       const action = upsertLottieSticker(
+        folderPath,
         targetChatId,
         rawName,
         lottiePayloadJson,
@@ -416,18 +307,18 @@ async function handleAddSticker({
           senderId,
           action,
           type: "lottie",
-          isGlobal,
+          isShared,
         },
         "addsticker: lottie sticker registered (payload saved, no file download)",
       );
 
       if (action === "updated") {
         await reply(
-          `Lottie sticker${globalLabel} *${rawName}* updated successfully! ✨✅`,
+          `Lottie sticker${scopeLabel} *${rawName}* updated successfully! ✨✅`,
         );
       } else {
         await reply(
-          `Lottie sticker${globalLabel} *${rawName}* added successfully! ✨✅\n` +
+          `Lottie sticker${scopeLabel} *${rawName}* added successfully! ✨✅\n` +
             "The bot can use this animated sticker fully.",
         );
       }
@@ -461,6 +352,7 @@ async function handleAddSticker({
       uploadDir,
     );
     const action = upsertWebpSticker(
+      folderPath,
       targetChatId,
       rawName,
       destPath,
@@ -475,18 +367,18 @@ async function handleAddSticker({
         senderId,
         action,
         type: "webp",
-        isGlobal,
+        isShared,
       },
       "addsticker: webp sticker registered",
     );
 
     if (action === "updated") {
       await reply(
-        `Sticker${globalLabel} *${rawName}* updated successfully! ✅`,
+        `Sticker${scopeLabel} *${rawName}* updated successfully! ✅`,
       );
     } else {
       await reply(
-        `Sticker${globalLabel} *${rawName}* added successfully! ✅\nThe bot can now use this sticker.`,
+        `Sticker${scopeLabel} *${rawName}* added successfully! ✅\nThe bot can now use this sticker.`,
       );
     }
   } catch (err: any) {
@@ -508,7 +400,7 @@ export { handleAddSticker };
 export const addStickerCommand: CommandHandler = {
   commands: ["add-sticker", "addsticker", "addstickers", "add-stickers"],
   description:
-    "Add a sticker to the bot's catalog by replying to a sticker and naming it. The bot can send stickers from this catalog using the send_sticker tool. Use /add-sticker global <name> to add it to the global catalog for all chats (owner only). Example: /add-sticker funny_cat.",
+    "Add a sticker to the bot's catalog by replying to a sticker and naming it. The bot can send stickers from this catalog using the send_sticker tool. Use /add-sticker default <name> (or global) to add it to the shared catalog for all chats (owner only). Example: /add-sticker funny_cat.",
   permission: "isPrivate or isAdmin or isOwner",
   run: (_sock, _message, ctx) => handleAddSticker(ctx),
 };
