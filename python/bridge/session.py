@@ -256,6 +256,7 @@ class AgentSession:
       per_chat_lock=self.per_chat_lock,
       get_prompt=db_get_prompt,
       record_stat=self._dashboard.record_stat,
+      pending_send_request_chat=self.pending_send_request_chat,
     )
     # --- Feature 5: scheduled-task runner (one-shot timers + re-invoke) ---
     # Persists `/schedule-task` rows in this tenant's settings.db and re-invokes

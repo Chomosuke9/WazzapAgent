@@ -10,13 +10,15 @@ real socket is bound.
 from __future__ import annotations
 
 import asyncio
-from collections import defaultdict, deque
+from collections import OrderedDict, defaultdict, deque
 
 from aiohttp.test_utils import make_mocked_request
 
 from bridge.db import tenant_db_context
 from bridge.agent.chat_reinvoker import ChatReinvoker
 from bridge.agent.direct_invoke import DirectInvokeServer, normalize_jid
+from bridge.messaging.ack_handler import handle_action_ack
+from wasocket.protocol import AckResult
 
 
 # --------------------------------------------------------------------------- #
@@ -267,5 +269,147 @@ def test_reinvoker_injects_direct_invoke_system_turn_and_block(tmp_path):
       # the [DIRECT INVOKE] #system turn was appended to history
       sys_turns = [m for m in per_chat[chat_id] if m.role == "system"]
       assert sys_turns and "[DIRECT INVOKE]" in (sys_turns[-1].text or "")
+
+  asyncio.run(asyncio.wait_for(scenario(), timeout=10))
+
+
+# --------------------------------------------------------------------------- #
+# ChatReinvoker — send registration + action_ack hydration
+#
+# Regression for: a /schedule-task or direct-invoke (port 8090) reply was
+# appended to history as a provisional ``context_msg_id="pending"`` entry but
+# never registered in ``pending_send_request_chat``, so the ``action_ack``
+# hydrator could never upgrade it to its real 6-digit id (it stayed "pending"
+# forever, unlike the normal message path and the sub-agent task-complete
+# path). The reinvoker now takes the account-shared pending map and registers
+# each send, so the entry hydrates exactly like every other send path.
+# --------------------------------------------------------------------------- #
+
+class _ReplyMsg:
+  """Minimal LLM2 reply: plain-text ``content`` and no tool calls, so
+  ``_extract_actions`` yields exactly one ``send_message`` action."""
+
+  def __init__(self, content: str):
+    self.content = content
+    self.tool_calls = None
+
+
+class _DispatchingResponder:
+  """Responder that returns a real text reply so the reinvoker DISPATCHES a
+  send_message (unlike ``_FakeResponder`` above, which returns ``None``)."""
+
+  def __init__(self, reply_text: str):
+    self._reply_text = reply_text
+    self.calls: list = []
+
+  async def generate(self, history, current, **kwargs):
+    self.calls.append({"kwargs": kwargs})
+    return _ReplyMsg(self._reply_text)
+
+
+class _CapturingWs:
+  """Fake gateway socket that records the outbound send_message calls (and
+  satisfies ``typing_indicator``'s presence pings)."""
+
+  def __init__(self):
+    self.sent: list[dict] = []
+    self.presence: list = []
+
+  async def send_presence(self, chat_id, presence):
+    self.presence.append((chat_id, presence))
+
+  async def send_message(self, chat_id, text=None, *, reply_to=None, request_id=None, attachments=None):
+    self.sent.append({
+      "chat_id": chat_id, "text": text, "reply_to": reply_to, "request_id": request_id,
+    })
+
+
+def test_reinvoke_send_registers_pending_and_hydrates_on_ack(tmp_path):
+  async def scenario():
+    with tenant_db_context(str(tmp_path)):
+      pending: OrderedDict = OrderedDict()
+      ws = _CapturingWs()
+      responder = _DispatchingResponder("ping from your watch!")
+      per_chat = defaultdict(deque)
+      per_chat_lock = defaultdict(asyncio.Lock)
+      reinvoker = ChatReinvoker(
+        ws=ws,
+        responder=responder,
+        per_chat=per_chat,
+        per_chat_lock=per_chat_lock,
+        get_prompt=lambda c: None,
+        pending_send_request_chat=pending,
+      )
+      chat_id = "628999@s.whatsapp.net"
+      result = await reinvoker.reinvoke(
+        chat_id,
+        "remind me",
+        system_label="DIRECT INVOKE",
+        block_title="Direct instruction firing now",
+        block_instructions="do it now.",
+        log_kind="direct invoke",
+      )
+      # A reply was produced and dispatched.
+      assert result is True
+      assert len(ws.sent) == 1
+      rid = ws.sent[0]["request_id"]
+      # The send is registered for hydration (the actual fix).
+      assert pending.get(rid) == chat_id
+      # The provisional assistant entry is in history, still "pending".
+      prov = [m for m in per_chat[chat_id] if m.role == "assistant"]
+      assert len(prov) == 1
+      assert prov[0].context_msg_id == "pending"
+      assert prov[0].message_id == f"local-send-{rid}"
+
+      # Drive the matching action_ack -> the provisional id hydrates to the
+      # real 6-digit contextMsgId, exactly like the subagent / message paths.
+      ack = AckResult(
+        request_id=rid,
+        action="send_message",
+        ok=True,
+        detail="sent",
+        result={"sent": [{"kind": "text", "contextMsgId": "000123"}]},
+      )
+      await handle_action_ack(
+        ack,
+        per_chat=per_chat,
+        per_chat_lock=per_chat_lock,
+        pending_send_request_chat=pending,
+        pending_subagent_attachments=OrderedDict(),
+        pending_run_command_chat=OrderedDict(),
+        media_paths_by_chat=defaultdict(dict),
+      )
+      assert prov[0].context_msg_id == "000123"
+      assert rid not in pending
+
+  asyncio.run(asyncio.wait_for(scenario(), timeout=10))
+
+
+def test_reinvoke_without_pending_map_still_appends_but_stays_provisional(tmp_path):
+  """Back-compat: when no pending map is injected (legacy / unit fakes), the
+  reply is still appended to history — it just never hydrates (stays
+  "pending"). This documents the default-None behaviour."""
+  async def scenario():
+    with tenant_db_context(str(tmp_path)):
+      ws = _CapturingWs()
+      responder = _DispatchingResponder("hello")
+      per_chat = defaultdict(deque)
+      per_chat_lock = defaultdict(asyncio.Lock)
+      reinvoker = ChatReinvoker(
+        ws=ws,
+        responder=responder,
+        per_chat=per_chat,
+        per_chat_lock=per_chat_lock,
+        get_prompt=lambda c: None,
+      )  # no pending_send_request_chat
+      chat_id = "628999@s.whatsapp.net"
+      result = await reinvoker.reinvoke(
+        chat_id, "x", system_label="DIRECT INVOKE",
+        block_title="t", block_instructions="i", log_kind="direct invoke",
+      )
+      assert result is True
+      prov = [m for m in per_chat[chat_id] if m.role == "assistant"]
+      assert len(prov) == 1
+      assert prov[0].context_msg_id == "pending"
 
   asyncio.run(asyncio.wait_for(scenario(), timeout=10))

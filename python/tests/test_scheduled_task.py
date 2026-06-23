@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections import defaultdict, deque
+from collections import OrderedDict, defaultdict, deque
 
 from bridge.db import tenant_db_context, ScheduledTasksRepository, ScheduledTask
 from bridge.agent.scheduled_task_runner import ScheduledTaskRunner
+from bridge.agent.chat_reinvoker import ChatReinvoker
+from bridge.messaging.ack_handler import handle_action_ack
+from wasocket.protocol import AckResult
 
 
 # --------------------------------------------------------------------------- #
@@ -186,6 +189,122 @@ def test_runner_rearm_pending_fires_persisted_rows():
       assert fired, "past-due persisted row should fire and be deleted"
       assert len(responder.calls) == 1
       assert responder.calls[0]["kwargs"].get("chat_type") == "private"  # @s.whatsapp.net
+    finally:
+      await _cancel_all(tasks)
+
+  asyncio.run(asyncio.wait_for(scenario(), timeout=10))
+
+
+# --------------------------------------------------------------------------- #
+# Fire -> dispatch reply -> register send -> hydrate on action_ack
+#
+# Regression: a fired scheduled task's reply was appended to history as a
+# provisional ``context_msg_id="pending"`` entry but never registered in
+# ``pending_send_request_chat``, so it never hydrated to its real 6-digit id
+# (unlike the sub-agent task-complete path). With the shared ChatReinvoker now
+# wired to the account's pending map, the scheduled-task reply hydrates too.
+# --------------------------------------------------------------------------- #
+
+class _ReplyMsg:
+  """Plain-text reply (no tool calls) -> exactly one send_message action."""
+
+  def __init__(self, content: str):
+    self.content = content
+    self.tool_calls = None
+
+
+class _DispatchingResponder:
+  def __init__(self, reply_text: str):
+    self._reply_text = reply_text
+    self.calls: list = []
+
+  async def generate(self, history, current, **kwargs):
+    self.calls.append({"kwargs": kwargs})
+    return _ReplyMsg(self._reply_text)
+
+
+class _CapturingWs:
+  def __init__(self):
+    self.sent: list[dict] = []
+    self.presence: list = []
+
+  async def send_presence(self, chat_id, presence):
+    self.presence.append((chat_id, presence))
+
+  async def send_message(self, chat_id, text=None, *, reply_to=None, request_id=None, attachments=None):
+    self.sent.append({
+      "chat_id": chat_id, "text": text, "reply_to": reply_to, "request_id": request_id,
+    })
+
+
+def test_runner_fire_registers_send_and_hydrates_via_ack():
+  async def scenario():
+    repo = _FakeRepo()
+    ws = _CapturingWs()
+    responder = _DispatchingResponder("scheduled reminder fired!")
+    per_chat = defaultdict(deque)
+    per_chat_lock = defaultdict(asyncio.Lock)
+    pending: OrderedDict = OrderedDict()
+    tasks: set = set()
+
+    def track(t):
+      tasks.add(t)
+      t.add_done_callback(tasks.discard)
+
+    # The shared reinvoker is what session.py wires in production — now with the
+    # account's pending_send_request_chat so sends hydrate.
+    reinvoker = ChatReinvoker(
+      ws=ws,
+      responder=responder,
+      per_chat=per_chat,
+      per_chat_lock=per_chat_lock,
+      get_prompt=lambda c: None,
+      pending_send_request_chat=pending,
+    )
+    runner = ScheduledTaskRunner(
+      repository=repo,
+      ws=ws,
+      responder=responder,
+      per_chat=per_chat,
+      per_chat_lock=per_chat_lock,
+      track_task=track,
+      get_prompt=lambda c: None,
+      reinvoker=reinvoker,
+    )
+    chat_id = "c@g.us"
+    fire_at = int(time.time() * 1000) + 20
+    await runner.schedule({"chatId": chat_id, "taskId": "t1", "fireAtMs": fire_at, "prompt": "ping"})
+
+    fired = await _wait_until(lambda: "t1" not in repo.rows)
+    try:
+      assert fired, "row should be deleted after the scheduled task fires"
+      # The fired reply was dispatched AND registered for hydration.
+      assert len(ws.sent) == 1
+      rid = ws.sent[0]["request_id"]
+      assert pending.get(rid) == chat_id
+      prov = [m for m in per_chat[chat_id] if m.role == "assistant"]
+      assert len(prov) == 1
+      assert prov[0].context_msg_id == "pending"
+
+      # action_ack hydrates the provisional id to the real 6-digit value.
+      ack = AckResult(
+        request_id=rid,
+        action="send_message",
+        ok=True,
+        detail="sent",
+        result={"sent": [{"kind": "text", "contextMsgId": "000777"}]},
+      )
+      await handle_action_ack(
+        ack,
+        per_chat=per_chat,
+        per_chat_lock=per_chat_lock,
+        pending_send_request_chat=pending,
+        pending_subagent_attachments=OrderedDict(),
+        pending_run_command_chat=OrderedDict(),
+        media_paths_by_chat=defaultdict(dict),
+      )
+      assert prov[0].context_msg_id == "000777"
+      assert rid not in pending
     finally:
       await _cancel_all(tasks)
 

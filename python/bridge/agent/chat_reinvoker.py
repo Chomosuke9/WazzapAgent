@@ -27,6 +27,7 @@ socket or DB required.
 from __future__ import annotations
 
 import time
+from collections import OrderedDict
 from typing import Callable, Optional
 
 from ..history import (
@@ -73,6 +74,13 @@ class ChatReinvoker:
   :param per_chat_lock: per-chat ``asyncio.Lock`` map (shared with the session).
   :param get_prompt: optional ``chat_id -> system-prompt-override`` lookup.
   :param record_stat: optional ``(chat_id, key)`` dashboard stat recorder.
+  :param pending_send_request_chat: optional account-shared ``request_id ->
+    chat_id`` map (an ``OrderedDict`` used as an LRU). When provided, each
+    dispatched ``send_message`` is registered here so the ``action_ack``
+    hydrator can upgrade the provisional ``context_msg_id="pending"`` history
+    entry to its real 6-digit id — exactly like the normal message path and the
+    sub-agent task-complete path. When ``None`` (legacy / unit tests) the send
+    is still appended to history but stays provisional.
   """
 
   def __init__(
@@ -84,6 +92,7 @@ class ChatReinvoker:
     per_chat_lock,
     get_prompt: Optional[Callable[[str], Optional[str]]] = None,
     record_stat: Optional[Callable[..., None]] = None,
+    pending_send_request_chat: Optional[OrderedDict] = None,
   ) -> None:
     self._ws = ws
     self._responder = responder
@@ -91,6 +100,7 @@ class ChatReinvoker:
     self._per_chat_lock = per_chat_lock
     self._get_prompt = get_prompt
     self._record_stat = record_stat
+    self._pending_send_request_chat = pending_send_request_chat
 
   async def reinvoke(
     self,
@@ -208,6 +218,17 @@ class ChatReinvoker:
         )
         if self._record_stat is not None:
           self._record_stat(chat_id, "responses_sent")
+        # Register the send so the action_ack hydrator upgrades the provisional
+        # ``context_msg_id="pending"`` entry below to its real 6-digit id —
+        # mirrors the normal message path (BatchProcessor) and the sub-agent
+        # task-complete path (_deliver_subagent_result). Without this the
+        # scheduled-task / direct-invoke / system-event reply stays "pending"
+        # in history forever (the LLM can never reference its own message).
+        if self._pending_send_request_chat is not None:
+          self._pending_send_request_chat[request_id] = chat_id
+          self._pending_send_request_chat.move_to_end(request_id)
+          while len(self._pending_send_request_chat) > 4096:
+            self._pending_send_request_chat.popitem(last=False)
         _prov = WhatsAppMessage(
           timestamp_ms=int(time.time() * 1000),
           sender=assistant_name(),
