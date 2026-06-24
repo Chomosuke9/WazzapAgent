@@ -397,7 +397,9 @@ async function handleIncomingMessage(
         // tag-everyone, which would spam every group) in a chat that isn't
         // activated, reply with the activation instructions — throttled per
         // chat so repeated tags don't flood the chat.
-        if (botMentioned && !taggedAll && shouldNotifyNotActivated(entry.folderPath, chatId)) {
+        // In private chats the user can't @-mention the bot, so we trigger
+        // on any message instead.
+        if ((!isGroup || (botMentioned && !taggedAll)) && shouldNotifyNotActivated(entry.folderPath, chatId)) {
           try {
             await sock.sendMessage(chatId, { text: getActivationMessage(ctx.repos!) });
           } catch (e) { /* ignore */ }
