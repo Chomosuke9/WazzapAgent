@@ -5,7 +5,7 @@ process.env.REQUIRE_ACTIVATION = 'false';
 
 import { handleGenerate } from '../../src/wa/commands/generate.js';
 
-function makeCtx(captured: any) {
+function makeCtx(captured: any, msgId: string = 'A'.repeat(32)) {
   const sock: any = {
     user: { id: '123:1@s.whatsapp.net', name: 'TestBot' },
     sendMessage: async (_jid: string, content: any) => {
@@ -40,7 +40,7 @@ function makeCtx(captured: any) {
     isGroup: true,
     fromMe: false,
     group: null,
-    msg: {} as any,
+    msg: { key: { id: msgId } } as any,
     folderPath: '/data',
     sock,
     repos,
@@ -69,6 +69,17 @@ test('/generate sends a cta_copy button carrying "/activate <code>" (feature 4)'
   const copyCode = findCopyCode(captured.relayed[0]);
   assert.equal(copyCode, '/activate WA-ABCD1234');
   assert.deepEqual(captured.gen, { type: 'group', days: 30 });
+});
+
+test('/generate falls back to a monospace code block for safe-tier callers (web)', async () => {
+  const captured = { textMessages: [] as any[], relayed: [] as any[], gen: null as any };
+  // A web message id ("3E" + 20 chars) maps to the safe tier — no cta_copy.
+  await handleGenerate(makeCtx(captured, '3E' + 'B'.repeat(20)));
+
+  assert.equal(captured.relayed.length, 0, 'no interactive message relayed on safe tier');
+  const sent = captured.textMessages.map((m) => m.text || '').join('\n');
+  assert.match(sent, /\/activate WA-ABCD1234/);
+  assert.ok(sent.includes('```'), 'activation code is sent in a monospace block');
 });
 
 test('/generate rejects invalid type', async () => {

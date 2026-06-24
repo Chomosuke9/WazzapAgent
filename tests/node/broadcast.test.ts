@@ -13,7 +13,7 @@ process.env.LOG_LEVEL = 'warn';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-const { reconstructAndSend } = await import('../../src/wa/commands/broadcast.ts');
+const { reconstructAndSend, handleBroadcastCommand } = await import('../../src/wa/commands/broadcast.ts');
 
 // Minimal fake AccountContext: reconstructAndSend only touches `ctx.jidQueues`
 // (through withJidQueue), a per-JID serialization Map.
@@ -81,5 +81,41 @@ describe('reconstructAndSend (migration relay-only behavior)', () => {
 
     assert.equal(result.ok, false);
     assert.equal(result.reason, 'error');
+  });
+});
+
+describe('text broadcast (/broadcast <text>) sends a plain message', () => {
+  it('sends each group a plain text message, never an interactive/rich one', async () => {
+    const calls = { sendMessage: [], relayMessage: [] };
+    const sock = {
+      user: { id: 'bot@s.whatsapp.net' },
+      groupFetchAllParticipating: async () => ({ 'g1@g.us': {}, 'g2@g.us': {} }),
+      sendMessage: async (...args) => { calls.sendMessage.push(args); return { key: { id: 'x' } }; },
+      relayMessage: async (...args) => { calls.relayMessage.push(args); },
+    };
+    const repos = { settings: { getAnnouncementEnabled: () => true } };
+    const account = { jidQueues: new Map() };
+    const ctx = {
+      chatId: 'owner@s.whatsapp.net',
+      senderId: 'owner@s.whatsapp.net',
+      text: 'Hello everyone',
+      quotedMessageId: null,
+      contextMsgId: null,
+      msg: {},
+      account,
+      sock,
+      repos,
+    };
+
+    await handleBroadcastCommand(ctx);
+
+    assert.equal(calls.relayMessage.length, 0, 'no interactive relay for a text broadcast');
+    const groupSends = calls.sendMessage.filter(([jid]) => jid === 'g1@g.us' || jid === 'g2@g.us');
+    assert.equal(groupSends.length, 2, 'one message per group');
+    for (const [, content] of groupSends) {
+      assert.ok(typeof content.text === 'string' && content.text.includes('Hello everyone'), 'carries the broadcast text');
+      assert.equal(content.viewOnceMessage, undefined, 'plain text, not a viewOnce interactive wrapper');
+      assert.equal(content.interactiveMessage, undefined, 'no interactiveMessage payload');
+    }
   });
 });

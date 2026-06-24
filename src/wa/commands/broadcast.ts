@@ -1,5 +1,4 @@
 import logger from "../../logger.js";
-import { sendRichMessage } from "../interactive/index.js";
 import { withJidQueue } from "../sendQueue.js";
 import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 import type { AccountContext } from "../../account/accountContext.js";
@@ -101,11 +100,7 @@ async function handleBroadcastCommand({
       }
       try {
         await withJidQueue(account!, groupJid, () =>
-          sendRichMessage(sock, groupJid, {
-            text: trimmedText,
-            footer: "Broadcast 📢",
-            badge: false,
-          }),
+          sock.sendMessage(groupJid, { text: `${trimmedText}\n\nBroadcast 📢` }),
         );
         sent += 1;
       } catch (err) {

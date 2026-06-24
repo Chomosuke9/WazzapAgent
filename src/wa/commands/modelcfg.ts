@@ -1,5 +1,7 @@
 import logger from '../../logger.js';
+import { getDevice } from 'baileys';
 import { sendNativeFlow } from '../interactive/index.js';
+import { deviceToTier } from '../interactive/compat.js';
 import config from '../../config.js';
 import * as registry from '../../server/accountRegistry.js';
 import type { WASocket } from 'baileys';
@@ -7,7 +9,7 @@ import type { CommandContext, CommandHandler } from '../command/CommandContext.j
 import type { ButtonHandler } from '../command/ButtonContext.js';
 import type { AccountContext } from '../../account/accountContext.js';
 
-async function handleModelcfg({ chatId, senderId: _senderId, args, folderPath = config.dataDir, sock, repos }: CommandContext): Promise<void> {
+async function handleModelcfg({ chatId, senderId: _senderId, args, folderPath = config.dataDir, msg, sock, repos }: CommandContext): Promise<void> {
   // If args contains |, use | as field separator; otherwise fall back to whitespace
   const rawArgs = (args || '').trim();
   let parts: string[];
@@ -30,6 +32,40 @@ async function handleModelcfg({ chatId, senderId: _senderId, args, folderPath = 
   const subArgs = parts.slice(1);
 
   if (!subcommand) {
+    // Device-aware rendering (same rationale as /setting): the menu below is
+    // built from single_select, which only renders on Android. For iOS/web/
+    // desktop callers send a text menu listing the equivalent /modelcfg
+    // subcommands instead, so the owner can still configure models there.
+    if (deviceToTier(getDevice(msg?.key?.id || '')) !== 'full') {
+      const models = repos!.model.getAllModels();
+      const defaultModel = repos!.model.getDefaultLlm2Model();
+      const modelLines = models.length
+        ? models.map((m) => {
+            const isDefault = defaultModel?.modelId === m.modelId;
+            const status = m.isActive ? '✓' : '✗';
+            const vision = m.visionSupport ? ' 👁' : '';
+            return `${status} ${m.displayName} \`${m.modelId}\`${isDefault ? ' [DEFAULT]' : ''}${vision}`;
+          })
+        : ['(no models configured)'];
+      const text = [
+        '*Model Configuration* _(owner)_',
+        '',
+        'Models:',
+        ...modelLines,
+        '',
+        'Change with a command:',
+        '- `/modelcfg default` <id>  — set the default model',
+        '- `/modelcfg add` <id>|<name>|[desc]|[vision=true]',
+        '- `/modelcfg edit` <id> name=… desc=… vision=true|false active=true|false',
+        '- `/modelcfg remove` <id>',
+        '- `/modelcfg list`',
+      ].join('\n');
+      try {
+        await sock.sendMessage(chatId, { text });
+      } catch (e) { /* ignore */ }
+      return;
+    }
+
     const modelRows = repos!.model.getAllActiveModels().map((m) => ({
       id: `modelcfg_default:${m.modelId}`,
       title: m.displayName + (m.visionSupport ? ' 👁' : ''),
@@ -130,6 +166,33 @@ async function handleModelcfg({ chatId, senderId: _senderId, args, folderPath = 
   }
 
   switch (subcommand) {
+    case 'default': {
+      if (subArgs.length < 1) {
+        try {
+          await sock.sendMessage(chatId, { text: 'Usage: `/modelcfg` default <model_id>' });
+        } catch (err) { /* ignore */ }
+        return;
+      }
+      const [modelId] = subArgs;
+      const models = repos!.model.getAllModels();
+      const model = models.find((m) => m.modelId === modelId);
+      if (!model) {
+        try {
+          await sock.sendMessage(chatId, { text: `Model "${modelId}" not found.` });
+        } catch (err) { /* ignore */ }
+        return;
+      }
+      // Default = the model with the smallest sort_order; nudge this one below
+      // the current minimum (mirrors setDefaultModel used by the button menu).
+      const minOrder = Math.min(...models.map((m) => m.sortOrder));
+      repos!.model.updateModel(modelId, { sortOrder: minOrder - 1 });
+      registry.sendReliableToClient(folderPath, { type: 'invalidate_default_model', folderPath });
+      try {
+        await sock.sendMessage(chatId, { text: `Model "${model.displayName}" set as default.` });
+      } catch (err) { /* ignore */ }
+      break;
+    }
+
     case 'list': {
       const models = repos!.model.getAllModels();
       if (models.length === 0) {
@@ -261,7 +324,7 @@ async function handleModelcfg({ chatId, senderId: _senderId, args, folderPath = 
 
     default:
       try {
-        await sock.sendMessage(chatId, { text: 'Unknown subcommand. Use: list, add, edit, remove' });
+        await sock.sendMessage(chatId, { text: 'Unknown subcommand. Use: list, add, edit, remove, default' });
       } catch (err) { /* ignore */ }
   }
 }

@@ -1,5 +1,7 @@
 import logger from "../../logger.js";
+import { getDevice } from "baileys";
 import { sendCopyCode } from "../interactive/index.js";
+import { deviceToTier, tierAllows, copyCodeFallbackText } from "../interactive/compat.js";
 import type {
   CommandContext,
   CommandHandler,
@@ -9,6 +11,7 @@ async function handleGenerate({
   chatId,
   senderId,
   args,
+  msg,
   sock,
   repos,
 }: CommandContext): Promise<void> {
@@ -86,6 +89,24 @@ async function handleGenerate({
     `Type: ${typeLabel}\n` +
     `Valid for: ${durationLabel}\n\n` +
     `Copy the code by tapping the button below, then send it to the group where you want ${botName} activated (or to ${botName}'s private chat).`;
+
+  // Device gate: a cta_copy button doesn't render on `safe` (web/desktop), so
+  // send the code in a monospace block (long-press to copy) for those callers.
+  if (!tierAllows(deviceToTier(getDevice(msg?.key?.id || "")), "cta_copy")) {
+    const fallbackBody =
+      `*Activation code created successfully!*\n` +
+      `Type: ${typeLabel}\n` +
+      `Valid for: ${durationLabel}\n\n` +
+      `Long-press the code below to copy it, then send it to the group where you want ${botName} activated (or to ${botName}'s private chat).`;
+    try {
+      await sock.sendMessage(chatId, {
+        text: `${fallbackBody}\n\n${copyCodeFallbackText(activateCommand, "Copy Code")}`,
+      });
+    } catch (e) {
+      /* ignore */
+    }
+    return;
+  }
 
   try {
     await sendCopyCode(sock, chatId, body, activateCommand, "Copy Code", {
