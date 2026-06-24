@@ -116,24 +116,18 @@ def _llm2_targets() -> list[LLM2Target]:
     fallback_model_raw = config.llm2_fallback_model_clean()
     fallback_endpoint_raw = config.llm2_fallback_endpoint_clean()
     fallback_api_key_raw = config.llm2_fallback_api_key_clean()
-    fallback_enabled = any(
-        (fallback_model_raw, fallback_endpoint_raw, fallback_api_key_raw)
-    )
+    fallback_enabled = any((fallback_model_raw, fallback_endpoint_raw, fallback_api_key_raw))
     if not fallback_enabled:
         return targets
 
     fallback_endpoint = (
-        _endpoint_base_url(fallback_endpoint_raw)
-        if fallback_endpoint_raw is not None
-        else primary_endpoint
+        _endpoint_base_url(fallback_endpoint_raw) if fallback_endpoint_raw is not None else primary_endpoint
     )
     fallback_target = LLM2Target(
         name="fallback",
         model=fallback_model_raw or primary_model,
         base_url=fallback_endpoint,
-        api_key=fallback_api_key_raw
-        if fallback_api_key_raw is not None
-        else primary_api_key,
+        api_key=fallback_api_key_raw if fallback_api_key_raw is not None else primary_api_key,
     )
 
     primary_target = targets[0]
@@ -158,16 +152,8 @@ def get_llm2(
     temperature = float(config.llm2_temperature_raw())
     timeout = _llm2_timeout()
     max_retries = _llm2_sdk_max_retries()
-    resolved_base_url = (
-        base_url
-        if base_url is not None
-        else config.llm2_endpoint_base_url()
-    )
-    resolved_api_key = (
-        api_key
-        if api_key is not None
-        else (config.llm2_api_key_clean() or "")
-    )
+    resolved_base_url = base_url if base_url is not None else config.llm2_endpoint_base_url()
+    resolved_api_key = api_key if api_key is not None else (config.llm2_api_key_clean() or "")
     kwargs = {
         "model": resolved_model,
         "temperature": temperature,
@@ -181,9 +167,7 @@ def get_llm2(
     )
 
 
-def _resolve_llm2_chat_id(
-    current_payload: dict | None, current: WhatsAppMessage
-) -> str | None:
+def _resolve_llm2_chat_id(current_payload: dict | None, current: WhatsAppMessage) -> str | None:
     """Resolve the chat id LLM2 logs/keys against (payload first, else sender)."""
     payload = current_payload if isinstance(current_payload, dict) else {}
     return payload.get("chatId") or payload.get("chat_id") or current.sender
@@ -254,12 +238,8 @@ def build_llm2_messages(
     of a hand-rebuilt approximation.
     """
     log_chat_id = _resolve_llm2_chat_id(current_payload, current)
-    can_delete, can_mute, can_kick = _compute_llm2_permissions(
-        log_chat_id, bot_is_admin, bot_is_super_admin
-    )
-    sticker_catalog = (
-        sticker_catalog_text(log_chat_id) if log_chat_id else sticker_catalog_text()
-    )
+    can_delete, can_mute, can_kick = _compute_llm2_permissions(log_chat_id, bot_is_admin, bot_is_super_admin)
+    sticker_catalog = sticker_catalog_text(log_chat_id) if log_chat_id else sticker_catalog_text()
     base_system = (system or _load_system_prompt()).strip()
     rendered_system = _render_system_prompt(
         base_system,
@@ -269,17 +249,14 @@ def build_llm2_messages(
         allow_kick=can_kick,
         allow_subagent=allow_subagent,
         sticker_catalog=sticker_catalog,
+        chat_type=chat_type,
     )
     history_list = list(history)
     message_max_chars = _llm2_message_max_chars()
     if message_max_chars > 0:
-        history_list = [
-            _truncate_message(msg, message_max_chars) for msg in history_list
-        ]
+        history_list = [_truncate_message(msg, message_max_chars) for msg in history_list]
         current = _truncate_message(current, message_max_chars)
-    hist_text = (
-        format_history(history_list, history=history_list) or "(no older messages)"
-    )
+    hist_text = format_history(history_list, history=history_list) or "(no older messages)"
     current_line = _format_current_window(current) or "(no current messages)"
     group_text = _group_description_block(group_description)
     context_injection = _context_injection_block(
@@ -289,14 +266,10 @@ def build_llm2_messages(
         bot_is_super_admin=bot_is_super_admin,
         chat_id=log_chat_id,
     )
-    messages_content_text = (
-        f"older messages:\n{hist_text}\n\ncurrent messages(burst):\n{current_line}"
-    )
+    messages_content_text = f"older messages:\n{hist_text}\n\ncurrent messages(burst):\n{current_line}"
     media_parts: list[dict] = []
     media_notes: list[str] = []
-    model_has_vision = (
-        get_model_vision_support(log_chat_id) if log_chat_id else False
-    )
+    model_has_vision = get_model_vision_support(log_chat_id) if log_chat_id else False
     logger.info(
         "LLM2 vision check: chat_id=%s model_vision=%s will_send_media=%s",
         log_chat_id,
@@ -306,9 +279,7 @@ def build_llm2_messages(
     if model_has_vision:
         media_parts, media_notes = build_visual_parts(current_payload)
     if media_notes:
-        messages_content_text += "\n\nVisual attachments:\n" + "\n".join(
-            f"- {note}" for note in media_notes
-        )
+        messages_content_text += "\n\nVisual attachments:\n" + "\n".join(f"- {note}" for note in media_notes)
 
     messages_content: str | list[dict]
     if media_parts:
@@ -328,7 +299,7 @@ def build_llm2_messages(
     #   6) user          : sub-agent FINISHED-this-turn block (re-invoke only)
     #   7) user          : scheduled-task block (scheduled cold-fire only)
     #   8) user          : older messages + current burst
-    msgs = [SystemMessage(content=rendered_system)]
+    msgs: list[SystemMessage | HumanMessage] = [SystemMessage(content=rendered_system)]
     msgs.append(HumanMessage(content=f"Group description:\n{group_text}"))
     msgs.append(HumanMessage(content=context_injection))
     # Long-term memory (the /memory command): durable per-chat facts injected as
@@ -339,9 +310,7 @@ def build_llm2_messages(
     subagent_block: str | None = subagent_context if subagent_context else None
     if subagent_block:
         msgs.append(HumanMessage(content=subagent_block))
-    files_block = (
-        _files_for_subagent_block(history_list) if allow_subagent else None
-    )
+    files_block = _files_for_subagent_block(history_list) if allow_subagent else None
     if files_block:
         msgs.append(HumanMessage(content=files_block))
     if subagent_result_block:
@@ -451,11 +420,7 @@ async def generate_reply(
         or payload.get("chat_type")
         or ("group" if bool(payload.get("isGroup")) else "private")
     )
-    log_chat_name = (
-        (payload.get("chatName") or payload.get("chat_name"))
-        if payload_chat_type == "group"
-        else None
-    )
+    log_chat_name = (payload.get("chatName") or payload.get("chat_name")) if payload_chat_type == "group" else None
     timeout_s = _llm2_timeout()
     retry_max = _llm2_retry_max()
     retry_backoff_s = _llm2_retry_backoff_seconds()
@@ -463,9 +428,7 @@ async def generate_reply(
     # Permissions gate both the dynamic tool list (here) and the system-prompt
     # rule injection (inside build_llm2_messages); the shared helper keeps the
     # two from drifting apart.
-    can_delete, can_mute, can_kick = _compute_llm2_permissions(
-        log_chat_id, bot_is_admin, bot_is_super_admin
-    )
+    can_delete, can_mute, can_kick = _compute_llm2_permissions(log_chat_id, bot_is_admin, bot_is_super_admin)
 
     # Build tools dynamically: base tools always, moderation tools only when permitted
     if tools is None:
@@ -639,9 +602,7 @@ async def generate_reply(
                     await asyncio.sleep(retry_backoff_s * attempt)
             return None, last_failure_kind
 
-        result, failure_kind = await _invoke_with_retry(
-            msgs, mode="multimodal" if media_part_count else "text"
-        )
+        result, failure_kind = await _invoke_with_retry(msgs, mode="multimodal" if media_part_count else "text")
         if result is None and media_part_count:
             if failure_kind == "timeout":
                 logger.warning(
@@ -671,9 +632,7 @@ async def generate_reply(
                         "media_parts": media_part_count,
                     },
                 )
-                result, _ = await _invoke_with_retry(
-                    built.text_fallback_messages, mode="text_fallback"
-                )
+                result, _ = await _invoke_with_retry(built.text_fallback_messages, mode="text_fallback")
 
         if result is not None:
             logger.debug(
@@ -686,9 +645,7 @@ async def generate_reply(
                     "endpoint": target.base_url,
                     "reply_preview": trunc(getattr(result, "content", ""), 800),
                     "tool_calls": len(getattr(result, "tool_calls", None) or []),
-                    "raw": dump_json(
-                        getattr(result, "model_dump", lambda: str(result))()
-                    ),
+                    "raw": dump_json(getattr(result, "model_dump", lambda: str(result))()),
                 },
             )
             # If a validator is provided, check whether the output is usable.

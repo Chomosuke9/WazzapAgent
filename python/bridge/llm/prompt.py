@@ -426,6 +426,25 @@ KICK is ALLOWED for this chat. Use the kick_members tool to remove disruptive me
 Only kick with clear justification. Cannot kick admins.
 </kick>"""
 
+# Warning blocks injected INSTEAD of the "ALLOWED" rules above when a moderation
+# action is NOT available — i.e. the chat's /permission level is too low OR the
+# bot isn't a group admin (see _compute_llm2_permissions). Without these the
+# model gets neither the tool nor any rule, so it silently ignores moderation
+# requests or hallucinates that it acted. These let it warn the user instead.
+# Only injected in GROUP chats (moderation is N/A in private chats), mirroring
+# the _SUBAGENT_OFF_RULES pattern.
+_DELETE_OFF_RULES = """<delete>
+DELETE is NOT allowed in this chat — you have no delete_messages tool and cannot remove messages. If asked to delete a message, briefly tell the user you can't because message-delete permission isn't enabled here, and do NOT pretend you deleted anything. An admin can enable it with /permission (the bot must also be a group admin).
+</delete>"""
+
+_MUTE_OFF_RULES = """<mute>
+MUTE is NOT allowed in this chat — you have no mute_member tool and cannot mute or unmute anyone. If asked, briefly tell the user you can't because mute permission isn't enabled here, and do NOT pretend you muted anyone. An admin can enable it with /permission (the bot must also be a group admin).
+</mute>"""
+
+_KICK_OFF_RULES = """<kick>
+KICK is NOT allowed in this chat — you have no kick_members tool and cannot remove members. If asked to kick or remove someone, briefly tell the user you can't because kick permission isn't enabled here, and do NOT pretend you removed anyone. An admin can enable it with /permission (the bot must also be a group admin).
+</kick>"""
+
 # Injected into the system prompt only when /subagent on is set for this chat
 # (i.e. allow_subagent=True). Tells LLM2 when to delegate via the
 # execute_subtask tool and what the sub-agent can / cannot do, so the model
@@ -491,6 +510,7 @@ def _render_system_prompt(
     allow_kick: bool = False,
     allow_subagent: bool = False,
     sticker_catalog: str | None = None,
+    chat_type: str | None = None,
 ) -> str:
     overide_text = (prompt_override or "").strip()
     configured_assistant_name = assistant_name()
@@ -498,6 +518,14 @@ def _render_system_prompt(
     catalog = (
         f"<sticker_catalog>\nAvailable stickers:\n{sticker_catalog}\n</sticker_catalog>" if sticker_catalog else ""
     )
+    # Moderation blocks: the "ALLOWED" rule when the action is available, else a
+    # warning block in GROUP chats (so the model tells the user it lacks the
+    # permission instead of ignoring/hallucinating), else nothing in private
+    # chats where moderation does not apply.
+    is_group = _normalize_chat_type(chat_type) == "group"
+    delete_block = _DELETE_RULES if allow_delete else (_DELETE_OFF_RULES if is_group else "")
+    mute_block = _MUTE_RULES if allow_mute else (_MUTE_OFF_RULES if is_group else "")
+    kick_block = _KICK_RULES if allow_kick else (_KICK_OFF_RULES if is_group else "")
     return (
         base_system.replace("{{prompt_override}}", overide_text)
         .replace("{{ prompt_override }}", overide_text)
@@ -507,12 +535,12 @@ def _render_system_prompt(
         .replace("{{ current_date }}", current_date)
         .replace("{{sticker_catalog}}", catalog)
         .replace("{{ sticker_catalog }}", catalog)
-        .replace("{{delete_rules}}", _DELETE_RULES if allow_delete else "")
-        .replace("{{ delete_rules }}", _DELETE_RULES if allow_delete else "")
-        .replace("{{mute_rules}}", _MUTE_RULES if allow_mute else "")
-        .replace("{{ mute_rules }}", _MUTE_RULES if allow_mute else "")
-        .replace("{{kick_rules}}", _KICK_RULES if allow_kick else "")
-        .replace("{{ kick_rules }}", _KICK_RULES if allow_kick else "")
+        .replace("{{delete_rules}}", delete_block)
+        .replace("{{ delete_rules }}", delete_block)
+        .replace("{{mute_rules}}", mute_block)
+        .replace("{{ mute_rules }}", mute_block)
+        .replace("{{kick_rules}}", kick_block)
+        .replace("{{ kick_rules }}", kick_block)
         .replace(
             "{{subagent_rules}}",
             _SUBAGENT_RULES if allow_subagent else _SUBAGENT_OFF_RULES,
