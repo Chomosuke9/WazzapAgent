@@ -99,6 +99,13 @@ export interface Config {
   stickerEmoji: string;
   requireActivation: boolean;
   subagentEnabledDefault: boolean;
+  // Feature-availability flags derived from the shared .env so Node can return
+  // a clear "not configured yet" error from the settings UI / commands instead
+  // of silently accepting a setting that can never take effect. The underlying
+  // features run on the Python bridge; on a single-host deploy both processes
+  // load the same .env (see featureAvailability.ts).
+  llm1Configured: boolean;
+  subagentConfigured: boolean;
 }
 
 const config: Config = {
@@ -160,6 +167,18 @@ const config: Config = {
   // Seeded into the per-tenant __global__ settings row on first boot (see
   // openAccountPersistence); runtime /subagent default on|off overrides it.
   subagentEnabledDefault: process.env.SUBAGENT_ENABLED_DEFAULT === 'true',
+  // LLM1 router is "configured" iff a primary or fallback endpoint is set —
+  // mirrors the bridge's call_llm1 gate (ADR-2: empty LLM1_ENDPOINT disables
+  // LLM1). Used to reject auto/hybrid mode selection with a helpful error when
+  // the router isn't set up.
+  llm1Configured: Boolean(
+    (process.env.LLM1_ENDPOINT || '').trim() ||
+    (process.env.LLM1_FALLBACK_ENDPOINT || '').trim(),
+  ),
+  // The Python sub-agent client defaults SUBAGENT_URL to http://localhost:5000,
+  // so the presence of an explicit env value is the signal that the owner
+  // actually set the service up. Used to reject /subagent on when unset.
+  subagentConfigured: Boolean((process.env.SUBAGENT_URL || '').trim()),
 };
 
 // Startup validation for required transport vars. Defaults exist

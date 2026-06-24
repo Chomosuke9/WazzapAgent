@@ -1,8 +1,11 @@
 import logger from '../../logger.js';
+import { getDevice } from 'baileys';
 import { sendNativeFlow } from '../interactive/index.js';
+import { deviceToTier } from '../interactive/compat.js';
 import config from '../../config.js';
 import * as registry from '../../server/accountRegistry.js';
-import { VALID_MODES } from '../../db/repositories/SettingsRepository.js';
+import { VALID_MODES, VALID_COMPAT_MODES } from '../../db/repositories/SettingsRepository.js';
+import { isFeatureConfigured, unconfiguredFeatureMessage } from '../featureAvailability.js';
 import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 import type { ButtonHandler } from '../command/ButtonContext.js';
 import type { AccountRepositories } from '../../db/repositories/index.js';
@@ -23,7 +26,7 @@ function formatActivationInfo(repos: AccountRepositories, chatId: string): strin
   return `${Math.floor(diffMs / 60000)} minutes`;
 }
 
-async function handleSettings({ chatId, senderId: _senderId, args: _args, sock, repos }: CommandContext): Promise<void> {
+async function handleSettings({ chatId, sock, repos, msg }: CommandContext): Promise<void> {
   const currentModelId = repos!.model.getLlm2Model(chatId);
   const defaultModel = repos!.model.getDefaultLlm2Model();
   const activeModelId = currentModelId || defaultModel?.modelId;
@@ -31,11 +34,43 @@ async function handleSettings({ chatId, senderId: _senderId, args: _args, sock, 
 
   const currentPermission = repos!.settings.getPermission(chatId);
   const currentMode = repos!.settings.getMode(chatId);
+  const compatMode = repos!.settings.getCompatibilityMode(chatId);
   const idleTrigger = repos!.settings.getIdleTrigger(chatId);
   const idleLabel = idleTrigger ? (idleTrigger.min === idleTrigger.max ? `${idleTrigger.min} messages` : `${idleTrigger.min}-${idleTrigger.max} messages`) : 'OFF';
 
   const permissionLabels = ['Forbidden', 'Delete only', 'Delete & mute', 'All moderation'];
   const permissionLabel = permissionLabels[currentPermission] || String(currentPermission);
+  const activationInfo = formatActivationInfo(repos!, chatId);
+  const summary = `Current:\n- Mode: ${currentMode}\n- Model: ${activeModelName}\n- Permission: Level ${currentPermission} (${permissionLabel})\n- Idle Trigger: ${idleLabel}\n- Compatibility: ${compatMode}\n- Activation: ${activationInfo}`;
+
+  // Device-aware rendering. The interactive menu below is built entirely from
+  // `single_select`, which only renders on Android (the `full` tier). For every
+  // other CALLER device — iOS (`semi`, no single_select) and web/desktop/unknown
+  // (`safe`) — fall back to a plain-text menu so the caller can still read and
+  // operate /setting via the matching slash commands. This is keyed on the
+  // caller's own message device, independent of the chat's compatibility_mode.
+  const callerDevice = getDevice(msg?.key?.id || '');
+  if (deviceToTier(callerDevice) !== 'full') {
+    const text = [
+      '*Chat Settings*',
+      '',
+      summary,
+      '',
+      'Change with a command:',
+      '- `/mode` auto | prefix | hybrid',
+      '- `/model` <id>  (run `/model` to list)',
+      '- `/permission` 0-3',
+      '- `/compat` auto | full | semi | safe',
+      '- `/prompt` <text>  (view or set the system prompt)',
+      '- `/reset`  (clear bot memory for this chat)',
+    ].join('\n');
+    try {
+      await sock.sendMessage(chatId, { text });
+    } catch (err) {
+      logger.warn({ err, chatId }, 'failed sending /settings text menu');
+    }
+    return;
+  }
 
   const buttons = [
     {
@@ -84,6 +119,21 @@ async function handleSettings({ chatId, senderId: _senderId, args: _args, sock, 
     {
       name: 'single_select',
       buttonParamsJson: JSON.stringify({
+        title: 'Compatibility',
+        sections: [{
+          title: 'Interactive Compatibility',
+          rows: [
+            { id: 'compat_select:auto', title: 'Auto', description: 'Match the chat device automatically' },
+            { id: 'compat_select:full', title: 'Full', description: 'All interactive (Android)' },
+            { id: 'compat_select:semi', title: 'Semi', description: 'No list menus (iOS)' },
+            { id: 'compat_select:safe', title: 'Safe', description: 'Plain text only (web/desktop)' },
+          ],
+        }],
+      }),
+    },
+    {
+      name: 'single_select',
+      buttonParamsJson: JSON.stringify({
         title: 'Misc',
         sections: [{
           title: 'Misc Options',
@@ -97,7 +147,7 @@ async function handleSettings({ chatId, senderId: _senderId, args: _args, sock, 
   ];
 
   try {
-    await sendNativeFlow(sock, chatId, `Chat Settings\n\nCurrent:\n- Mode: ${currentMode}\n- Model: ${activeModelName}\n- Permission: Level ${currentPermission} (${permissionLabel})\n- Idle Trigger: ${idleLabel}\n- Activation: ${formatActivationInfo(repos!, chatId)}`, buttons, { footer: 'Click a button' });
+    await sendNativeFlow(sock, chatId, `Chat Settings\n\n${summary}`, buttons, { footer: 'Click a button' });
   } catch (err) {
     logger.warn({ err, chatId }, 'failed sending /settings interactive');
     try {
@@ -178,6 +228,25 @@ export const settingsButton: ButtonHandler = {
   },
 };
 
+/** `compat_select:<mode>` → set the chat's interactive compatibility mode (the
+ * Compatibility section of `/setting` routes here). Node-only setting, so no
+ * Python `invalidate_chat_settings` broadcast is needed. */
+export const compatSelectButton: ButtonHandler = {
+  prefixes: ['compat_select:'],
+  permission: 'owner or isPrivate or (isGroup and isAdmin)',
+  run: async (bc, mode) => {
+    const { sock, account, chatId } = bc;
+    if (!VALID_COMPAT_MODES.has(mode)) {
+      await sock.sendMessage(chatId, {
+        text: 'Invalid compatibility mode. Choose auto, full, semi, or safe.',
+      });
+      return;
+    }
+    account.repos!.settings.setCompatibilityMode(chatId, mode);
+    await sock.sendMessage(chatId, { text: `Compatibility mode changed to: *${mode}*` });
+  },
+};
+
 /** `mode_select:<mode>` → set the chat's response mode (replaces the removed
  * `/mode` command; the mode-setting section of `/setting` routes here). */
 export const modeSelectButton: ButtonHandler = {
@@ -189,6 +258,13 @@ export const modeSelectButton: ButtonHandler = {
       await sock.sendMessage(chatId, {
         text: 'Invalid mode. Choose auto, prefix, or hybrid.',
       });
+      return;
+    }
+    // Auto/Hybrid modes route messages through the LLM1 router. If LLM1 is not
+    // configured, refuse the change with a helpful error so the owner knows
+    // their setup is incomplete (prefix mode needs no router and is allowed).
+    if (mode !== 'prefix' && !isFeatureConfigured('llm1')) {
+      await sock.sendMessage(chatId, { text: unconfiguredFeatureMessage('llm1') });
       return;
     }
     account.repos!.settings.setMode(chatId, mode);

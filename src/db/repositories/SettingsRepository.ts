@@ -36,6 +36,8 @@ interface IdleTrigger {
 
 export const VALID_MODES = new Set(["auto", "prefix", "hybrid"]);
 export const VALID_TRIGGERS = new Set(["tag", "tagall", "reply", "join", "name"]);
+export const VALID_COMPAT_MODES = new Set(["auto", "full", "semi", "safe"]);
+export const DEFAULT_COMPAT_MODE = "auto";
 
 export class SettingsRepository extends BaseRepository {
   getPrompt(chatId: string): string | null {
@@ -85,6 +87,84 @@ export class SettingsRepository extends BaseRepository {
       chatId,
     );
     logger.info({ chatId, mode }, "DB set_mode");
+  }
+
+  // -------------------------------------------------------------------------
+  // Compatibility mode (interactive-message gating) + auto-detected device.
+  //
+  // `compatibility_mode` is one of auto|full|semi|safe and is read ONLY by the
+  // Node gateway (interactive sends all execute Node-side), so changing it
+  // needs no Python invalidation. In `auto`, the effective tier derives from
+  // `auto_device` — the last KNOWN device of the chat's audience, persisted by
+  // inbound.ts (DM peer; group admin/owner). See wa/interactive/compat.ts.
+  // -------------------------------------------------------------------------
+
+  getCompatibilityMode(chatId: string): string {
+    const row = this.getSettingRow(chatId);
+    let value = row?.compatibility_mode ?? DEFAULT_COMPAT_MODE;
+    if (!VALID_COMPAT_MODES.has(value)) value = DEFAULT_COMPAT_MODE;
+    return value;
+  }
+
+  setCompatibilityMode(chatId: string, mode: string): void {
+    if (!VALID_COMPAT_MODES.has(mode)) mode = DEFAULT_COMPAT_MODE;
+    this.ensureChatRow(chatId);
+    this.runSettingsQuery(
+      "UPDATE chat_settings SET compatibility_mode = ?, updated_at = datetime('now') WHERE chat_id = ?",
+      mode,
+      chatId,
+    );
+    logger.info({ chatId, mode }, "DB set_compatibility_mode");
+  }
+
+  setGlobalCompatibilityMode(mode: string): void {
+    if (!VALID_COMPAT_MODES.has(mode)) mode = DEFAULT_COMPAT_MODE;
+    this.runSettingsQuery(
+      "UPDATE chat_settings SET compatibility_mode = ?, updated_at = datetime('now')",
+      mode,
+    );
+    logger.info({ mode }, "DB set_global_compatibility_mode");
+  }
+
+  setDefaultCompatibilityMode(mode: string): void {
+    if (!VALID_COMPAT_MODES.has(mode)) mode = DEFAULT_COMPAT_MODE;
+    this.ensureGlobalRow();
+    this.runSettingsQuery(
+      "UPDATE chat_settings SET compatibility_mode = ?, updated_at = datetime('now') WHERE chat_id = ?",
+      mode,
+      GLOBAL_CHAT_ID,
+    );
+    logger.info({ mode }, "DB set_default_compatibility_mode");
+  }
+
+  /** Last known device for the chat's audience (used by `auto`), or null. */
+  getAutoDevice(chatId: string): string | null {
+    const row = this.getSettingRow(chatId);
+    return row?.auto_device ?? null;
+  }
+
+  /**
+   * Persist the detected device for a chat (write-if-changed). Compares against
+   * the chat's OWN row (never the __global__ fallback) so a first detection
+   * creates the row, and never writes on the global defaults row.
+   */
+  setAutoDevice(chatId: string, device: string): void {
+    if (chatId === GLOBAL_CHAT_ID) return;
+    const row = this.getOneFromState<{ auto_device: string | null }>(
+      this.settingsState,
+      initSettingsTables,
+      "SELECT auto_device FROM chat_settings WHERE chat_id = ?",
+      chatId,
+    );
+    const current = row?.auto_device ?? null;
+    if (current === device) return; // write-if-changed
+    this.ensureChatRow(chatId);
+    this.runSettingsQuery(
+      "UPDATE chat_settings SET auto_device = ?, updated_at = datetime('now') WHERE chat_id = ?",
+      device,
+      chatId,
+    );
+    logger.info({ chatId, device }, "DB set_auto_device");
   }
 
   getTriggers(chatId: string): Set<string> {

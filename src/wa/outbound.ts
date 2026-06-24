@@ -38,6 +38,7 @@ import {
 } from '../mediaHandler.js';
 import { actionError } from './actions.js';
 import { sendRichMessage } from './interactive/index.js';
+import { resolveTier, tierAllows } from './interactive/compat.js';
 import config from '../config.js';
 import type { GroupContextValue, ParticipantRoleFlags } from './domain/caches.js';
 import type { SentEntry } from '../protocol/types.js';
@@ -404,7 +405,12 @@ async function sendOutgoing(ctx: AccountContext, {
     const renderedText = await renderOutboundMentions(ctx, chatId, normalizedText, group);
     group = renderedText.groupContext || group;
     let sentMsg: any;
-    if (config.llmReplyInteractive) {
+    // Device-aware gate: only use the interactive rich layout when the chat's
+    // compatibility tier permits it. In `safe` (web/desktop/unknown, or an
+    // explicit setting) fall through to plain text, which renders everywhere.
+    const useRich = config.llmReplyInteractive
+      && tierAllows(resolveTier(ctx.repos, chatId), 'rich');
+    if (useRich) {
       // Interactive mode: sendRichMessage with optional footer.
       // Note: not compatible with WhatsApp Web (viewOnceMessage wrapper).
       try {

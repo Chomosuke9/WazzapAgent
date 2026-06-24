@@ -16,6 +16,7 @@
  */
 import logger from '../logger.js';
 import config from '../config.js';
+import { getDevice } from 'baileys';
 import {
   normalizeJid,
   normalizeContextMsgId,
@@ -242,6 +243,20 @@ async function handleIncomingMessage(
     && /\p{L}/u.test(senderDisplay)
   ) {
     ctx.repos?.settings.upsertParticipantName(chatId, senderRef, senderDisplay);
+  }
+  // Compatibility mode (auto): remember the audience's device so `auto` can pick
+  // a tier (android→full, ios→semi, web/desktop→safe). Only learn from real
+  // senders (skip the bot's own echoes) and never downgrade a known device to
+  // `unknown`. In a DM the peer IS the audience; in a group we only trust an
+  // admin/owner (the people who configure the bot — "depend on who activated").
+  if (!fromMe && msg.key?.id && ctx.repos) {
+    const device = getDevice(msg.key.id);
+    if (device !== 'unknown') {
+      const isAdminOrOwner = senderRole.isAdmin || senderRole.isSuperAdmin || isOwnerJid(senderId);
+      if (!isGroup || isAdminOrOwner) {
+        ctx.repos.settings.setAutoDevice(chatId, device);
+      }
+    }
   }
   const contextMsgId = normalizeContextMsgId(precomputedContextMsgId) || ensureContextMsgId(ctx, chatId, msg.key.id);
   const chatName = isGroup ? (group?.name || chatId) : chatId;

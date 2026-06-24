@@ -45,6 +45,14 @@ import { dispatchRunCommand } from '../wa/runCommand.js';
 import { withJidQueue } from '../wa/sendQueue.js';
 import { sendCopyCode, sendQuickReply } from '../wa/interactive/index.js';
 import {
+  resolveTier,
+  tierAllows,
+  quizFallbackText,
+  buttonsFallbackText,
+  carouselFallbackText,
+  copyCodeFallbackText,
+} from '../wa/interactive/compat.js';
+import {
   normalizeJid,
   resolveQuotedMessage,
   nextContextMsgId,
@@ -226,6 +234,18 @@ type ActionHandler = (
   deps: DispatchDeps,
 ) => Promise<void>;
 
+/**
+ * Map a `sendOutgoing` result to the `{ contextMsgId, messageId }` ack shape the
+ * interactive senders return, so a text fallback acks identically (Python's
+ * provisional-history hydration is unchanged).
+ */
+function fallbackAckResult(
+  result: Awaited<ReturnType<typeof sendOutgoing>>,
+): { contextMsgId: string | null; messageId: string | null } {
+  const first = result?.sent?.[0];
+  return { contextMsgId: first?.contextMsgId ?? null, messageId: first?.messageId ?? null };
+}
+
 const handleSendMessage: ActionHandler = async (entry, payload, requestId, deps) => {
   const ctx = entry.ctx;
   const result = await deps.withJidQueue(ctx, payload.chatId, () => deps.sendOutgoing(ctx, payload));
@@ -333,6 +353,23 @@ const handleSendQuiz: ActionHandler = async (entry, payload, requestId) => {
   if (!sock) throw new Error('WhatsApp socket not ready');
   const { chatId, question, choices, replyTo, footer, requestId: rid } = payload;
   try {
+    // Compatibility gate: in a tier that can't render quick-reply buttons
+    // (safe — web/desktop/unknown) send a numbered text quiz instead. The LLM
+    // still sees its quiz (Python keeps the synthetic "[QUESTION SENT]" entry)
+    // and the user's typed answer is evaluated on the next turn.
+    if (!tierAllows(resolveTier(ctx.repos, chatId), 'quick_reply')) {
+      const result = await withJidQueue(ctx, chatId, () =>
+        sendOutgoing(ctx, { chatId, text: quizFallbackText(question, choices || []), replyTo }),
+      );
+      emitActionAck(entry, {
+        requestId: rid || requestId,
+        action: 'send_quiz',
+        ok: true,
+        detail: 'sent (text fallback)',
+        result: fallbackAckResult(result),
+      });
+      return;
+    }
     // Body is exactly what the LLM wrote in `question` — no auto-appending of choices.
     // The LLM already included the choices in the question text however it sees fit.
     // Resolve @Name (senderRef) mention tokens to JIDs, same as sendOutgoing() does
@@ -403,6 +440,16 @@ const handleSendButtons: ActionHandler = async (entry, payload, requestId, deps)
       ? JSON.stringify(btn.buttonParams)
       : (btn.buttonParamsJson || '{}'),
   }));
+  if (!tierAllows(resolveTier(entry.ctx.repos, payload.chatId), 'native_flow')) {
+    const result = await deps.withJidQueue(entry.ctx, payload.chatId, () =>
+      deps.sendOutgoing(entry.ctx, {
+        chatId: payload.chatId,
+        text: buttonsFallbackText(payload.text || '', nativeButtons),
+      }),
+    );
+    emitActionAck(entry, { requestId, action: 'send_buttons', ok: true, detail: 'sent (text fallback)', result: fallbackAckResult(result) });
+    return;
+  }
   const result = await deps.sendNativeFlow(sock as WaSocketLike, payload.chatId, payload.text || '', nativeButtons, { footer: payload.footer });
   emitActionAck(entry, { requestId, action: 'send_buttons', ok: true, detail: 'sent', result });
 };
@@ -422,6 +469,16 @@ const handleSendCarousel: ActionHandler = async (entry, payload, requestId, deps
         : (btn.buttonParamsJson || '{}'),
     })),
   }));
+  if (!tierAllows(resolveTier(entry.ctx.repos, payload.chatId), 'carousel')) {
+    const result = await deps.withJidQueue(entry.ctx, payload.chatId, () =>
+      deps.sendOutgoing(entry.ctx, {
+        chatId: payload.chatId,
+        text: carouselFallbackText(payload.text, cards),
+      }),
+    );
+    emitActionAck(entry, { requestId, action: 'send_carousel', ok: true, detail: 'sent (text fallback)', result: fallbackAckResult(result) });
+    return;
+  }
   const result = await deps.sendCarousel(sock as WaSocketLike, payload.chatId, cards, { text: payload.text });
   emitActionAck(entry, { requestId, action: 'send_carousel', ok: true, detail: 'sent', result });
 };
@@ -450,6 +507,16 @@ const handleSendCopyCode: ActionHandler = async (entry, payload, requestId, deps
     };
   }
   try {
+    if (!tierAllows(resolveTier(ctx.repos, chatId), 'cta_copy')) {
+      const result = await deps.withJidQueue(ctx, chatId, () =>
+        sendOutgoing(ctx, {
+          chatId,
+          text: copyCodeFallbackText(code, displayText, quotedPreviewText),
+        }),
+      );
+      emitActionAck(entry, { requestId, action: 'send_copy_code', ok: true, detail: 'sent (text fallback)', result: fallbackAckResult(result) });
+      return;
+    }
     const result = await deps.withJidQueue(ctx, chatId, () =>
       sendCopyCode(sock, chatId, '', code, displayText || 'Copy Code', {
         badge: false,

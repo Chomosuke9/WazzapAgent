@@ -32,6 +32,8 @@ export interface ChatSettingsRow {
   idle_trigger_min: number | null;
   idle_trigger_max: number | null;
   announcement_enabled: number;
+  compatibility_mode: string;
+  auto_device: string | null;
   updated_at: string;
 }
 
@@ -96,9 +98,9 @@ export abstract class BaseRepository {
     this.runSettingsQuery(
       `INSERT OR IGNORE INTO chat_settings
         (chat_id, prompt, permission, mode, triggers, llm2_model,
-         subagent_enabled, idle_trigger_min, idle_trigger_max, announcement_enabled, updated_at)
+         subagent_enabled, idle_trigger_min, idle_trigger_max, announcement_enabled, compatibility_mode, updated_at)
       SELECT ?, prompt, permission, mode, triggers, llm2_model,
-             subagent_enabled, idle_trigger_min, idle_trigger_max, announcement_enabled, datetime('now')
+             subagent_enabled, idle_trigger_min, idle_trigger_max, announcement_enabled, compatibility_mode, datetime('now')
       FROM chat_settings WHERE chat_id = ?`,
       chatId,
       GLOBAL_CHAT_ID,

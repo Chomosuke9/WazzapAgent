@@ -81,6 +81,8 @@ function initSettingsTables(db: SqliteDb): void {
       idle_trigger_min INTEGER DEFAULT NULL,
       idle_trigger_max INTEGER DEFAULT NULL,
       announcement_enabled INTEGER NOT NULL DEFAULT 1,
+      compatibility_mode TEXT NOT NULL DEFAULT 'auto',
+      auto_device      TEXT DEFAULT NULL,
       updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
@@ -108,6 +110,14 @@ function initSettingsTables(db: SqliteDb): void {
     db.run(
       "ALTER TABLE chat_settings ADD COLUMN announcement_enabled INTEGER NOT NULL DEFAULT 1",
     );
+  }
+  if (!chatSettingsCols.has("compatibility_mode")) {
+    db.run(
+      "ALTER TABLE chat_settings ADD COLUMN compatibility_mode TEXT NOT NULL DEFAULT 'auto'",
+    );
+  }
+  if (!chatSettingsCols.has("auto_device")) {
+    db.run("ALTER TABLE chat_settings ADD COLUMN auto_device TEXT DEFAULT NULL");
   }
 
   // Ensure a __global__ defaults row exists so setGlobal* updates it and
