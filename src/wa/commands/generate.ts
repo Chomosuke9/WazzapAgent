@@ -1,7 +1,6 @@
 import logger from "../../logger.js";
-import { getDevice } from "baileys";
 import { sendCopyCode } from "../interactive/index.js";
-import { deviceToTier, tierAllows, copyCodeFallbackText } from "../interactive/compat.js";
+import { resolveCallerTier, tierAllows, copyCodeFallbackText } from "../interactive/compat.js";
 import type {
   CommandContext,
   CommandHandler,
@@ -90,9 +89,10 @@ async function handleGenerate({
     `Valid for: ${durationLabel}\n\n` +
     `Copy the code by tapping the button below, then send it to the group where you want ${botName} activated (or to ${botName}'s private chat).`;
 
-  // Device gate: a cta_copy button doesn't render on `safe` (web/desktop), so
-  // send the code in a monospace block (long-press to copy) for those callers.
-  if (!tierAllows(deviceToTier(getDevice(msg?.key?.id || "")), "cta_copy")) {
+  // Device-/setting-aware: a cta_copy button doesn't render on `safe`
+  // (web/desktop), and an explicit `safe` compatibility_mode must be honoured,
+  // so send the code in a monospace block (long-press to copy) in that case.
+  if (!tierAllows(resolveCallerTier(repos, chatId, msg?.key?.id), "cta_copy")) {
     const fallbackBody =
       `*Activation code created successfully!*\n` +
       `Type: ${typeLabel}\n` +

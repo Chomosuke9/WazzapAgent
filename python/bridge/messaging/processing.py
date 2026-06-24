@@ -201,7 +201,13 @@ def _mentioned_participant_rows(payload: dict) -> list[dict]:
 
 def _mention_label(row: dict) -> str:
   if bool(row.get("isBot")):
-    name = _clean_text(row.get("name"))
+    # The bot's mention label must reflect its CANONICAL identity — the
+    # configured ASSISTANT_NAME (same name used for "(You)" turns and declared
+    # to the LLM as the "@<name> (bot)" mention token) — NOT the WhatsApp
+    # push-name the gateway resolved for the bot's JID. Those two can differ
+    # (e.g. a WhatsApp profile literally named "Vivy (bot)"), which made bot
+    # mentions render inconsistently and doubled the suffix ("Vivy (bot) (bot)").
+    name = _clean_text(assistant_name())
     return f"{name} (bot)" if name else "bot (bot)"
   name = _clean_text(row.get("name"))
   sender_ref = _clean_text(row.get("senderRef"))

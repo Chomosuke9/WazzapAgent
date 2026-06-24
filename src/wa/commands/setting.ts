@@ -1,7 +1,6 @@
 import logger from '../../logger.js';
-import { getDevice } from 'baileys';
 import { sendNativeFlow } from '../interactive/index.js';
-import { deviceToTier } from '../interactive/compat.js';
+import { resolveCallerTier, tierAllows } from '../interactive/compat.js';
 import config from '../../config.js';
 import * as registry from '../../server/accountRegistry.js';
 import { VALID_MODES, VALID_COMPAT_MODES } from '../../db/repositories/SettingsRepository.js';
@@ -43,14 +42,14 @@ async function handleSettings({ chatId, sock, repos, msg }: CommandContext): Pro
   const activationInfo = formatActivationInfo(repos!, chatId);
   const summary = `Current:\n- Mode: ${currentMode}\n- Model: ${activeModelName}\n- Permission: Level ${currentPermission} (${permissionLabel})\n- Idle Trigger: ${idleLabel}\n- Compatibility: ${compatMode}\n- Activation: ${activationInfo}`;
 
-  // Device-aware rendering. The interactive menu below is built entirely from
-  // `single_select`, which only renders on Android (the `full` tier). For every
-  // other CALLER device — iOS (`semi`, no single_select) and web/desktop/unknown
-  // (`safe`) — fall back to a plain-text menu so the caller can still read and
-  // operate /setting via the matching slash commands. This is keyed on the
-  // caller's own message device, independent of the chat's compatibility_mode.
-  const callerDevice = getDevice(msg?.key?.id || '');
-  if (deviceToTier(callerDevice) !== 'full') {
+  // Device-/setting-aware rendering. The interactive menu below is built
+  // entirely from `single_select` (the `list` interactive kind), which only the
+  // `full` tier renders. An explicit `safe`/`semi` compatibility_mode forces the
+  // plain-text menu; `auto` derives the tier from the CALLER's own message
+  // device (see `resolveCallerTier`) so the caller can still read and operate
+  // /setting via the matching slash commands.
+  const tier = resolveCallerTier(repos!, chatId, msg?.key?.id);
+  if (!tierAllows(tier, 'list')) {
     const text = [
       '*Chat Settings*',
       '',
@@ -179,7 +178,7 @@ export const settingsButton: ButtonHandler = {
   prefixes: ['settings:'],
   permission: 'owner or (isGroup and isAdmin)',
   run: async (bc, action) => {
-    const { sock, account, chatId } = bc;
+    const { sock, account, chatId, msg } = bc;
     if (action === 'model') {
       const models = account.repos!.model.getAllActiveModels();
       if (models.length === 0) {
@@ -189,6 +188,18 @@ export const settingsButton: ButtonHandler = {
       const currentModelId = account.repos!.model.getLlm2Model(chatId);
       const defaultModel = account.repos!.model.getDefaultLlm2Model();
       const activeModelId = currentModelId || defaultModel?.modelId || null;
+      // Respect the chat's compatibility mode: the picker is a single_select
+      // (`list`) menu, so on `safe`/`semi` (or a non-`full` caller in `auto`)
+      // fall back to a text list the caller switches with `/model <id>`.
+      if (!tierAllows(resolveCallerTier(account.repos, chatId, msg?.key?.id), 'list')) {
+        const lines = models.map(
+          (m) => `- \`${m.modelId}\`${m.modelId === activeModelId ? ' ✓' : ''} — ${m.displayName}${m.visionSupport ? ' 👁' : ''}`,
+        );
+        await sock.sendMessage(chatId, {
+          text: ['*Select LLM Model*', '', ...lines, '', 'Switch with `/model <id>`.'].join('\n'),
+        });
+        return;
+      }
       const sections = models.map((m) => ({
         title: m.displayName + (m.visionSupport ? ' 👁' : ''),
         rows: [

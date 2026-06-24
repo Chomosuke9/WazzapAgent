@@ -18,6 +18,7 @@
  * the WhatsApp message-id shape); see `inbound.ts`, which persists the last
  * KNOWN device per chat into `auto_device` for the `auto` resolution here.
  */
+import { getDevice } from 'baileys';
 import type { AccountRepositories } from '../../db/repositories/index.js';
 
 /** Device classes as predicted by Baileys' `getDevice(messageId)`. */
@@ -78,6 +79,34 @@ export function resolveTier(repos: AccountRepositories | undefined, chatId: stri
   if (mode === 'full' || mode === 'semi' || mode === 'safe') return mode;
   // auto → derive from the last known device, else safe.
   return deviceToTier(repos.settings.getAutoDevice(chatId));
+}
+
+/**
+ * Resolve the effective tier for an interactive message sent in DIRECT RESPONSE
+ * to a caller — a slash command or a button tap (both carry the triggering
+ * message). An explicit `full`/`semi`/`safe` `compatibility_mode` ALWAYS wins;
+ * only `auto` falls back to the CALLER's OWN device (the device that just sent
+ * the command / tapped the button), so the person reading the reply can operate
+ * it via the matching slash commands.
+ *
+ * Contrast with {@link resolveTier}, which for `auto` derives from the chat
+ * AUDIENCE's last-known device — the right choice for messages the bot sends
+ * proactively (LLM replies, quizzes) rather than in reply to a specific caller.
+ *
+ * When `repos` is absent (abnormal) the explicit setting can't be read, so the
+ * tier comes purely from the caller's device.
+ */
+export function resolveCallerTier(
+  repos: AccountRepositories | undefined,
+  chatId: string,
+  callerMessageId: string | null | undefined,
+): Tier {
+  const callerTier = deviceToTier(getDevice(callerMessageId || ''));
+  // Explicit setting wins when readable; otherwise (no repos / no settings repo
+  // / `auto`) the tier is the caller's own device.
+  const mode = repos?.settings?.getCompatibilityMode?.(chatId);
+  if (mode === 'full' || mode === 'semi' || mode === 'safe') return mode;
+  return callerTier;
 }
 
 // ---------------------------------------------------------------------------

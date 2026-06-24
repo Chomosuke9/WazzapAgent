@@ -1,7 +1,6 @@
 import logger from '../../logger.js';
-import { getDevice } from 'baileys';
 import { sendNativeFlow } from '../interactive/index.js';
-import { deviceToTier } from '../interactive/compat.js';
+import { resolveCallerTier, tierAllows } from '../interactive/compat.js';
 import config from '../../config.js';
 import * as registry from '../../server/accountRegistry.js';
 import type { WASocket } from 'baileys';
@@ -32,11 +31,13 @@ async function handleModelcfg({ chatId, senderId: _senderId, args, folderPath = 
   const subArgs = parts.slice(1);
 
   if (!subcommand) {
-    // Device-aware rendering (same rationale as /setting): the menu below is
-    // built from single_select, which only renders on Android. For iOS/web/
-    // desktop callers send a text menu listing the equivalent /modelcfg
-    // subcommands instead, so the owner can still configure models there.
-    if (deviceToTier(getDevice(msg?.key?.id || '')) !== 'full') {
+    // Device-/setting-aware rendering (same rationale as /setting): the menu
+    // below is built from single_select (the `list` kind), which only the
+    // `full` tier renders. An explicit `safe`/`semi` compatibility_mode forces
+    // the text menu; `auto` derives from the caller's own device. The text menu
+    // lists the equivalent /modelcfg subcommands so the owner can still configure
+    // models there.
+    if (!tierAllows(resolveCallerTier(repos, chatId, msg?.key?.id), 'list')) {
       const models = repos!.model.getAllModels();
       const defaultModel = repos!.model.getDefaultLlm2Model();
       const modelLines = models.length
@@ -133,6 +134,18 @@ async function handleModelcfg({ chatId, senderId: _senderId, args, folderPath = 
     if (models.length === 0) {
       try {
         await sock.sendMessage(chatId, { text: 'No models to remove.' });
+      } catch (err) { /* ignore */ }
+      return;
+    }
+    // Honour compatibility mode: this is a single_select (`list`) menu, so on
+    // `safe`/`semi` (or a non-`full` caller in `auto`) list the models as text
+    // and let the owner remove one with `/modelcfg remove <id>`.
+    if (!tierAllows(resolveCallerTier(repos, chatId, msg?.key?.id), 'list')) {
+      const lines = models.map((m) => `- \`${m.modelId}\` — ${m.displayName}${m.isActive ? '' : ' (inactive)'}`);
+      try {
+        await sock.sendMessage(chatId, {
+          text: ['*Remove Model*', '', ...lines, '', 'Remove with `/modelcfg remove <id>`.'].join('\n'),
+        });
       } catch (err) { /* ignore */ }
       return;
     }
@@ -466,10 +479,27 @@ function parseModelReply(ctx: AccountContext, chatId: string, text: string): Mod
   return null;
 }
 
-async function showModelSelectionForEdit(sock: WASocket, ctx: AccountContext, chatId: string): Promise<void> {
+async function showModelSelectionForEdit(sock: WASocket, ctx: AccountContext, chatId: string, callerMessageId?: string | null): Promise<void> {
   const models = ctx.repos!.model.getAllModels();
   if (models.length === 0) {
     await sock.sendMessage(chatId, { text: "No models to edit." });
+    return;
+  }
+  // Single_select (`list`) submenu → respect compatibility mode (text fallback
+  // on safe/semi or a non-`full` caller in auto).
+  if (!tierAllows(resolveCallerTier(ctx.repos, chatId, callerMessageId), 'list')) {
+    const lines = models.map(
+      (m) => `- \`${m.modelId}\` — ${m.displayName}${m.isActive ? '' : ' (inactive)'}`,
+    );
+    await sock.sendMessage(chatId, {
+      text: [
+        '*Edit Model*',
+        '',
+        ...lines,
+        '',
+        'Edit with `/modelcfg edit <id> name=… desc=… vision=true|false active=true|false`.',
+      ].join('\n'),
+    });
     return;
   }
   const sections = [
@@ -517,11 +547,20 @@ Or send "cancel" to cancel.`;
   await sock.sendMessage(chatId, { text: helpText });
 }
 
-async function showModelSelectionForDefault(sock: WASocket, ctx: AccountContext, chatId: string): Promise<void> {
+async function showModelSelectionForDefault(sock: WASocket, ctx: AccountContext, chatId: string, callerMessageId?: string | null): Promise<void> {
   const models = ctx.repos!.model.getAllModels().filter((m) => m.isActive);
   if (models.length === 0) {
     await sock.sendMessage(chatId, {
       text: "No active models to set as default.",
+    });
+    return;
+  }
+  // Single_select (`list`) submenu → respect compatibility mode (text fallback
+  // on safe/semi or a non-`full` caller in auto).
+  if (!tierAllows(resolveCallerTier(ctx.repos, chatId, callerMessageId), 'list')) {
+    const lines = models.map((m) => `- \`${m.modelId}\` — ${m.displayName}${m.visionSupport ? ' 👁' : ''}`);
+    await sock.sendMessage(chatId, {
+      text: ['*Set Default Model*', '', ...lines, '', 'Set with `/modelcfg default <id>`.'].join('\n'),
     });
     return;
   }
@@ -607,7 +646,7 @@ export const modelcfgButton: ButtonHandler = {
     }
 
     if (action === "edit") {
-      await showModelSelectionForEdit(sock, account, chatId);
+      await showModelSelectionForEdit(sock, account, chatId, bc.msg?.key?.id);
       return;
     }
 
@@ -615,7 +654,7 @@ export const modelcfgButton: ButtonHandler = {
       if (modelId) {
         await setDefaultModel(sock, account, account.folderPath, chatId, modelId);
       } else {
-        await showModelSelectionForDefault(sock, account, chatId);
+        await showModelSelectionForDefault(sock, account, chatId, bc.msg?.key?.id);
       }
       return;
     }
