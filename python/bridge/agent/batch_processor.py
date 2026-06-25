@@ -189,6 +189,34 @@ def _delete_history_note(context_msg_id: str | None) -> str | None:
   return f"Deleted message {normalized}."
 
 
+def _assistant_provisional(text, *, message_id, media=None, quoted_message_id=None):
+  """Build a provisional ('pending') assistant history entry.
+
+  Collapses the five near-identical WhatsAppMessage(...) builds in the action
+  dispatch loop. All quoted_*/sender_is_admin fields rely on their dataclass
+  defaults (None/False) — the originals set them explicitly to the same values.
+  """
+  return WhatsAppMessage(
+    timestamp_ms=int(time.time() * 1000),
+    sender=assistant_name(),
+    context_msg_id="pending",
+    sender_ref=assistant_sender_ref(),
+    text=text,
+    media=media,
+    quoted_message_id=_normalize_context_msg_id(quoted_message_id),
+    message_id=message_id,
+    role="assistant",
+  )
+
+
+def _remember(od, key, value, *, cap=4096):
+  """Insert into a bounded LRU OrderedDict, evicting oldest past ``cap``."""
+  od[key] = value
+  od.move_to_end(key)
+  while len(od) > cap:
+    od.popitem(last=False)
+
+
 def _record_invokers(session, chat_id, payloads):
   for _p in payloads:
     _ref = _clean_text(_p.get("senderRef"))
@@ -1193,27 +1221,11 @@ class BatchProcessor:
           request_id=request_id,
         )
         session._dashboard.record_stat(chat_id, "responses_sent")
-        pending_send_request_chat[request_id] = chat_id
-        pending_send_request_chat.move_to_end(request_id)
-        while len(pending_send_request_chat) > 4096:
-          pending_send_request_chat.popitem(last=False)
-        _prov_msg = WhatsAppMessage(
-          timestamp_ms=int(time.time() * 1000),
-          sender=assistant_name(),
-          context_msg_id="pending",
-          sender_ref=assistant_sender_ref(),
-          sender_is_admin=False,
-          text=action_text or None,
-          media=None,
-          quoted_message_id=_normalize_context_msg_id(action.get("replyTo")),
-          quoted_sender=None,
-          quoted_text=None,
-          quoted_media=None,
-          quoted_sender_ref=None,
-          quoted_sender_is_admin=False,
-          quoted_sender_is_super_admin=False,
+        _remember(pending_send_request_chat, request_id, chat_id)
+        _prov_msg = _assistant_provisional(
+          action_text or None,
           message_id=f"local-send-{request_id}",
-          role="assistant",
+          quoted_message_id=action.get("replyTo"),
         )
         hydrate_quoted_from_history(_prov_msg, history)
         _append_history(
@@ -1299,23 +1311,11 @@ class BatchProcessor:
           )
           session._dashboard.record_stat(chat_id, "stickers_sent")
           # Add history entry so LLM knows which sticker was sent
-          _sticker_prov_msg = WhatsAppMessage(
-            timestamp_ms=int(time.time() * 1000),
-            sender=assistant_name(),
-            context_msg_id="pending",
-            sender_ref=assistant_sender_ref(),
-            sender_is_admin=False,
-            text=f"<media:sticker={expression}>",
+          _sticker_prov_msg = _assistant_provisional(
+            f"<media:sticker={expression}>",
             media="sticker",
-            quoted_message_id=_normalize_context_msg_id(action.get("contextMsgId")),
-            quoted_sender=None,
-            quoted_text=None,
-            quoted_media=None,
-            quoted_sender_ref=None,
-            quoted_sender_is_admin=False,
-            quoted_sender_is_super_admin=False,
             message_id=f"local-sticker-{request_id}",
-            role="assistant",
+            quoted_message_id=action.get("contextMsgId"),
           )
           hydrate_quoted_from_history(_sticker_prov_msg, history)
           _append_history(history, _sticker_prov_msg)
@@ -1343,23 +1343,11 @@ class BatchProcessor:
           )
           session._dashboard.record_stat(chat_id, "stickers_sent")
           # Add history entry so LLM knows which sticker was sent
-          _sticker_prov_msg = WhatsAppMessage(
-            timestamp_ms=int(time.time() * 1000),
-            sender=assistant_name(),
-            context_msg_id="pending",
-            sender_ref=assistant_sender_ref(),
-            sender_is_admin=False,
-            text=f"<media:sticker={sticker_name}>",
+          _sticker_prov_msg = _assistant_provisional(
+            f"<media:sticker={sticker_name}>",
             media="sticker",
-            quoted_message_id=_normalize_context_msg_id(action.get("replyTo")),
-            quoted_sender=None,
-            quoted_text=None,
-            quoted_media=None,
-            quoted_sender_ref=None,
-            quoted_sender_is_admin=False,
-            quoted_sender_is_super_admin=False,
             message_id=f"local-sticker-{request_id}",
-            role="assistant",
+            quoted_message_id=action.get("replyTo"),
           )
           hydrate_quoted_from_history(_sticker_prov_msg, history)
           _append_history(history, _sticker_prov_msg)
@@ -1392,23 +1380,10 @@ class BatchProcessor:
           f"{action.get('question', '')}\n"
           f"[BUTTONS] {_choice_summary}"
         )
-        _prov_quiz_msg = WhatsAppMessage(
-          timestamp_ms=int(time.time() * 1000),
-          sender=assistant_name(),
-          context_msg_id="pending",
-          sender_ref=assistant_sender_ref(),
-          sender_is_admin=False,
-          text=_quiz_history_text,
-          media=None,
-          quoted_message_id=_normalize_context_msg_id(action.get("replyTo")),
-          quoted_sender=None,
-          quoted_text=None,
-          quoted_media=None,
-          quoted_sender_ref=None,
-          quoted_sender_is_admin=False,
-          quoted_sender_is_super_admin=False,
+        _prov_quiz_msg = _assistant_provisional(
+          _quiz_history_text,
           message_id=f"local-quiz-{request_id}",
-          role="assistant",
+          quoted_message_id=action.get("replyTo"),
         )
         hydrate_quoted_from_history(_prov_quiz_msg, history)
         _append_history(history, _prov_quiz_msg)
@@ -1446,22 +1421,12 @@ class BatchProcessor:
         # hydrate the real contextMsgId and lets the bot's own fromMe echo
         # MERGE into this entry instead of appending a duplicate (mirrors the
         # send_message branch).
-        _mute_prov = WhatsAppMessage(
-          timestamp_ms=int(time.time() * 1000),
-          sender=assistant_name(),
-          context_msg_id="pending",
-          sender_ref=assistant_sender_ref(),
-          sender_is_admin=False,
-          text=notify_text,
-          media=None,
+        _mute_prov = _assistant_provisional(
+          notify_text,
           message_id=f"local-send-{notify_rid}",
-          role="assistant",
         )
         _append_history(history, _mute_prov)
-        pending_send_request_chat[notify_rid] = chat_id
-        pending_send_request_chat.move_to_end(notify_rid)
-        while len(pending_send_request_chat) > 4096:
-          pending_send_request_chat.popitem(last=False)
+        _remember(pending_send_request_chat, notify_rid, chat_id)
         action_counts[action_type] += 1
         continue
       if action_type == "execute_subtask":
@@ -1497,10 +1462,7 @@ class BatchProcessor:
         # Track this request so the action_ack handler can append the
         # corresponding "Command X executed successfully/failed" log
         # line into per-chat history once Node confirms execution.
-        pending_run_command_chat[request_id] = (chat_id, command_text)
-        pending_run_command_chat.move_to_end(request_id)
-        while len(pending_run_command_chat) > 4096:
-          pending_run_command_chat.popitem(last=False)
+        _remember(pending_run_command_chat, request_id, (chat_id, command_text))
         action_counts[action_type] += 1
         continue
       logger.warning(
