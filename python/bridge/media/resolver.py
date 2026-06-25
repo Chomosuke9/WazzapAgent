@@ -10,6 +10,7 @@ closures; only their home moved.
 """
 from __future__ import annotations
 
+import mimetypes
 import os
 import time
 from collections import deque
@@ -182,13 +183,8 @@ def _resolve_quoted_media_attachments(
 
 def _guess_mime_from_path(file_path: str) -> str:
   """Guess MIME type from file path."""
-  import mimetypes as _mt
-  guessed = _mt.guess_type(file_path)[0]
-  if guessed and guessed.startswith("image/"):
-    return guessed
-  if file_path.lower().endswith(".webp"):
-    return "image/webp"
-  return "image/jpeg"
+  guessed = mimetypes.guess_type(file_path)[0]
+  return guessed or "image/jpeg"
 
 
 def _resolve_sticker_media(

@@ -52,16 +52,7 @@ function isPathWithin(basePath: string, candidatePath: string): boolean {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
-/**
- * Per-tenant directories an attachment path is allowed to live under
- * (CONTRACT.md §8). When omitted, falls back to the process-global `config.*`
- * dirs so the single-account default and existing callers are unchanged.
- */
-export interface AllowedAttachmentDirs {
-  mediaDir?: string;
-  stickersDir?: string;
-  stickerUploadDir?: string;
-}
+export type AllowedAttachmentDirs = { mediaDir?: string; stickersDir?: string; stickerUploadDir?: string };
 
 async function resolveAllowedAttachmentPath(
   rawPath: unknown,
@@ -106,44 +97,87 @@ async function resolveAllowedAttachmentPath(
 function inferExtension(mime: string | null | undefined): string {
   const normalized = normalizeMime(mime);
   if (!normalized) return 'bin';
-  if (normalized.includes('jpeg')) return 'jpg';
-  if (normalized.includes('png')) return 'png';
-  if (normalized.includes('gif')) return 'gif';
-  if (normalized.includes('webp')) return 'webp';
-  if (normalized.includes('bmp')) return 'bmp';
-  if (normalized.includes('heic')) return 'heic';
-  if (normalized.includes('heif')) return 'heif';
-  if (normalized.includes('avif')) return 'avif';
-  if (normalized === 'video/x-matroska' || normalized.includes('matroska')) return 'mkv';
-  if (normalized === 'video/quicktime' || normalized.includes('quicktime')) return 'mov';
-  if (normalized === 'video/x-msvideo' || normalized.includes('msvideo')) return 'avi';
-  // Order matters: ``audio/mp4`` and ``audio/x-m4a`` must be checked before the
-  // generic ``includes('mp4')`` fallback, otherwise audio files would all get
-  // a ``.mp4`` extension instead of ``.m4a``.
-  if (normalized === 'audio/mp4' || normalized === 'audio/x-m4a') return 'm4a';
-  if (normalized === 'video/mp4' || normalized.includes('mp4')) return 'mp4';
-  if (normalized === 'audio/mpeg' || normalized.includes('mp3')) return 'mp3';
-  if (normalized === 'audio/wav' || normalized === 'audio/x-wav') return 'wav';
-  if (normalized === 'audio/flac') return 'flac';
-  if (normalized.includes('ogg')) return 'ogg';
-  if (normalized.includes('pdf')) return 'pdf';
-  if (normalized.includes('wordprocessingml')) return 'docx';
-  if (normalized.includes('spreadsheetml')) return 'xlsx';
-  if (normalized.includes('presentationml')) return 'pptx';
-  if (normalized.includes('opendocument.text')) return 'odt';
-  if (normalized.includes('opendocument.spreadsheet')) return 'ods';
-  if (normalized.includes('opendocument.presentation')) return 'odp';
-  if (normalized.includes('rtf')) return 'rtf';
-  if (normalized.includes('7z-compressed')) return '7z';
-  if (normalized.includes('vnd.rar') || normalized === 'application/x-rar-compressed') return 'rar';
-  if (normalized.includes('gzip')) return 'gz';
-  if (normalized.includes('x-tar')) return 'tar';
-  if (normalized.includes('zip')) return 'zip';
-  if (normalized === 'text/plain') return 'txt';
-  if (normalized === 'text/csv') return 'csv';
-  if (normalized === 'text/html') return 'html';
-  if (normalized === 'application/json') return 'json';
-  if (normalized === 'application/xml' || normalized === 'text/xml') return 'xml';
+
+  const MIME_EXT: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'image/bmp': 'bmp',
+    'image/heic': 'heic',
+    'image/heif': 'heif',
+    'image/avif': 'avif',
+    'video/x-matroska': 'mkv',
+    'video/quicktime': 'mov',
+    'video/x-msvideo': 'avi',
+    'audio/mp4': 'm4a',
+    'audio/x-m4a': 'm4a',
+    'video/mp4': 'mp4',
+    'audio/mpeg': 'mp3',
+    'audio/wav': 'wav',
+    'audio/x-wav': 'wav',
+    'audio/flac': 'flac',
+    'application/x-rar-compressed': 'rar',
+    'text/plain': 'txt',
+    'text/csv': 'csv',
+    'text/html': 'html',
+    'application/json': 'json',
+    'application/xml': 'xml',
+    'text/xml': 'xml',
+    'application/pdf': 'pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+    'application/vnd.oasis.opendocument.text': 'odt',
+    'application/vnd.oasis.opendocument.spreadsheet': 'ods',
+    'application/vnd.oasis.opendocument.presentation': 'odp',
+    'application/rtf': 'rtf',
+    'application/x-7z-compressed': '7z',
+    'application/vnd.rar': 'rar',
+    'application/gzip': 'gz',
+    'application/x-tar': 'tar',
+    'application/zip': 'zip',
+    'audio/ogg': 'ogg',
+  };
+
+  const exact = MIME_EXT[normalized];
+  if (exact) return exact;
+
+  // ponytail: substring fallback for non-standard MIME variants
+  const SUBSTRINGS: [string, string][] = [
+    ['jpeg', 'jpg'],
+    ['png', 'png'],
+    ['gif', 'gif'],
+    ['webp', 'webp'],
+    ['bmp', 'bmp'],
+    ['heic', 'heic'],
+    ['heif', 'heif'],
+    ['avif', 'avif'],
+    ['matroska', 'mkv'],
+    ['quicktime', 'mov'],
+    ['msvideo', 'avi'],
+    ['mp4', 'mp4'],
+    ['mp3', 'mp3'],
+    ['ogg', 'ogg'],
+    ['pdf', 'pdf'],
+    ['wordprocessingml', 'docx'],
+    ['spreadsheetml', 'xlsx'],
+    ['presentationml', 'pptx'],
+    ['opendocument.text', 'odt'],
+    ['opendocument.spreadsheet', 'ods'],
+    ['opendocument.presentation', 'odp'],
+    ['rtf', 'rtf'],
+    ['7z-compressed', '7z'],
+    ['vnd.rar', 'rar'],
+    ['gzip', 'gz'],
+    ['x-tar', 'tar'],
+    ['zip', 'zip'],
+  ];
+
+  for (const [sub, ext] of SUBSTRINGS) {
+    if (normalized.includes(sub)) return ext;
+  }
+
   return normalized.split('/').pop() || 'bin';
 }
 

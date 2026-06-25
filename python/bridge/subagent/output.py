@@ -286,6 +286,80 @@ def _format_size(size_bytes: int) -> str:
     return f"{size_bytes / 1024:.1f} KB"
   return f"{size_bytes / (1024 * 1024):.1f} MB"
 
+def _stage_single_file(
+  used_names: set[str],
+  target_root: Path,
+  safe_name: str,
+  *,
+  data: bytes | None = None,
+  source_path: str | None = None,
+  size_bytes: int,
+  mime_override: str | None = None,
+) -> StagedFile | None:
+  """Collision-avoiding write/copy + thumbnail + StagedFile for one file.
+
+  ``safe_name`` must already be cleaned of directory components.
+
+  Exactly one of ``data`` (write bytes) or ``source_path`` (copy file)
+  must be provided.
+
+  Returns ``StagedFile`` on success; ``None`` on write/copy/traversal error.
+  """
+  final_name = safe_name
+  counter = 1
+  while final_name in used_names or (target_root / final_name).exists():
+    stem, ext = os.path.splitext(safe_name)
+    final_name = f"{stem}_{counter}{ext}"
+    counter += 1
+  used_names.add(final_name)
+
+  dest = target_root / final_name
+  try:
+    dest.resolve().relative_to(target_root.resolve())
+  except ValueError:
+    return None
+
+  if data is not None:
+    try:
+      dest.write_bytes(data)
+    except OSError:
+      return None
+  else:
+    assert source_path is not None
+    try:
+      shutil.copyfile(source_path, dest)
+    except OSError:
+      return None
+
+  real_dest = str(dest.resolve())
+  kind, mime_detected = detect_kind(real_dest)
+  if mime_detected == "application/octet-stream" and mime_override:
+    mime_detected = mime_override
+    if mime_detected.startswith("image/"):
+      kind = "image" if mime_detected in _WA_SUPPORTED_IMAGE_MIMES else "document"
+    elif mime_detected.startswith("video/"):
+      kind = "video" if mime_detected in _WA_SUPPORTED_VIDEO_MIMES else "document"
+    elif mime_detected.startswith("audio/"):
+      kind = "audio" if mime_detected in _WA_SUPPORTED_AUDIO_MIMES else "document"
+
+  thumbnail_b64_val: str | None = None
+  if kind == "document" and generate_document_thumbnail is not None:
+    try:
+      thumb_bytes = generate_document_thumbnail(real_dest, mime_detected)
+      if thumb_bytes:
+        thumbnail_b64_val = base64.b64encode(thumb_bytes).decode("ascii")
+    except Exception:
+      logger.debug("_stage_single_file: thumbnail generation failed for %s", real_dest, exc_info=True)
+
+  return StagedFile(
+    path=real_dest,
+    name=final_name,
+    size_bytes=size_bytes,
+    mime=mime_detected,
+    kind=kind,
+    thumbnail_base64=thumbnail_b64_val,
+  )
+
 def stage_output_files(
   session_id: str,
   raw_paths: Iterable[str],
@@ -371,59 +445,13 @@ def stage_output_files(
         skipped.append(SkippedFile(source_path="", name=name, reason=f"file too large ({_format_size(size)} > 200 MB)"))
         continue
 
-      final_name = safe_name
-      counter = 1
-      while final_name in used_names or (target_root / final_name).exists():
-        stem, ext = os.path.splitext(safe_name)
-        final_name = f"{stem}_{counter}{ext}"
-        counter += 1
-      used_names.add(final_name)
-
-      dest = target_root / final_name
-      # Defense in depth: confirm the resolved destination is still inside the
-      # per-session staging root before writing.
-      try:
-        dest.resolve().relative_to(target_root.resolve())
-      except ValueError:
-        skipped.append(SkippedFile(source_path="", name=name, reason="unsafe file name (path traversal rejected)"))
-        continue
-      try:
-        dest.write_bytes(data)
-      except OSError as err:
-        skipped.append(SkippedFile(source_path="", name=name, reason=f"write failed: {err}"))
-        continue
-
-      real_dest = str(dest.resolve())
-      kind, mime_detected = detect_kind(real_dest)
-      # Use provided mime as fallback only if detection gives octet-stream
       provided_mime = item.get("mime") or ""
-      if mime_detected == "application/octet-stream" and provided_mime:
-        mime_detected = provided_mime
-        # Re-check kind with provided mime
-        if mime_detected.startswith("image/"):
-          kind = "image" if mime_detected in _WA_SUPPORTED_IMAGE_MIMES else "document"
-        elif mime_detected.startswith("video/"):
-          kind = "video" if mime_detected in _WA_SUPPORTED_VIDEO_MIMES else "document"
-        elif mime_detected.startswith("audio/"):
-          kind = "audio" if mime_detected in _WA_SUPPORTED_AUDIO_MIMES else "document"
-
-      thumbnail_b64_val: str | None = None
-      if kind == "document" and generate_document_thumbnail is not None:
-        try:
-          thumb_bytes = generate_document_thumbnail(real_dest, mime_detected)
-          if thumb_bytes:
-            thumbnail_b64_val = base64.b64encode(thumb_bytes).decode("ascii")
-        except Exception:
-          logger.debug("stage_output_files: thumbnail generation failed for %s", real_dest, exc_info=True)
-
-      staged.append(StagedFile(
-        path=real_dest,
-        name=final_name,
-        size_bytes=size,
-        mime=mime_detected,
-        kind=kind,
-        thumbnail_base64=thumbnail_b64_val,
-      ))
+      result = _stage_single_file(used_names, target_root, safe_name,
+        data=data, size_bytes=size, mime_override=provided_mime or None)
+      if result is None:
+        skipped.append(SkippedFile(source_path="", name=name, reason="base64 write failed or unsafe name"))
+        continue
+      staged.append(result)
 
     # Second pass: copy any raw_paths whose basename is NOT already represented
     # in files_content. These are oversized files that SubAgents couldn't inline;
@@ -457,41 +485,12 @@ def stage_output_files(
         ))
         continue
 
-      final_name = name
-      counter = 1
-      while final_name in used_names or (target_root / final_name).exists():
-        stem, ext = os.path.splitext(name)
-        final_name = f"{stem}_{counter}{ext}"
-        counter += 1
-      used_names.add(final_name)
-
-      dest = target_root / final_name
-      try:
-        shutil.copyfile(src, dest)
-      except OSError as err:
-        skipped.append(SkippedFile(source_path=src, name=name, reason=f"copy failed: {err}"))
+      result = _stage_single_file(used_names, target_root, name,
+        source_path=src, size_bytes=size)
+      if result is None:
+        skipped.append(SkippedFile(source_path=src, name=name, reason="copy failed"))
         continue
-
-      real_dest = str(dest.resolve())
-      kind, mime = detect_kind(real_dest)
-
-      thumbnail_b64_val = None
-      if kind == "document" and generate_document_thumbnail is not None:
-        try:
-          thumb_bytes = generate_document_thumbnail(real_dest, mime)
-          if thumb_bytes:
-            thumbnail_b64_val = base64.b64encode(thumb_bytes).decode("ascii")
-        except Exception:
-          logger.debug("stage_output_files: thumbnail generation failed for %s", real_dest, exc_info=True)
-
-      staged.append(StagedFile(
-        path=real_dest,
-        name=final_name,
-        size_bytes=size,
-        mime=mime,
-        kind=kind,
-        thumbnail_base64=thumbnail_b64_val,
-      ))
+      staged.append(result)
 
     return StagedOutputs(staged=staged, skipped=skipped)
 
@@ -518,53 +517,12 @@ def stage_output_files(
       ))
       continue
 
-    # Avoid clobbering when two source files share a basename.
-    final_name = name
-    counter = 1
-    while final_name in used_names or (target_root / final_name).exists():
-      stem, ext = os.path.splitext(name)
-      final_name = f"{stem}_{counter}{ext}"
-      counter += 1
-    used_names.add(final_name)
-
-    dest = target_root / final_name
-    try:
-      shutil.copyfile(src, dest)
-    except OSError as err:
-      skipped.append(SkippedFile(source_path=src, name=name, reason=f"copy failed: {err}"))
+    result = _stage_single_file(used_names, target_root, name,
+      source_path=src, size_bytes=size)
+    if result is None:
+      skipped.append(SkippedFile(source_path=src, name=name, reason="copy failed"))
       continue
-
-    real_dest = str(dest.resolve())
-    kind, mime = detect_kind(real_dest)
-    # NOTE: MP4 re-encoding (ffmpeg -preset fast) was removed to avoid
-    # blocking the bot for 10-20s during subagent result delivery. Videos
-    # from common sources (yt-dlp, TikTok) are typically already
-    # WhatsApp-compatible (H.264+AAC+faststart).
-
-    # Generate a JPEG thumbnail for documents. WhatsApp shows a preview
-    # bubble for documents only when ``jpegThumbnail`` is provided; without
-    # it the preview is solid white.  We skip thumbnail generation for
-    # audio/video because WhatsApp already renders those natively.
-    thumbnail_b64: str | None = None
-    if kind == "document" and generate_document_thumbnail is not None:
-      try:
-        thumb_bytes = generate_document_thumbnail(real_dest, mime)
-        if thumb_bytes:
-          thumbnail_b64 = base64.b64encode(thumb_bytes).decode("ascii")
-      except Exception:
-        logger.debug(
-          "stage_output_files: thumbnail generation failed for %s",
-          real_dest, exc_info=True,
-        )
-
-    staged.append(StagedFile(
-      path=real_dest,
-      name=final_name,
-      size_bytes=size,
-      mime=mime,
-      kind=kind,
-      thumbnail_base64=thumbnail_b64,
-    ))
+    staged.append(result)
 
   return StagedOutputs(staged=staged, skipped=skipped)
 

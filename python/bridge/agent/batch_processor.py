@@ -189,6 +189,14 @@ def _delete_history_note(context_msg_id: str | None) -> str | None:
   return f"Deleted message {normalized}."
 
 
+def _record_invokers(session, chat_id, payloads):
+  for _p in payloads:
+    _ref = _clean_text(_p.get("senderRef"))
+    _name = _clean_text(_p.get("senderName"))
+    if _ref:
+      session._dashboard.record_user_invoke(chat_id, _ref, _name)
+
+
 @dataclass
 class PendingChat:
   payloads: list[dict] = field(default_factory=list)
@@ -750,11 +758,7 @@ class BatchProcessor:
         )
         llm1_ms = 0
         # Record invoking user for dashboard
-        for _pp in prefix_matched_payloads:
-          _pp_ref = _clean_text(_pp.get("senderRef"))
-          _pp_name = _clean_text(_pp.get("senderName"))
-          if _pp_ref:
-            session._dashboard.record_user_invoke(chat_id, _pp_ref, _pp_name)
+        _record_invokers(session, chat_id, prefix_matched_payloads)
         logger.info(
           "prefix mode: matched %d/%d payloads; skipping LLM1",
           len(prefix_matched_payloads), len(llm1_trigger_payloads),
@@ -771,11 +775,7 @@ class BatchProcessor:
           reason="Hybrid mode: bot was explicitly invoked (prefix trigger in batch).",
         )
         llm1_ms = 0
-        for _pp in prefix_matched_payloads:
-          _pp_ref = _clean_text(_pp.get("senderRef"))
-          _pp_name = _clean_text(_pp.get("senderName"))
-          if _pp_ref:
-            session._dashboard.record_user_invoke(chat_id, _pp_ref, _pp_name)
+        _record_invokers(session, chat_id, prefix_matched_payloads)
         logger.info(
           "hybrid mode: prefix matched %d/%d payloads; skipping LLM1",
           len(prefix_matched_payloads), len(llm1_trigger_payloads),
@@ -833,12 +833,7 @@ class BatchProcessor:
             reason="Hybrid mode: prefix trigger interrupted LLM1; responding immediately.",
           )
           # Record invoking users from new payloads
-          for _np in new_payloads:
-            if _message_matches_prefix(_np, triggers):
-              _np_ref = _clean_text(_np.get("senderRef"))
-              _np_name = _clean_text(_np.get("senderName"))
-              if _np_ref:
-                session._dashboard.record_user_invoke(chat_id, _np_ref, _np_name)
+          _record_invokers(session, chat_id, [p for p in new_payloads if _message_matches_prefix(p, triggers)])
           logger.info(
             "hybrid mode: prefix trigger interrupted LLM1 after %dms; merged %d new payloads",
             llm1_ms, len(new_payloads),
@@ -859,11 +854,7 @@ class BatchProcessor:
           if decision.output_tokens:
             session._dashboard.record_stat(chat_id, "llm1_output_tokens", decision.output_tokens)
           if decision.should_response:
-            for _ap in llm1_trigger_payloads:
-              _ap_ref = _clean_text(_ap.get("senderRef"))
-              _ap_name = _clean_text(_ap.get("senderName"))
-              if _ap_ref:
-                session._dashboard.record_user_invoke(chat_id, _ap_ref, _ap_name)
+            _record_invokers(session, chat_id, llm1_trigger_payloads)
           logger.info(
             "hybrid mode: LLM1 completed in %dms (no prefix interrupt); should_response=%s",
             llm1_ms, decision.should_response,
@@ -884,13 +875,8 @@ class BatchProcessor:
         session._dashboard.record_stat(chat_id, "llm1_input_tokens", decision.input_tokens)
       if decision.output_tokens:
         session._dashboard.record_stat(chat_id, "llm1_output_tokens", decision.output_tokens)
-      # Record invoking user for auto mode too
       if decision.should_response:
-        for _ap in llm1_trigger_payloads:
-          _ap_ref = _clean_text(_ap.get("senderRef"))
-          _ap_name = _clean_text(_ap.get("senderName"))
-          if _ap_ref:
-            session._dashboard.record_user_invoke(chat_id, _ap_ref, _ap_name)
+        _record_invokers(session, chat_id, llm1_trigger_payloads)
     ctx.decision = decision
     ctx.group_description = group_description
     ctx.db_prompt = db_prompt

@@ -1,7 +1,7 @@
 """Step 29 — provisional-history hydration reconcile tests.
 
 Drives the agent's re-homed ``action_ack`` handler
-(:func:`bridge.messaging.ack_handler.handle_action_ack`) directly with a
+(:func:`bridge.agent.ack_hydrator.handle_action_ack`) directly with a
 synthetic :class:`wasocket.protocol.AckResult` and asserts the three behaviors
 the old ``async for raw in ws`` loop used to provide are preserved verbatim:
 
@@ -14,7 +14,7 @@ the old ``async for raw in ws`` loop used to provide are preserved verbatim:
       ``"Command <name> executed successfully"`` (``ok=True``) / the failure
       line (``ok=False``) to that chat's history.
 
-These import only the dependency-light ``ack_handler`` module (NOT
+These import only the dependency-light ``ack_hydrator`` module (NOT
 ``bridge.main``, which pulls in PIL / langchain), mirroring how
 ``test_idle_trigger`` avoids the heavy import.
 """
@@ -22,7 +22,7 @@ import asyncio
 from collections import OrderedDict, defaultdict, deque
 
 from bridge.history import WhatsAppMessage
-from bridge.messaging.ack_handler import handle_action_ack
+from bridge.agent.ack_hydrator import handle_action_ack
 from wasocket.protocol import AckResult
 
 

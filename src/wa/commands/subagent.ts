@@ -1,6 +1,5 @@
 import config from "../../config.js";
 import * as registry from "../../server/accountRegistry.js";
-import { isFeatureConfigured, unconfiguredFeatureMessage } from "../featureAvailability.js";
 import type { AccountRepositories } from "../../db/repositories/index.js";
 import { parseConfigScope, scopeSuffix, type ConfigScope } from "./configScope.js";
 import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
@@ -59,10 +58,12 @@ async function handleSubagent({ chatId, args, folderPath = config.dataDir, sock,
     // Enabling the sub-agent is pointless until the service URL is configured —
     // surface a clear error so the owner knows their setup is incomplete.
     // Disabling is always allowed (e.g. to turn off a previously-seeded default).
-    if (enabled && !isFeatureConfigured("subagent")) {
+    if (enabled && !config.subagentConfigured) {
       try {
         await sock.sendMessage(chatId, {
-          text: unconfiguredFeatureMessage("subagent"),
+          text:
+            "The sub-agent isn't configured yet. Set SUBAGENT_URL in your .env and " +
+            "restart the bot before enabling it.",
         });
       } catch (err) {
         /* ignore */

@@ -298,49 +298,36 @@ async function resolveLidForPhone(sock: any, phone: unknown): Promise<string | n
 
 function isOwnerJid(senderId: unknown): boolean {
   if (!senderId) return false;
-  const candidates = new Set<string>();
   const raw = String(senderId).trim().toLowerCase();
-  const normalized = (normalizeJid(senderId) || String(senderId)).toLowerCase();
-  if (raw) candidates.add(raw);
-  if (normalized) candidates.add(normalized);
-
-  for (const candidate of Array.from(candidates)) {
-    if (!candidate) continue;
-    if (candidate.includes('@')) {
-      const [local, domain] = candidate.split('@');
+  const normalized = (normalizeJid(senderId) || raw).toLowerCase();
+  const candidates = new Set([raw, normalized]);
+  for (const s of [raw, normalized]) {
+    if (s.includes('@')) {
+      const local = s.split('@')[0];
       if (local) {
         candidates.add(local);
         if (local.includes(':')) {
           const base = local.split(':')[0];
-          if (base) {
-            candidates.add(base);
-            candidates.add(`${base}@${domain || 's.whatsapp.net'}`);
-          }
+          if (base) { candidates.add(base); candidates.add(`${base}@s.whatsapp.net`); }
         }
       }
     }
-    const digits = candidate.replace(/\D/g, '');
-    if (digits.length >= 5) {
-      candidates.add(digits);
-      candidates.add(`${digits}@s.whatsapp.net`);
-    }
+    const digits = s.replace(/\D/g, '');
+    if (digits.length >= 5) { candidates.add(digits); candidates.add(`${digits}@s.whatsapp.net`); }
   }
-
   const ownerEntries = config.botOwnerJids.concat(Array.from(runtimeOwnerLids));
-  const match = ownerEntries.some((ownerJid) => {
+  return ownerEntries.some(ownerJid => {
     if (!ownerJid) return false;
     const ownerLocal = ownerJid.split('@')[0];
     const ownerDigits = ownerJid.replace(/\D/g, '');
     for (const candidate of candidates) {
       if (candidate === ownerJid) return true;
       if (ownerLocal && candidate === ownerLocal) return true;
-      const candidateDigits = candidate.replace(/\D/g, '');
-      if (ownerDigits && candidateDigits && ownerDigits === candidateDigits) return true;
+      const cd = candidate.replace(/\D/g, '');
+      if (ownerDigits && cd && ownerDigits === cd) return true;
     }
     return false;
   });
-
-  return match;
 }
 
 export {

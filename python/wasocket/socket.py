@@ -550,21 +550,6 @@ class WaSocket:
         await self._transport.send(action_frame)
         return await future
 
-    async def _await_ack(self, action_frame: Any, request_id: str) -> dict:
-        """Register the pending future, send the frame, and await the ack.
-
-        Registration happens BEFORE the send so an ack that races back through
-        the pump always finds its future. Returns the ack ``result`` dict, or
-        raises the mapped :class:`WaSocketError` (set by the frame router on
-        ``error`` / ``ok=false``) or a ``timeout`` error on ack-wait expiry.
-
-        Thin wrapper over :meth:`_dispatch_action` for the SDK-allocated-id path
-        (kept as a stable internal entry point).
-        """
-        return await self._dispatch_action(
-            action_frame, request_id, caller_supplied=False
-        )
-
     # ------------------------------------------------------------------ #
     # Internal: transport callbacks
     # ------------------------------------------------------------------ #

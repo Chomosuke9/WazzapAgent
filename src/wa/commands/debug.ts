@@ -1,6 +1,7 @@
 import logger from '../../logger.js';
 import type { WaSocketLike } from '../../protocol/ports.js';
-import { sendNativeFlow, sendCarousel, sendRichMessage, sendList, sendCombinedButtons } from '../interactive/index.js';
+import { sendNativeFlow, sendCarousel, sendRichMessage } from '../interactive/index.js';
+import { sendList, sendCombinedButtons } from '../interactive/sendInteractive.js';
 import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 
 // ---------------------------------------------------------------------------

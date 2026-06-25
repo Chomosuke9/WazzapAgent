@@ -196,58 +196,36 @@ def _env_path(*keys: str) -> str | None:
   return None
 
 
-def _resolve_settings_db_path() -> Path:
+def _resolve_db_path(kind: str, env_keys: tuple[str, ...], global_var_name: str, default_name: str) -> Path:
   root = current_tenant_db_root()
   if root is not None:
-    path = root / 'settings.db'
+    path = root / default_name
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
-  global _SETTINGS_DB_PATH
-  if _SETTINGS_DB_PATH is not None:
-    return _SETTINGS_DB_PATH
-  raw = _env_path('BOT_SETTINGS_DB_PATH', 'SETTINGS_DB_PATH')
+  g = globals()
+  cached = g.get(global_var_name)
+  if cached is not None:
+    return cached
+  raw = _env_path(*env_keys)
   if raw:
-    _SETTINGS_DB_PATH = Path(raw)
+    p = Path(raw)
   else:
-    _SETTINGS_DB_PATH = _data_dir() / 'settings.db'
-  _SETTINGS_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-  return _SETTINGS_DB_PATH
+    p = _data_dir() / default_name
+  p.parent.mkdir(parents=True, exist_ok=True)
+  g[global_var_name] = p
+  return p
+
+
+def _resolve_settings_db_path() -> Path:
+  return _resolve_db_path('settings', ('BOT_SETTINGS_DB_PATH', 'SETTINGS_DB_PATH'), '_SETTINGS_DB_PATH', 'settings.db')
 
 
 def _resolve_stats_db_path() -> Path:
-  root = current_tenant_db_root()
-  if root is not None:
-    path = root / 'stats.db'
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
-  global _STATS_DB_PATH
-  if _STATS_DB_PATH is not None:
-    return _STATS_DB_PATH
-  raw = _env_path('BOT_STATS_DB_PATH', 'STATS_DB_PATH')
-  if raw:
-    _STATS_DB_PATH = Path(raw)
-  else:
-    _STATS_DB_PATH = _data_dir() / 'stats.db'
-  _STATS_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-  return _STATS_DB_PATH
+  return _resolve_db_path('stats', ('BOT_STATS_DB_PATH', 'STATS_DB_PATH'), '_STATS_DB_PATH', 'stats.db')
 
 
 def _resolve_moderation_db_path() -> Path:
-  root = current_tenant_db_root()
-  if root is not None:
-    path = root / 'moderation.db'
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
-  global _MODERATION_DB_PATH
-  if _MODERATION_DB_PATH is not None:
-    return _MODERATION_DB_PATH
-  raw = _env_path('BOT_MODERATION_DB_PATH', 'MODERATION_DB_PATH')
-  if raw:
-    _MODERATION_DB_PATH = Path(raw)
-  else:
-    _MODERATION_DB_PATH = _data_dir() / 'moderation.db'
-  _MODERATION_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-  return _MODERATION_DB_PATH
+  return _resolve_db_path('moderation', ('BOT_MODERATION_DB_PATH', 'MODERATION_DB_PATH'), '_MODERATION_DB_PATH', 'moderation.db')
 
 
 def _backup_corrupt_file(db_path: Path) -> Optional[Path]:

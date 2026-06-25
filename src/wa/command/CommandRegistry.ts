@@ -25,7 +25,7 @@ import type { AccountRepositories } from "../../db/repositories/index.js";
 import type { CommandContext, CommandHandler } from "./CommandContext.js";
 import type { WaSocketLike } from "../../protocol/ports.js";
 import {
-  PERMISSION_ATOMS,
+  resolveAtom,
   isPermitted as isPermittedBy,
   validatePermission,
   describePermission,
@@ -74,23 +74,13 @@ function resolvePermissionAtom(
   name: string,
   context: CommandListenerContext,
 ): boolean {
-  switch (PERMISSION_ATOMS[name.toLowerCase()]) {
-    case "public":
-      return true;
-    case "owner":
-      return Boolean(context.senderIsOwner);
-    case "admin":
-      return Boolean(context.senderIsAdmin);
-    case "group":
-      return context.chatType === "group";
-    case "private":
-      return context.chatType !== "group";
-    case "from_me":
-      return Boolean(context.fromMe);
-    default:
-      // Unknown atoms are rejected at init; treat defensively as deny here.
-      return false;
-  }
+  return resolveAtom(name, {
+    isOwner: Boolean(context.senderIsOwner),
+    isAdmin: Boolean(context.senderIsAdmin),
+    isGroup: context.chatType === "group",
+    isPrivate: context.chatType !== "group",
+    fromMe: Boolean(context.fromMe),
+  });
 }
 
 /** Whether the invocation satisfies the command's permission expression. */

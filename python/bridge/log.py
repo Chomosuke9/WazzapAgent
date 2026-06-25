@@ -110,26 +110,7 @@ _THIRD_PARTY_NOISY = (
 )
 
 
-def _level_from_env() -> int:
-  load_dotenv()
-  level = config.bridge_log_level().upper()
-  return getattr(logging, level, logging.INFO)
 
-
-def _extras_limit_from_env() -> int:
-  load_dotenv()
-  return config.bridge_log_extras_limit()
-
-
-def _chat_label_width_from_env() -> int:
-  load_dotenv()
-  return config.bridge_log_chat_label_width()
-
-
-def _chat_label_default_from_env() -> str:
-  load_dotenv()
-  value = " ".join(str(config.bridge_log_chat_label_default_raw()).split()).strip()
-  return value or "system"
 
 
 def _resolve_color() -> bool:
@@ -151,10 +132,12 @@ def _resolve_color() -> bool:
     return False
 
 
-EXTRAS_JSON_LIMIT = _extras_limit_from_env()
+load_dotenv()
+EXTRAS_JSON_LIMIT = config.bridge_log_extras_limit()
 SHOW_INFO_EXTRAS = env_flag("BRIDGE_LOG_INFO_EXTRAS", False)
-CHAT_LABEL_WIDTH = _chat_label_width_from_env()
-CHAT_LABEL_DEFAULT = _chat_label_default_from_env()
+CHAT_LABEL_WIDTH = config.bridge_log_chat_label_width()
+_chat_label_default_value = " ".join(str(config.bridge_log_chat_label_default_raw()).split()).strip()
+CHAT_LABEL_DEFAULT = _chat_label_default_value or "system"
 CHAT_LABEL_CONTEXT: contextvars.ContextVar[str | None] = contextvars.ContextVar(
   "bridge_chat_label_context",
   default=None,
@@ -307,7 +290,9 @@ def setup_logging() -> logging.Logger:
   if _CONFIGURED:
     return bridge_logger
 
-  level = _level_from_env()
+  load_dotenv()
+  _level_str = config.bridge_log_level().upper()
+  level = getattr(logging, _level_str, logging.INFO)
   handler = logging.StreamHandler(sys.stdout)
   handler.setFormatter(ExtraFormatter(datefmt="%H:%M:%S", color=_resolve_color()))
 

@@ -94,64 +94,62 @@ LLM1_REACT_TOOL = {
 }
 
 
-def build_llm1_sticker_tool() -> dict:
-    """Build the llm_sticker tool. Sticker catalog is injected via system prompt."""
-    return {
-        "type": "function",
-        "function": {
-            "name": "llm_sticker",
-            "description": (
-                "Send a sticker in response to a message — "
-                "instead of sending a text reply. "
-                "Use for big moments: major milestone, genuinely funny/absurd situation — "
-                "only if a sticker name clearly fits. DO NOT overdo it."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "sticker_name": {
-                        "type": "string",
-                        "description": (
-                            "Exact sticker name to send — see the sticker catalog "
-                            "in the system prompt. Must match one of those names exactly."
-                        ),
-                        "minLength": 1,
-                        "maxLength": 100,
-                    },
-                    "context_msg_id": {
-                        "type": "string",
-                        "description": (
-                            "The 6-digit contextMsgId of the target message. "
-                            "Use the id from current messages(burst). "
-                            "Use the last message id if targeting the most recent message."
-                        ),
-                        "minLength": 6,
-                        "maxLength": 6,
-                    },
-                    "confidence": {
-                        "type": "integer",
-                        "description": "Confidence percentage (0-100) about this decision.",
-                        "minimum": 0,
-                        "maximum": 100,
-                    },
-                    "reason": {
-                        "type": "string",
-                        "description": ("A concise reason for this action. 1-2 short sentences (max 320 chars)."),
-                        "minLength": 2,
-                        "maxLength": 320,
-                    },
+LLM1_STICKER_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "llm_sticker",
+        "description": (
+            "Send a sticker in response to a message — "
+            "instead of sending a text reply. "
+            "Use for big moments: major milestone, genuinely funny/absurd situation — "
+            "only if a sticker name clearly fits. DO NOT overdo it."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "sticker_name": {
+                    "type": "string",
+                    "description": (
+                        "Exact sticker name to send — see the sticker catalog "
+                        "in the system prompt. Must match one of those names exactly."
+                    ),
+                    "minLength": 1,
+                    "maxLength": 100,
                 },
-                "required": ["sticker_name", "context_msg_id", "confidence", "reason"],
-                "additionalProperties": False,
+                "context_msg_id": {
+                    "type": "string",
+                    "description": (
+                        "The 6-digit contextMsgId of the target message. "
+                        "Use the id from current messages(burst). "
+                        "Use the last message id if targeting the most recent message."
+                    ),
+                    "minLength": 6,
+                    "maxLength": 6,
+                },
+                "confidence": {
+                    "type": "integer",
+                    "description": "Confidence percentage (0-100) about this decision.",
+                    "minimum": 0,
+                    "maximum": 100,
+                },
+                "reason": {
+                    "type": "string",
+                    "description": ("A concise reason for this action. 1-2 short sentences (max 320 chars)."),
+                    "minLength": 2,
+                    "maxLength": 320,
+                },
             },
-            "strict": True,
+            "required": ["sticker_name", "context_msg_id", "confidence", "reason"],
+            "additionalProperties": False,
         },
-    }
+        "strict": True,
+    },
+}
 
 
 def build_llm1_tools() -> list[dict]:
     """Build the LLM1 tool list."""
-    return [LLM1_TOOL, LLM1_REACT_TOOL, build_llm1_sticker_tool()]
+    return [LLM1_TOOL, LLM1_REACT_TOOL, LLM1_STICKER_TOOL]
 
 
 # ---------------------------------------------------------------------------
@@ -251,41 +249,39 @@ LLM2_REACT_TOOL = {
 }
 
 
-def build_llm2_sticker_tool() -> dict:
-    """Build the send_sticker tool. Sticker catalog is injected via system prompt."""
-    return {
-        "type": "function",
-        "function": {
-            "name": "send_sticker",
-            "description": (
-                "Send a sticker in response to a message. "
-                "Use for big moments — celebrations, genuinely funny/absurd situations, etc."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "context_msg_id": {
-                        "type": "string",
-                        "description": "The 6-digit contextMsgId of the message to reply to.",
-                        "minLength": 6,
-                        "maxLength": 6,
-                    },
-                    "sticker_name": {
-                        "type": "string",
-                        "description": (
-                            "Exact sticker name to send — see the sticker catalog "
-                            "in the system prompt. Must match one of those names exactly."
-                        ),
-                        "minLength": 1,
-                        "maxLength": 100,
-                    },
+LLM2_STICKER_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "send_sticker",
+        "description": (
+            "Send a sticker in response to a message. "
+            "Use for big moments — celebrations, genuinely funny/absurd situations, etc."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "context_msg_id": {
+                    "type": "string",
+                    "description": "The 6-digit contextMsgId of the message to reply to.",
+                    "minLength": 6,
+                    "maxLength": 6,
                 },
-                "required": ["context_msg_id", "sticker_name"],
-                "additionalProperties": False,
+                "sticker_name": {
+                    "type": "string",
+                    "description": (
+                        "Exact sticker name to send — see the sticker catalog "
+                        "in the system prompt. Must match one of those names exactly."
+                    ),
+                    "minLength": 1,
+                    "maxLength": 100,
+                },
             },
-            "strict": True,
+            "required": ["context_msg_id", "sticker_name"],
+            "additionalProperties": False,
         },
-    }
+        "strict": True,
+    },
+}
 
 
 LLM2_DELETE_TOOL = {
@@ -530,7 +526,7 @@ def build_llm2_tools(
 ) -> list[dict]:
     """Build the LLM2 tool list based on current chat permissions."""
     tools = list(LLM2_BASE_TOOLS)
-    tools.append(build_llm2_sticker_tool())
+    tools.append(LLM2_STICKER_TOOL)
     if allow_quiz:
         tools.append(LLM2_QUIZ_TOOL)
     if allow_delete:

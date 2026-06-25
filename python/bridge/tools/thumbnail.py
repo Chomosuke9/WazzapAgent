@@ -22,6 +22,7 @@ from typing import Optional
 
 from PIL import Image, ImageDraw, ImageFont
 
+from .sticker import _FONT_PATHS
 from ..log import setup_logging
 
 logger = setup_logging()
@@ -123,13 +124,6 @@ def _generate_placeholder(mime: str | None, ext: str) -> bytes:
 # ---------------------------------------------------------------------------
 # Font loading (DejaVu Sans preferred; falls back to Pillow default)
 # ---------------------------------------------------------------------------
-
-_FONT_PATHS = [
-  "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-  "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
-  "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-]
-
 
 def _try_load_font(size: int) -> ImageFont.FreeTypeFont:
   """Attempt to load a TrueType font at the given size; fall back to default."""

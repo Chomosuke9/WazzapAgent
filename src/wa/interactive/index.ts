@@ -1,11 +1,2 @@
-export {
-  sendQuickReply,
-  sendUrlButtons,
-  sendCopyCode,
-  sendCombinedButtons,
-  sendList,
-  sendNativeFlow,
-  sendRichMessage,
-} from './sendInteractive.js';
-export { sendLegacyButtons, sendTemplate } from './sendButtons.js';
+export { sendQuickReply, sendCopyCode, sendNativeFlow, sendRichMessage } from './sendInteractive.js';
 export { sendCarousel } from './sendCarousel.js';

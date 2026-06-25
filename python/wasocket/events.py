@@ -20,7 +20,6 @@
 #     SDK model is defined independently and must never import/subclass it.
 #   - No event-dispatch / `on()` logic (that is Step 27).
 
-import re
 from dataclasses import dataclass, field, fields
 from typing import Any, Optional
 
@@ -49,25 +48,7 @@ SET_SUBAGENT_ENABLED = "set_subagent_enabled"
 SCHEDULE_TASK = "schedule_task"
 
 
-# ---------------------------------------------------------------------------
-# camelCase (wire) -> snake_case (dataclass) conversion.
-#
-# Kept local so events.py stays self-contained and never pulls in the transport
-# layer. (Mirrors `wasocket.protocol.camel_to_snake`.)
-# ---------------------------------------------------------------------------
-
-_CAMEL_BOUNDARY = re.compile(r"(?<!^)(?=[A-Z])")
-
-
-def camel_to_snake(name: str) -> str:
-    """``contextMsgId`` -> ``context_msg_id``."""
-    return _CAMEL_BOUNDARY.sub("_", name).lower()
-
-
-def snake_to_camel(name: str) -> str:
-    """``context_msg_id`` -> ``contextMsgId``."""
-    head, *rest = name.split("_")
-    return head + "".join(part[:1].upper() + part[1:] for part in rest)
+from .protocol import camel_to_snake, snake_to_camel
 
 
 # ---------------------------------------------------------------------------

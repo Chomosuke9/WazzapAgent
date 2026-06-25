@@ -834,29 +834,4 @@ function attachChatbotListener(
   });
 }
 
-/**
- * Initialize and start the WhatsApp socket for the single-account live boot.
- *
- * Step 07: moved here from `wa/connection.ts` (it lazy-imported this factory,
- * forming the `account/ ↔ wa/` cycle). It creates/resumes the DEFAULT account
- * (keyed by `config.dataDir`) and returns its live socket.
- *
- * `whatsapp_status` forwarding happens inside the factory's `connection.update`
- * via `eventForwarder.forwardStatus` (exactly once); the `onStatusChange` hook
- * is a logging/extension side-hook only.
- *
- * @returns The connected (default account) socket instance.
- */
-export async function startWhatsApp(): Promise<WASocket> {
-  const entry = await createOrResumeAccount({
-    folderPath: config.dataDir,
-    printQr: true,
-    onStatusChange: (status, reason) => {
-      logger.debug(
-        { status, reason, folderPath: config.dataDir },
-        "whatsapp status change",
-      );
-    },
-  });
-  return entry.sock as WASocket;
-}
+

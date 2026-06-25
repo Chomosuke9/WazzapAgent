@@ -4,7 +4,6 @@ import { resolveCallerTier, tierAllows } from '../interactive/compat.js';
 import config from '../../config.js';
 import * as registry from '../../server/accountRegistry.js';
 import { VALID_MODES, VALID_COMPAT_MODES } from '../../db/repositories/SettingsRepository.js';
-import { isFeatureConfigured, unconfiguredFeatureMessage } from '../featureAvailability.js';
 import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 import type { ButtonHandler } from '../command/ButtonContext.js';
 import type { AccountRepositories } from '../../db/repositories/index.js';
@@ -274,8 +273,13 @@ export const modeSelectButton: ButtonHandler = {
     // Auto/Hybrid modes route messages through the LLM1 router. If LLM1 is not
     // configured, refuse the change with a helpful error so the owner knows
     // their setup is incomplete (prefix mode needs no router and is allowed).
-    if (mode !== 'prefix' && !isFeatureConfigured('llm1')) {
-      await sock.sendMessage(chatId, { text: unconfiguredFeatureMessage('llm1') });
+    if (mode !== 'prefix' && !config.llm1Configured) {
+      await sock.sendMessage(chatId, {
+        text:
+          "Auto and Hybrid modes need the LLM1 router, which isn't configured yet. " +
+          "Set LLM1_ENDPOINT (plus LLM1_MODEL and LLM1_API_KEY) in your .env and " +
+          "restart the bot. Prefix mode works without it.",
+      });
       return;
     }
     account.repos!.settings.setMode(chatId, mode);

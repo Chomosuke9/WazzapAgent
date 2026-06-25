@@ -14,7 +14,7 @@ from collections import OrderedDict, defaultdict, deque
 from bridge.db import tenant_db_context, ScheduledTasksRepository, ScheduledTask
 from bridge.agent.scheduled_task_runner import ScheduledTaskRunner
 from bridge.agent.chat_reinvoker import ChatReinvoker
-from bridge.messaging.ack_handler import handle_action_ack
+from bridge.agent.ack_hydrator import handle_action_ack
 from wasocket.protocol import AckResult
 
 

@@ -29,6 +29,37 @@ export const PERMISSION_ATOMS: Record<string, string> = {
   fromme: "from_me",
 };
 
+export interface PermissionAtoms {
+  isOwner: boolean;
+  isAdmin: boolean;
+  isGroup: boolean;
+  isPrivate: boolean;
+  fromMe: boolean;
+}
+
+/** Resolve a canonical atom name against a plain atom struct. */
+export function resolveAtom(
+  name: string,
+  atoms: PermissionAtoms,
+): boolean {
+  switch (PERMISSION_ATOMS[name.toLowerCase()]) {
+    case "public":
+      return true;
+    case "owner":
+      return atoms.isOwner;
+    case "admin":
+      return atoms.isAdmin;
+    case "group":
+      return atoms.isGroup;
+    case "private":
+      return atoms.isPrivate;
+    case "from_me":
+      return atoms.fromMe;
+    default:
+      return false;
+  }
+}
+
 /**
  * Tokenise + evaluate a permission expression via recursive descent.
  * Grammar: or := and ("or" and)* ; and := primary ("and" primary)* ;

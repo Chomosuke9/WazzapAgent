@@ -23,7 +23,7 @@ import { fileURLToPath, pathToFileURL } from "url";
 import config from "../../config.js";
 import logger from "../../logger.js";
 import {
-  PERMISSION_ATOMS,
+  resolveAtom,
   isPermitted,
   validatePermission,
   describePermission,
@@ -59,24 +59,13 @@ function isButtonHandler(val: unknown): val is ButtonHandler {
 
 /** Resolve a canonical atom against a button tap's {@link ButtonContext}. */
 function resolveButtonAtom(name: string, bc: ButtonContext): boolean {
-  switch (PERMISSION_ATOMS[name.toLowerCase()]) {
-    case "public":
-      return true;
-    case "owner":
-      return bc.senderIsOwner;
-    case "admin":
-      return bc.senderIsAdmin;
-    case "group":
-      return bc.isGroup;
-    case "private":
-      return !bc.isGroup;
-    case "from_me":
-      // Button taps are user-originated, never the bot itself.
-      return false;
-    default:
-      // Unknown atoms are rejected at init; treat defensively as deny here.
-      return false;
-  }
+  return resolveAtom(name, {
+    isOwner: bc.senderIsOwner,
+    isAdmin: bc.senderIsAdmin,
+    isGroup: bc.isGroup,
+    isPrivate: !bc.isGroup,
+    fromMe: false, // Button taps are user-originated, never the bot itself.
+  });
 }
 
 /**

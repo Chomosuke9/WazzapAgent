@@ -289,6 +289,18 @@ Extra instructions in `<prompt_override>`:
     ]
 
 
+def _count_phrase(value, singular: str, plural: str) -> str:
+    if value is None:
+        return f"unknown {plural}"
+    if isinstance(value, int):
+        return f"{value} {singular if value == 1 else plural}"
+    return f"{value} {plural}"
+
+
+def _is_singular_count(value) -> bool:
+    return isinstance(value, int) and value == 1
+
+
 def _metadata_block(current_payload: dict | None) -> str:
     payload = current_payload if isinstance(current_payload, dict) else {}
     bot_mentioned = bool(payload.get("botMentionedInWindow", payload.get("botMentioned")))
@@ -312,16 +324,6 @@ def _metadata_block(current_payload: dict | None) -> str:
         role_line = "Bot is an admin."
     else:
         role_line = "Bot is a normal member."
-
-    def _count_phrase(value, singular: str, plural: str) -> str:
-        if value is None:
-            return f"unknown {plural}"
-        if isinstance(value, int):
-            return f"{value} {singular if value == 1 else plural}"
-        return f"{value} {plural}"
-
-    def _is_singular_count(value) -> bool:
-        return isinstance(value, int) and value == 1
 
     if bot_mentioned:
         mention_line = "- Bot is mentioned in this current message window."
@@ -501,6 +503,15 @@ def _current_date_str() -> str:
     return now.strftime("%A, %d %B %Y")
 
 
+_PLACEHOLDER_KEYS = (
+    "prompt_override", "assistant_name", "current_date", "sticker_catalog",
+    "delete_rules", "mute_rules", "kick_rules", "subagent_rules",
+)
+_PLACEHOLDER_RE = re.compile(
+    r"\{\{\s*(" + "|".join(re.escape(k) for k in _PLACEHOLDER_KEYS) + r")\s*\}\}"
+)
+
+
 def _render_system_prompt(
     base_system: str,
     *,
@@ -526,30 +537,17 @@ def _render_system_prompt(
     delete_block = _DELETE_RULES if allow_delete else (_DELETE_OFF_RULES if is_group else "")
     mute_block = _MUTE_RULES if allow_mute else (_MUTE_OFF_RULES if is_group else "")
     kick_block = _KICK_RULES if allow_kick else (_KICK_OFF_RULES if is_group else "")
-    return (
-        base_system.replace("{{prompt_override}}", overide_text)
-        .replace("{{ prompt_override }}", overide_text)
-        .replace("{{assistant_name}}", configured_assistant_name)
-        .replace("{{ assistant_name }}", configured_assistant_name)
-        .replace("{{current_date}}", current_date)
-        .replace("{{ current_date }}", current_date)
-        .replace("{{sticker_catalog}}", catalog)
-        .replace("{{ sticker_catalog }}", catalog)
-        .replace("{{delete_rules}}", delete_block)
-        .replace("{{ delete_rules }}", delete_block)
-        .replace("{{mute_rules}}", mute_block)
-        .replace("{{ mute_rules }}", mute_block)
-        .replace("{{kick_rules}}", kick_block)
-        .replace("{{ kick_rules }}", kick_block)
-        .replace(
-            "{{subagent_rules}}",
-            _SUBAGENT_RULES if allow_subagent else _SUBAGENT_OFF_RULES,
-        )
-        .replace(
-            "{{ subagent_rules }}",
-            _SUBAGENT_RULES if allow_subagent else _SUBAGENT_OFF_RULES,
-        )
-    )
+    _placeholders = {
+        "prompt_override": overide_text,
+        "assistant_name": configured_assistant_name,
+        "current_date": current_date,
+        "sticker_catalog": catalog,
+        "delete_rules": delete_block,
+        "mute_rules": mute_block,
+        "kick_rules": kick_block,
+        "subagent_rules": _SUBAGENT_RULES if allow_subagent else _SUBAGENT_OFF_RULES,
+    }
+    return _PLACEHOLDER_RE.sub(lambda m: _placeholders[m.group(1)], base_system)
 
 
 def _normalize_chat_type(chat_type: str | None) -> str:
@@ -701,16 +699,6 @@ def _context_injection_block(
     explicit_join_participants = payload.get("explicitJoinParticipantsInWindow")
     quoted_has_media = payload.get("quotedHasMedia")
     llm1_reason_raw = payload.get("llm1Reason")
-
-    def _count_phrase(value, singular: str, plural: str) -> str:
-        if value is None:
-            return f"unknown {plural}"
-        if isinstance(value, int):
-            return f"{value} {singular if value == 1 else plural}"
-        return f"{value} {plural}"
-
-    def _is_singular_count(value) -> bool:
-        return isinstance(value, int) and value == 1
 
     try:
         mention_count = int(mention_count)

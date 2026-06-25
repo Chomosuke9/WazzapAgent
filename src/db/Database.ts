@@ -40,8 +40,6 @@ interface SubagentEnabledRow {
   enabled: number;
 }
 
-type RetryFn = <T>(fn: () => T) => T;
-
 // ---------------------------------------------------------------------------
 // Tuning constants
 // ---------------------------------------------------------------------------
@@ -68,8 +66,6 @@ const DB_CORRUPTION_TOKENS = [
   "database corruption",
 ];
 
-function noop(..._args: unknown[]): void {}
-
 function parsePositiveIntEnv(name: string, fallback: number): number {
   const parsed = Number(process.env[name]);
   if (!Number.isFinite(parsed)) return fallback;
@@ -91,14 +87,12 @@ function normalizeParams(params: unknown): unknown[] {
 
 class SqliteStatement {
   stmt: BetterSqlite3.Statement;
-  retryFn: RetryFn;
   params: unknown[];
   rows: Record<string, unknown>[] | null;
   index: number;
 
-  constructor(stmt: BetterSqlite3.Statement, retryFn: RetryFn) {
+  constructor(stmt: BetterSqlite3.Statement) {
     this.stmt = stmt;
-    this.retryFn = retryFn;
     this.params = [];
     this.rows = null;
     this.index = 0;
@@ -112,18 +106,14 @@ class SqliteStatement {
 
   step(): boolean {
     if (this.rows === null) {
-      this.rows = this.retryFn(
-        () => this.stmt.all(...this.params) as Record<string, unknown>[],
-      );
+      this.rows = this.stmt.all(...this.params) as Record<string, unknown>[];
     }
     return this.index < this.rows.length;
   }
 
   getAsObject(): Record<string, unknown> {
     if (this.rows === null) {
-      this.rows = this.retryFn(
-        () => this.stmt.all(...this.params) as Record<string, unknown>[],
-      );
+      this.rows = this.stmt.all(...this.params) as Record<string, unknown>[];
     }
     const row = this.rows[this.index];
     this.index += 1;
@@ -148,25 +138,20 @@ class SqliteDb {
   }
 
   run(sql: string, params?: unknown): void {
-    return retrySqliteOperation(() => {
-      const values = normalizeParams(params);
-      if (values.length === 0) {
-        this.native.exec(sql);
-        return;
-      }
-      this.native.prepare(sql).run(...values);
-    });
+    const values = normalizeParams(params);
+    if (values.length === 0) {
+      this.native.exec(sql);
+      return;
+    }
+    this.native.prepare(sql).run(...values);
   }
 
   prepare(sql: string): SqliteStatement {
-    return new SqliteStatement(
-      retrySqliteOperation(() => this.native.prepare(sql)),
-      retrySqliteOperation,
-    );
+    return new SqliteStatement(this.native.prepare(sql));
   }
 
   pragma(sql: string): unknown {
-    return retrySqliteOperation(() => this.native.pragma(sql));
+    return this.native.pragma(sql);
   }
 
   close(): void {
@@ -183,8 +168,8 @@ function runTransaction<T>(db: SqliteDb, fn: () => T): T {
   } catch (err) {
     try {
       db.run("ROLLBACK");
-    } catch (rollbackErr) {
-      noop(rollbackErr);
+    } catch {
+      /* ignore */
     }
     throw err;
   }
@@ -210,39 +195,14 @@ function closeDb(db: SqliteDb | null): void {
   if (!db) return;
   try {
     db.close();
-  } catch (err) {
-    noop(err);
+  } catch {
+    /* ignore */
   }
 }
 
 function isDbCorruptionError(err: any): boolean {
   const msg = String(err?.message || err || "").toLowerCase();
   return DB_CORRUPTION_TOKENS.some((token) => msg.includes(token));
-}
-
-/**
- * Run a synchronous better-sqlite3 operation.
- *
- * better-sqlite3 is synchronous, so every call blocks the event loop for its
- * duration. SQLite's own `busy_timeout` (set to {@link SQLITE_BUSY_TIMEOUT_MS}
- * on every connection via both the constructor `timeout` and
- * `PRAGMA busy_timeout`) is the canonical wait-for-lock mechanism: it parks on a
- * contended lock and retries internally, only throwing `SQLITE_BUSY` once the
- * timeout elapses.
- *
- * The previous implementation layered a manual exponential-backoff retry ON TOP
- * of that — each attempt re-ran the operation (re-waiting the full
- * busy_timeout) and slept between tries with `Atomics.wait`, which blocks the
- * ENTIRE event loop (freezing every tenant and the WS heartbeats) for up to
- * ~retries × busy_timeout. We now rely on busy_timeout alone: the worst-case
- * block is a single timeout window, with no event-loop-blocking sleeps on the
- * hot path. Operators who need a shorter freeze can lower `DB_BUSY_TIMEOUT_MS`.
- *
- * Kept as a single-call wrapper (rather than inlined) so the `RetryFn` seam and
- * call sites stay unchanged.
- */
-function retrySqliteOperation<T>(fn: () => T): T {
-  return fn();
 }
 
 function backupCorruptFile(dbPath: string): string | null {
@@ -262,8 +222,8 @@ function backupCorruptFile(dbPath: string): string | null {
     try {
       fs.unlinkSync(dbPath);
       logger.warn({ dbPath }, "DB recovery: corrupt DB deleted");
-    } catch (deleteErr) {
-      noop(deleteErr);
+    } catch {
+      /* ignore */
     }
     return null;
   }
@@ -300,14 +260,14 @@ function withRecoveryLock<T>(dbPath: string, fn: () => T): T {
         // staleness window elapses.
         try {
           fs.closeSync(fd);
-        } catch (closeErr) {
-          noop(closeErr);
+        } catch {
+          /* ignore */
         }
         fd = null;
         try {
           fs.unlinkSync(lockPath);
-        } catch (unlinkErr) {
-          noop(unlinkErr);
+        } catch {
+          /* ignore */
         }
         throw writeErr;
       }
@@ -340,8 +300,8 @@ function withRecoveryLock<T>(dbPath: string, fn: () => T): T {
     try {
       const now = new Date();
       fs.utimesSync(lockPath, now, now);
-    } catch (err) {
-      noop(err);
+    } catch {
+      /* ignore */
     }
   }, heartbeatMs);
   if (typeof heartbeat.unref === "function") heartbeat.unref();
@@ -352,13 +312,13 @@ function withRecoveryLock<T>(dbPath: string, fn: () => T): T {
     clearInterval(heartbeat);
     try {
       if (fd !== null) fs.closeSync(fd);
-    } catch (err) {
-      noop(err);
+    } catch {
+      /* ignore */
     }
     try {
       fs.unlinkSync(lockPath);
-    } catch (err) {
-      noop(err);
+    } catch {
+      /* ignore */
     }
   }
 }
@@ -836,9 +796,8 @@ class Database {
 export {
   Database,
   SqliteDb,
-  SqliteStatement,
   withDbRecovery,
   runTransaction,
   ensureParentDir,
 };
-export type { DbState, RetryFn };
+export type { DbState };
