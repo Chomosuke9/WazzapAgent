@@ -153,7 +153,17 @@ async function dispatchRunCommand(
     return { ok: false, command: null, detail: 'missing command text' };
   }
 
-  const slashCommand = parseSlashCommand(rawCommand);
+  // Be lenient about the leading slash: the LLM-driven `run_command` path may
+  // emit the command with or without a leading '/'. Normalize by prepending it
+  // when missing so `parseSlashCommand` resolves it either way. This is scoped
+  // to the programmatic run_command action only — human-typed messages keep
+  // requiring an explicit '/' via the inbound parser.
+  const trimmedCommand = rawCommand.trim();
+  const normalizedCommand = trimmedCommand.startsWith('/')
+    ? trimmedCommand
+    : `/${trimmedCommand}`;
+
+  const slashCommand = parseSlashCommand(normalizedCommand);
   if (!slashCommand) {
     return { ok: false, command: null, detail: `unrecognised command: ${rawCommand}` };
   }
@@ -184,7 +194,7 @@ async function dispatchRunCommand(
   const fakeMsg = buildFakeMessage({
     ctx,
     chatId,
-    commandText: rawCommand,
+    commandText: normalizedCommand,
     senderId: botSenderId,
     fromMe: true,
     contextMsgId,
@@ -206,7 +216,7 @@ async function dispatchRunCommand(
     botIsSuperAdmin: Boolean(group?.botIsSuperAdmin),
     contextMsgId: fakeMsg.quotedStanzaId,
     fromMe: true,
-    text: rawCommand,
+    text: normalizedCommand,
     group,
     msg: fakeMsg,
     account: ctx,

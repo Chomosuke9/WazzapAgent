@@ -189,7 +189,8 @@ LLM2_REPLY_TOOL = {
                     "type": ["string", "null"],
                     "description": (
                         "Slash command that runs automatically alongside the reply, e.g. '/sticker' or "
-                        "'/help'. Must start with '/'. Set to null when not needed. "
+                        "'/help'. A leading '/' is recommended but optional (it is added automatically "
+                        "if missing). Set to null when not needed. "
                         "Only use a command when the user explicitly asks for something a command can do "
                         "(see the command list). "
                         "CRITICAL: Always append the required arguments to the command itself — "

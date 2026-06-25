@@ -197,6 +197,53 @@ class TestExtractActionsFromToolCalls:
     assert len(actions) == 1
     assert actions[0]["replyTo"] is None
 
+  def test_reply_command_literal_null_string_ignored(self):
+    # Some models emit the literal string "null" instead of a JSON null for
+    # the optional command. It must NOT be treated as a real slash command.
+    for sentinel in ("null", "NULL", "none", "None", "nil", "/"):
+      tc = [{"name": "reply_message", "args": {
+        "context_msg_id": "000123",
+        "text": "Hi",
+        "command": sentinel,
+        "command_context_msg_id": None,
+      }}]
+      actions = _extract_actions_from_tool_calls(
+        tc, fallback_reply_to=None, allowed_context_ids={"000123"},
+      )
+      # Only the send_message action — no run_command for the sentinel.
+      assert len(actions) == 1, f"sentinel {sentinel!r} should yield no run_command"
+      assert actions[0]["type"] == "send_message"
+
+  def test_reply_command_without_slash_is_normalized(self):
+    # Loosened requirement: a command with no leading '/' is accepted and
+    # normalized by prepending '/' rather than being rejected.
+    tc = [{"name": "reply_message", "args": {
+      "context_msg_id": "000123",
+      "text": "Making it a sticker",
+      "command": "sticker upper#lower",
+      "command_context_msg_id": "000123",
+    }}]
+    actions = _extract_actions_from_tool_calls(
+      tc, fallback_reply_to=None, allowed_context_ids={"000123"},
+    )
+    assert len(actions) == 2
+    run_cmd = next(a for a in actions if a["type"] == "run_command")
+    assert run_cmd["command"] == "/sticker upper#lower"
+    assert run_cmd["contextMsgId"] == "000123"
+
+  def test_reply_command_with_slash_unchanged(self):
+    tc = [{"name": "reply_message", "args": {
+      "context_msg_id": "000123",
+      "text": "On it",
+      "command": "/help",
+      "command_context_msg_id": "000123",
+    }}]
+    actions = _extract_actions_from_tool_calls(
+      tc, fallback_reply_to=None, allowed_context_ids={"000123"},
+    )
+    run_cmd = next(a for a in actions if a["type"] == "run_command")
+    assert run_cmd["command"] == "/help"
+
   def test_react_to_message(self):
     tc = [{"name": "react_to_message", "args": {"context_msg_id": "000123", "emoji": "👍"}}]
     actions = _extract_actions_from_tool_calls(
