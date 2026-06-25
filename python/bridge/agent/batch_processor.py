@@ -135,6 +135,60 @@ logger = setup_logging()
 from ..messaging.gateway import _dispatch_sticker
 
 
+def _resolve_ref_name(history, current, ref: str) -> str | None:
+  """Resolve a human-readable name for ``ref`` from the current burst / history.
+
+  Used so moderation history notes (mute/kick) and confirmations are legible.
+  Returns ``None`` when the senderRef is not found (e.g. an unmute target whose
+  messages were already deleted by the mute gate — the caller then falls back
+  to the name stored on the mute record or the bare senderRef).
+  """
+  if not ref:
+    return None
+  candidates = list(history)
+  if current is not None:
+    candidates.append(current)
+  for _m in candidates:
+    if getattr(_m, "sender_ref", None) == ref and getattr(_m, "sender", None):
+      return _m.sender
+  return None
+
+
+def _kick_history_note(targets, name_lookup) -> str | None:
+  """Build a synthetic assistant history line recording a kick.
+
+  Without recording the kick, the offending user's messages linger in the
+  rolling history window and LLM2 re-issues the kick every burst (the "bot
+  spams kick" symptom). ``name_lookup`` maps a senderRef -> display name.
+  Returns ``None`` when there are no valid targets.
+  """
+  kicked: list[str] = []
+  for target in targets or []:
+    if not isinstance(target, dict):
+      continue
+    ref = str(target.get("senderRef") or "").strip().lower()
+    if not ref:
+      continue
+    who = name_lookup(ref) or ref
+    kicked.append(f"{who} ({ref})" if who != ref else ref)
+  if not kicked:
+    return None
+  return f"Removed from the group: {', '.join(kicked)}."
+
+
+def _delete_history_note(context_msg_id: str | None) -> str | None:
+  """Build a synthetic assistant history line recording a message deletion.
+
+  Python's rolling history is NOT pruned on delete, so without this note the
+  deleted message stays visible to LLM2 and it can re-issue delete on the next
+  burst. Returns ``None`` for an unresolvable contextMsgId.
+  """
+  normalized = _normalize_context_msg_id(context_msg_id)
+  if not normalized:
+    return None
+  return f"Deleted message {normalized}."
+
+
 @dataclass
 class PendingChat:
   payloads: list[dict] = field(default_factory=list)
@@ -1204,16 +1258,33 @@ class BatchProcessor:
           action.get("contextMsgId"),
           request_id=_make_request_id("delete"),
         )
+        # Record the deletion so LLM2 sees on its next turn that it already
+        # removed this message. Python's rolling history is not pruned on
+        # delete, so without this note the deleted message stays visible and
+        # the model can re-issue delete (the same root cause as kick spam).
+        _del_note = _delete_history_note(action.get("contextMsgId"))
+        if _del_note:
+          _append_sticker_log_to_history(history, _del_note)
         action_counts[action_type] += 1
         continue
       if action_type == "kick_member":
+        _kick_targets = action.get("targets") or []
         await send_kick_member(
           ws,
           chat_id,
-          action.get("targets") or [],
+          _kick_targets,
           request_id=_make_request_id("kick"),
           mode=action.get("mode") or "partial_success",
         )
+        # Record the kick in history so LLM2 sees the members were already
+        # removed. Without this the offending messages linger in the rolling
+        # window and the model re-issues kick every burst (bot "spams" kick).
+        _kick_note = _kick_history_note(
+          _kick_targets,
+          lambda _ref: _resolve_ref_name(history, current, _ref),
+        )
+        if _kick_note:
+          _append_sticker_log_to_history(history, _kick_note)
         action_counts[action_type] += 1
         continue
       if action_type == "react_message":
@@ -1362,22 +1433,6 @@ class BatchProcessor:
         sender_ref = action.get("senderRef", "")
         duration = action.get("durationMinutes", 30)
 
-        def _name_for_ref(ref: str) -> str | None:
-          # Resolve a human-readable name from the current burst / history so
-          # the confirmation message is legible. Works for a fresh mute (the
-          # target is still visible); for an unmute the muted user is invisible
-          # (their messages were deleted by the mute gate) so the caller falls
-          # back to the name stored on the mute record.
-          if not ref:
-            return None
-          candidates = list(history)
-          if current is not None:
-            candidates.append(current)
-          for _m in candidates:
-            if getattr(_m, "sender_ref", None) == ref and getattr(_m, "sender", None):
-              return _m.sender
-          return None
-
         if duration == 0:
           stored_name = None
           for _mute in db_list_active_mutes(chat_id):
@@ -1385,25 +1440,42 @@ class BatchProcessor:
               stored_name = _mute.get("name")
               break
           db_remove_mute(chat_id, sender_ref)
-          who = stored_name or _name_for_ref(sender_ref) or sender_ref
-          await send_message(
-            ws,
-            chat_id,
-            f"🔊 {who} has been unmuted.",
-            None,
-            request_id=_make_request_id("unmute_notify"),
-          )
+          who = stored_name or _resolve_ref_name(history, current, sender_ref) or sender_ref
+          notify_text = f"🔊 {who} has been unmuted."
+          notify_rid = _make_request_id("unmute_notify")
         else:
-          who = _name_for_ref(sender_ref)
+          who = _resolve_ref_name(history, current, sender_ref)
           db_add_mute(chat_id, sender_ref, duration, sender_name=who)
-          await send_message(
-            ws,
-            chat_id,
+          notify_text = (
             f"🔇 {who or sender_ref} has been muted for {duration} minute(s). "
-            "Their messages will be auto-deleted until then.",
-            None,
-            request_id=_make_request_id("mute_notify"),
+            "Their messages will be auto-deleted until then."
           )
+          notify_rid = _make_request_id("mute_notify")
+        await send_message(ws, chat_id, notify_text, None, request_id=notify_rid)
+        # Record the (un)mute notification in history immediately as a
+        # provisional assistant turn so LLM2 sees on its next burst that it
+        # already (un)muted this user and does NOT re-issue the action every
+        # burst (the visible "bot spams mute" symptom: repeated muted notices).
+        # Tracking the request in pending_send_request_chat lets the action_ack
+        # hydrate the real contextMsgId and lets the bot's own fromMe echo
+        # MERGE into this entry instead of appending a duplicate (mirrors the
+        # send_message branch).
+        _mute_prov = WhatsAppMessage(
+          timestamp_ms=int(time.time() * 1000),
+          sender=assistant_name(),
+          context_msg_id="pending",
+          sender_ref=assistant_sender_ref(),
+          sender_is_admin=False,
+          text=notify_text,
+          media=None,
+          message_id=f"local-send-{notify_rid}",
+          role="assistant",
+        )
+        _append_history(history, _mute_prov)
+        pending_send_request_chat[notify_rid] = chat_id
+        pending_send_request_chat.move_to_end(notify_rid)
+        while len(pending_send_request_chat) > 4096:
+          pending_send_request_chat.popitem(last=False)
         action_counts[action_type] += 1
         continue
       if action_type == "execute_subtask":

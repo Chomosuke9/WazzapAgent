@@ -38,28 +38,42 @@ def _store_media_path(media_paths_by_chat: dict, payload: dict) -> None:
   Stores ALL attachment kinds (image, sticker, document, audio, video),
   not just visual media. This enables LLM2 to reference any file path
   when delegating tasks to the sub-agent.
+
+  Attachments are grouped by their OWN owning message's ``contextMsgId``.
+  After a burst merge (see ``_merge_payload_attachments``) one payload can
+  carry attachments from several messages, so keying everything under the
+  payload's top-level ``contextMsgId`` would mis-file them and break later
+  quoted-image reuse / sub-agent resolution. Each merged attachment is stamped
+  with its own ``contextMsgId``; un-stamped attachments (single-message
+  payloads) fall back to the payload's id, preserving the prior behaviour.
   """
-  ctx_id = payload.get("contextMsgId")
+  payload_ctx_id = payload.get("contextMsgId")
   chat_id = payload.get("chatId")
   atts = payload.get("attachments") or []
-  if not ctx_id or not chat_id:
+  if not chat_id:
     return
-  paths = []
+  paths_by_ctx: dict[str, list] = {}
   for att in atts:
-    if isinstance(att, dict):
-      p = att.get("path")
-      if p:
-        paths.append({
-          "kind": str(att.get("kind", "")).lower(),
-          "mime": att.get("mime", ""),
-          "fileName": att.get("fileName", ""),
-          "originalFileName": att.get("originalFileName") or None,
-          "jpegThumbnail": att.get("jpegThumbnail") or None,
-          "path": p,
-          "received_at": time.time(),
-        })
-  if paths:
-    media_paths_by_chat.setdefault(chat_id, {})[ctx_id] = paths
+    if not isinstance(att, dict):
+      continue
+    p = att.get("path")
+    if not p:
+      continue
+    att_ctx_id = att.get("contextMsgId") or payload_ctx_id
+    if not att_ctx_id:
+      continue
+    paths_by_ctx.setdefault(att_ctx_id, []).append({
+      "kind": str(att.get("kind", "")).lower(),
+      "mime": att.get("mime", ""),
+      "fileName": att.get("fileName", ""),
+      "originalFileName": att.get("originalFileName") or None,
+      "jpegThumbnail": att.get("jpegThumbnail") or None,
+      "path": p,
+      "received_at": time.time(),
+    })
+  for att_ctx_id, paths in paths_by_ctx.items():
+    if paths:
+      media_paths_by_chat.setdefault(chat_id, {})[att_ctx_id] = paths
 
 
 def _cleanup_stale_media_paths(media_paths_by_chat: dict, max_age_seconds: float = 86400.0) -> int:
@@ -241,8 +255,8 @@ async def materialize_visual_media(sock, payload: dict, media_paths_by_chat: dic
   if not atts or sock is None:
     return
   chat_id = payload.get("chatId")
-  ctx_id = payload.get("contextMsgId")
-  message_id = payload.get("messageId")
+  payload_ctx_id = payload.get("contextMsgId")
+  payload_message_id = payload.get("messageId")
   if not chat_id:
     return
   changed = False
@@ -254,14 +268,21 @@ async def materialize_visual_media(sock, payload: dict, media_paths_by_chat: dic
     kind = str(att.get("kind") or "").lower()
     if kind not in _VISUAL_DOWNLOAD_KINDS:
       continue
+    # An attachment may have been merged in from an EARLIER burst message
+    # (see ``_merge_payload_attachments``), so the payload's top-level
+    # contextMsgId/messageId is NOT necessarily this attachment's owner.
+    # Prefer the attachment's own stamped ids; fall back to the payload's
+    # for un-merged single-message payloads (which carry no per-att id).
+    att_ctx_id = att.get("contextMsgId") or payload_ctx_id
+    att_message_id = att.get("messageId") or payload_message_id
     try:
       result = await sock.download_media(
-        chat_id, context_msg_id=ctx_id, message_id=message_id
+        chat_id, context_msg_id=att_ctx_id, message_id=att_message_id
       )
     except Exception as err:  # NotFoundError / TimeoutError / etc.
       logger.info(
         "materialize_visual_media: download failed ctx=%s: %s",
-        ctx_id, err, extra={"chat_id": chat_id},
+        att_ctx_id, err, extra={"chat_id": chat_id},
       )
       continue
     path = result.get("path") if isinstance(result, dict) else None
@@ -270,7 +291,7 @@ async def materialize_visual_media(sock, payload: dict, media_paths_by_chat: dic
       if isinstance(result, dict) and result.get("mime") and not att.get("mime"):
         att["mime"] = result["mime"]
       changed = True
-  if changed and ctx_id:
+  if changed:
     _store_media_path(media_paths_by_chat, payload)
 
 

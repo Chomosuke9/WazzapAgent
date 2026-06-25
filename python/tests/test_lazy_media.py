@@ -47,6 +47,37 @@ def test_materialize_downloads_pending_image_and_stores_path():
     assert media_paths.get("c@g.us", {}).get("000125")
 
 
+def test_materialize_uses_per_attachment_ids_after_burst_merge():
+    """Regression: after a burst merge (``_merge_payload_attachments``) an
+    attachment carries its OWN contextMsgId/messageId (its source message),
+    which differ from the payload's top-level ids (the LAST burst message —
+    e.g. a follow-up text). The on-demand download MUST target the
+    attachment's own message; otherwise the gateway looks up the text message
+    and replies 'unsupported media type' and the image is never seen."""
+    payload = {
+        "chatId": "c@g.us",
+        "contextMsgId": "000090",   # payload top-level = a later text message
+        "messageId": "wamid-text",
+        "attachments": [{
+            "kind": "image", "mime": "image/jpeg", "path": None, "pending": True,
+            "contextMsgId": "000085",   # the image's OWN (earlier) message
+            "messageId": "wamid-image",
+        }],
+    }
+    media_paths = {}
+    sock = FakeSock(result={"path": "/tmp/wamid-image_image.jpg", "mime": "image/jpeg", "kind": "image"})
+    asyncio.run(materialize_visual_media(sock, payload, media_paths))
+
+    assert len(sock.calls) == 1
+    assert sock.calls[0]["context_msg_id"] == "000085"
+    assert sock.calls[0]["message_id"] == "wamid-image"
+    assert payload["attachments"][0]["path"] == "/tmp/wamid-image_image.jpg"
+    # path is re-stored under the attachment's OWN ctx id (for quoted reuse),
+    # NOT the payload's top-level id.
+    assert media_paths.get("c@g.us", {}).get("000085")
+    assert media_paths.get("c@g.us", {}).get("000090") is None
+
+
 def test_materialize_skips_document_with_thumbnail_no_download():
     payload = {
         "chatId": "c@g.us",

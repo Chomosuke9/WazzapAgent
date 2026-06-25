@@ -58,6 +58,60 @@ def test_store_media_path_noop_without_ids_or_paths():
   assert store == {}
 
 
+def test_store_media_path_groups_by_attachment_ctx_id():
+  """After a burst merge, a single payload can carry attachments from several
+  messages (each stamped with its own contextMsgId). They must be filed under
+  their OWN owning message, not the payload's top-level id — else quoted-image
+  reuse / sub-agent resolution looks under the wrong key."""
+  store: dict = {}
+  payload = {
+    "chatId": "c@g.us",
+    "contextMsgId": "000090",  # payload top-level (last burst message)
+    "attachments": [
+      {"kind": "image", "path": "/tmp/a.jpg", "contextMsgId": "000085"},  # own id
+      {"kind": "image", "path": "/tmp/b.jpg"},  # no own id -> falls back to payload
+    ],
+  }
+  _store_media_path(store, payload)
+  assert store["c@g.us"]["000085"][0]["path"] == "/tmp/a.jpg"
+  assert store["c@g.us"]["000090"][0]["path"] == "/tmp/b.jpg"
+
+
+# --- _merge_payload_attachments (burst attachment union + source stamping) ---
+
+def test_merge_stamps_source_ids_on_attachments():
+  """Each attachment is stamped with its SOURCE message's ids so the merged
+  payload (whose top-level id is only the last burst message) can still
+  download each attachment against the message that actually holds it."""
+  from bridge.messaging.moderation import _merge_payload_attachments
+
+  img_payload = {
+    "contextMsgId": "000085", "messageId": "wamid-img",
+    "attachments": [{"kind": "image", "path": None}],
+  }
+  text_payload = {"contextMsgId": "000086", "messageId": "wamid-txt", "attachments": []}
+  merged = _merge_payload_attachments([img_payload, text_payload], text_payload)
+
+  assert merged["contextMsgId"] == "000086"  # base stays the last message
+  assert len(merged["attachments"]) == 1
+  assert merged["attachments"][0]["contextMsgId"] == "000085"
+  assert merged["attachments"][0]["messageId"] == "wamid-img"
+  # the SOURCE payload's own attachment dict must not be mutated
+  assert "contextMsgId" not in img_payload["attachments"][0]
+
+
+def test_merge_does_not_override_existing_attachment_ids():
+  from bridge.messaging.moderation import _merge_payload_attachments
+
+  p = {
+    "contextMsgId": "000001", "messageId": "m1",
+    "attachments": [{"kind": "image", "path": None, "contextMsgId": "000099", "messageId": "m99"}],
+  }
+  merged = _merge_payload_attachments([p], p)
+  assert merged["attachments"][0]["contextMsgId"] == "000099"
+  assert merged["attachments"][0]["messageId"] == "m99"
+
+
 # --- _cleanup_stale_media_paths ---
 
 def test_cleanup_removes_only_stale_entries():
