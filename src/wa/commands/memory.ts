@@ -56,7 +56,7 @@ const USAGE =
   "🧠 *Long-term memory*\n\n" +
   "`/memory` — show saved memories\n" +
   "`/memory add <text>` — save a fact/preference for this chat\n" +
-  "`/memory delete <index>` — remove the Nth memory (see `/memory`)\n\n" +
+    "`/memory delete <index>[,<index>...]` — remove one or more (see `/memory`)\n\n" +
   "Owner-only, shared across all chats:\n" +
   "`/memory global add <text>` · `/memory global delete <index>`\n\n" +
   "Tip: tag people with the `@Name (senderRef)` format so they stay correctly " +
@@ -138,7 +138,7 @@ function renderMemoryList(
     );
   }
   lines.push("");
-  lines.push("Use `/memory add <text>` or `/memory delete <index>`.");
+  lines.push("Use `/memory add <text>` or `/memory delete <index>[,<index>...]`.");
   return lines.join("\n");
 }
 
@@ -259,29 +259,38 @@ export async function handleMemory(ctx: CommandContext): Promise<void> {
 
   // --- delete --------------------------------------------------------------
   if (sub === "delete" || sub === "del" || sub === "remove" || sub === "rm") {
-    const index = Number.parseInt(rest, 10);
-    if (!rest || !Number.isInteger(index) || index < 1) {
+    // Accept one or more indices: `1`, `1,2,3`, `1 2 3`. All resolve against a
+    // single snapshot so the bot can remove several at once without the
+    // index-shift bug of running `/memory delete N` repeatedly.
+    const indices = rest
+      .split(/[,\s]+/)
+      .filter(Boolean)
+      .map((t) => Number.parseInt(t, 10));
+    if (!indices.length || indices.some((n) => !Number.isInteger(n) || n < 1)) {
       await safeSend(
         sock,
         chatId,
-        `Usage: \`/memory${isScoped ? " " + scope : ""} delete <index>\` — see \`/memory\` for the numbered list.`,
+        `Usage: \`/memory${isScoped ? " " + scope : ""} delete <index>[,<index>...]\` — see \`/memory\` for the numbered list.`,
       );
       return;
     }
-    const deleted = repos.settings.deleteMemoryByIndex(scopeKey, index);
-    if (deleted === null) {
+    const deleted = repos.settings.deleteMemoriesByIndices(scopeKey, indices);
+    if (!deleted.length) {
       await safeSend(
         sock,
         chatId,
-        `No memory at index ${index}${scopeSuffix(scope)}. Use \`/memory\` to see the list.`,
+        `No memory at index ${indices.join(", ")}${scopeSuffix(scope)}. Use \`/memory\` to see the list.`,
       );
       return;
     }
     invalidate();
+    const body = deleted
+      .map((t) => `• ${previewText(renderStoredMentions(repos.settings, chatId, t))}`)
+      .join("\n");
     await safeSend(
       sock,
       chatId,
-      `🗑️ Deleted memory #${index}${scopeSuffix(scope)}:\n${previewText(renderStoredMentions(repos.settings, chatId, deleted))}`,
+      `🗑️ Deleted ${deleted.length} memor${deleted.length === 1 ? "y" : "ies"}${scopeSuffix(scope)}:\n${body}`,
     );
     return;
   }
@@ -293,7 +302,7 @@ export async function handleMemory(ctx: CommandContext): Promise<void> {
 export const memoryCommand: CommandHandler = {
   commands: ["memory", "memo"],
   description:
-    "Save long-term memory the bot keeps about this chat. /memory lists saved entries, /memory add <text> saves one (mentions like @Name (senderRef) are kept stable), /memory delete <index> removes one. Owner-only /memory global add|delete manages a list shared across all chats.",
+    "Save long-term memory the bot keeps about this chat. /memory lists saved entries, /memory add <text> saves one (mentions like @Name (senderRef) are kept stable), /memory delete <index> removes one — delete several at once with a comma list like /memory delete 1,2,3 (do NOT issue separate delete commands; indices shift). Owner-only /memory global add|delete manages a list shared across all chats.",
   // The bot itself (its run_command self-trigger sets fromMe), group admins, and
   // the bot owner — NOT regular members. The LLM manages memory automatically.
   permission: "fromMe or isAdmin or isOwner or isPrivate",

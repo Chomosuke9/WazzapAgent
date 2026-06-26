@@ -112,6 +112,41 @@ test('memory CRUD: add / list / count / delete-by-index', () => {
   }
 });
 
+test('memory multi-delete: indices resolve against one snapshot (no shift bug)', () => {
+  const dbDir = tmpTenant('wazzap-mem-multi-');
+  const db = new Database(dbDir);
+  try {
+    db.open();
+    const repos = createRepositories(db);
+    const chat = 'c@g.us';
+    ['a', 'b', 'c', 'd', 'e'].forEach((t) => repos.settings.addMemory(chat, t));
+
+    // deleting 1,3,5 must remove a,c,e — not the shifted entries that a
+    // repeated single delete would hit.
+    assert.deepEqual(
+      repos.settings.deleteMemoriesByIndices(chat, [1, 3, 5]),
+      ['a', 'c', 'e'],
+    );
+    assert.deepEqual(
+      repos.settings.listMemories(chat).map((m) => m.text),
+      ['b', 'd'],
+    );
+
+    // mixed valid/invalid/duplicate indices: skip junk, no double-delete
+    assert.deepEqual(
+      repos.settings.deleteMemoriesByIndices(chat, [2, 2, 9, 0]),
+      ['d'],
+    );
+    assert.deepEqual(
+      repos.settings.listMemories(chat).map((m) => m.text),
+      ['b'],
+    );
+  } finally {
+    db.close();
+    rmParent(dbDir);
+  }
+});
+
 test('memory_mentions: upsert + scoped lookup prefers chat over global', () => {
   const dbDir = tmpTenant('wazzap-mem-bind-');
   const db = new Database(dbDir);

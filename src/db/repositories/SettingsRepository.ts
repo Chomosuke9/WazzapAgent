@@ -511,18 +511,31 @@ export class SettingsRepository extends BaseRepository {
    * Returns the deleted entry's text, or null if the index was out of range.
    */
   deleteMemoryByIndex(scopeKey: string, index: number): string | null {
-    if (!Number.isInteger(index) || index < 1) return null;
-    const row = this.getOneFromState<{ id: number; text: string }>(
-      this.settingsState,
-      initSettingsTables,
-      "SELECT id, text FROM memories WHERE scope_key = ? ORDER BY id ASC LIMIT 1 OFFSET ?",
-      scopeKey,
-      index - 1,
-    );
-    if (!row) return null;
-    this.runSettingsQuery("DELETE FROM memories WHERE id = ?", row.id);
-    logger.info({ scopeKey, index }, "DB delete_memory");
-    return row.text;
+    const [text] = this.deleteMemoriesByIndices(scopeKey, [index]);
+    return text ?? null;
+  }
+
+  /**
+   * Delete entries at 1-based indices (oldest-first) within a scope. All
+   * indices resolve against a SINGLE snapshot taken before any delete, so
+   * deleting [1,2,3] removes the originally-numbered entries — not whatever
+   * shifts up after the first delete. Returns the deleted entries' texts in
+   * the order the indices were given (out-of-range indices are skipped).
+   */
+  deleteMemoriesByIndices(scopeKey: string, indices: number[]): string[] {
+    const snapshot = this.listMemories(scopeKey);
+    const seen = new Set<number>();
+    const deleted: string[] = [];
+    for (const index of indices) {
+      if (!Number.isInteger(index) || index < 1 || index > snapshot.length) continue;
+      const row = snapshot[index - 1];
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      this.runSettingsQuery("DELETE FROM memories WHERE id = ?", row.id);
+      deleted.push(row.text);
+    }
+    if (deleted.length) logger.info({ scopeKey, indices }, "DB delete_memory");
+    return deleted;
   }
 
   /** Persist (UPSERT) the stable LID behind a senderRef used in memory text. */
