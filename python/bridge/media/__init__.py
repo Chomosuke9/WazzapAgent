@@ -33,8 +33,8 @@ from .resolver import (
   _store_media_path,
   materialize_visual_media,
   materialize_media_for_subagent,
+  materialize_quoted_media,
 )
-
 __all__ = [
   # visual
   "build_visual_parts",
@@ -53,4 +53,5 @@ __all__ = [
   "_store_media_path",
   "materialize_visual_media",
   "materialize_media_for_subagent",
+  "materialize_quoted_media",
 ]

@@ -108,6 +108,7 @@ from ..media import (
   _resolve_sticker_media,
   _store_media_path,
   materialize_visual_media,
+  materialize_quoted_media,
   llm1_media_enabled,
 )
 
@@ -1032,7 +1033,10 @@ class BatchProcessor:
     llm1_ms = ctx.llm1_ms
     allowed_context_ids = _collect_context_ids(history)
     fallback_reply_to = _normalize_context_msg_id(last_payload.get("contextMsgId"))
-    llm2_payload = _merge_payload_attachments(trigger_window_payloads, last_payload)
+    # Union attachments from the WHOLE burst (every non-empty payload), not
+    # just the trigger window: media sent AFTER the triggering message in the
+    # same burst (e.g. "@bot look" then a sticker) must still reach the model.
+    llm2_payload = _merge_payload_attachments(ctx.non_empty_payloads, last_payload)
     llm2_payload.update(llm_context_metadata)
     llm2_payload.update(
       {
@@ -1041,11 +1045,6 @@ class BatchProcessor:
         "llm1Reason": " ".join((decision.reason or "").split()),
       }
     )
-
-    # Resolve quoted message media for vision-capable models
-    resolved_atts = _resolve_quoted_media_attachments(media_paths_by_chat, llm2_payload, chat_id)
-    if resolved_atts != (llm2_payload.get("attachments") or []):
-      llm2_payload["attachments"] = resolved_atts
 
     # Determine whether subagent tool should be available for this chat
     allow_subagent = db_get_subagent_enabled(chat_id)
@@ -1092,6 +1091,13 @@ class BatchProcessor:
     # would not use them anyway). This is the single point where media is
     # genuinely "needed".
     if llm2_payload and db_get_model_vision_support(chat_id):
+      # Replied-to sticker/image: download the quoted message's bytes on demand
+      # (lazy media never fetched them), then fold them into the payload so the
+      # vision model sees what the user replied to.
+      await materialize_quoted_media(ws, llm2_payload, session.media_paths_by_chat)
+      resolved_atts = _resolve_quoted_media_attachments(media_paths_by_chat, llm2_payload, chat_id)
+      if resolved_atts != (llm2_payload.get("attachments") or []):
+        llm2_payload["attachments"] = resolved_atts
       await materialize_visual_media(ws, llm2_payload, session.media_paths_by_chat)
     async with typing_indicator(ws, chat_id):
       _validate_llm2_result = session._llm2.make_validator(

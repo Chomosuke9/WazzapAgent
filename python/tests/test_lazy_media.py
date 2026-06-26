@@ -7,6 +7,7 @@ import pytest
 
 from wasocket import protocol
 from bridge.media import materialize_visual_media, materialize_media_for_subagent
+from bridge.media import materialize_quoted_media
 
 
 class FakeSock:
@@ -115,8 +116,50 @@ def test_materialize_noop_when_already_downloaded():
     assert payload["attachments"][0]["path"] == "/already/here.jpg"
 
 
-# --- materialize_media_for_subagent (sub-agent input fix) ---
+# --- materialize_quoted_media (replied-to sticker/image fix) ---
 
+
+def test_materialize_quoted_downloads_replied_to_sticker(tmp_path):
+    """Replying to a sticker/image that was never downloaded (lazy media) must
+    fetch its bytes on demand and store them under the quoted contextMsgId so
+    _resolve_quoted_media_attachments can feed it to the vision model."""
+    f = tmp_path / "sticker.webp"
+    f.write_bytes(b"webp")
+    payload = {
+        "chatId": "c@g.us",
+        "contextMsgId": "000200",
+        "attachments": [],  # the reply itself has no media
+        "quoted": {"contextMsgId": "000150", "messageId": "wamid-sticker"},
+    }
+    media_paths = {}
+    sock = FakeSock(result={"path": str(f), "mime": "image/webp", "kind": "sticker"})
+    asyncio.run(materialize_quoted_media(sock, payload, media_paths))
+
+    assert len(sock.calls) == 1
+    assert sock.calls[0]["context_msg_id"] == "000150"
+    stored = media_paths["c@g.us"]["000150"]
+    assert stored[0]["path"] == str(f)
+    assert stored[0]["kind"] == "sticker"
+
+
+def test_materialize_quoted_noop_when_already_on_disk(tmp_path):
+    f = tmp_path / "img.jpg"
+    f.write_bytes(b"x")
+    payload = {"chatId": "c@g.us", "quoted": {"contextMsgId": "000150"}}
+    media_paths = {"c@g.us": {"000150": [{"kind": "image", "path": str(f)}]}}
+    sock = FakeSock(result={"path": "/new.jpg"})
+    asyncio.run(materialize_quoted_media(sock, payload, media_paths))
+    assert sock.calls == []
+
+
+def test_materialize_quoted_noop_without_quoted():
+    payload = {"chatId": "c@g.us", "attachments": []}
+    sock = FakeSock(result={"path": "/new.jpg"})
+    asyncio.run(materialize_quoted_media(sock, payload, {}))
+    assert sock.calls == []
+
+
+# --- materialize_media_for_subagent (sub-agent input fix) ---
 
 def test_subagent_materialize_downloads_document(tmp_path):
     """A document referenced by execute_subtask must be downloaded on demand

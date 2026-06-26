@@ -319,6 +319,24 @@ async def _deliver_subagent_result(
     )
 
   reinvoke_history = list(history)
+  # Feed the sub-agent's visual output (image/sticker) back INTO the re-invoke
+  # so a vision-capable LLM2 can actually see what was produced (build_visual_parts
+  # inside generate() is already vision-gated). Non-visual outputs are described
+  # in the result block instead.
+  reinvoke_payload = current_payload
+  visual_outputs = [
+    {
+      "kind": sf.kind,
+      "mime": sf.mime,
+      "fileName": sf.name,
+      "path": sf.path,
+    }
+    for sf in staged_outputs.staged
+    if str(sf.kind or "").lower() in {"image", "sticker"} and os.path.isfile(sf.path)
+  ]
+  if visual_outputs:
+    reinvoke_payload = dict(current_payload or {})
+    reinvoke_payload["attachments"] = list(reinvoke_payload.get("attachments") or []) + visual_outputs
   reply_msg = None
   try:
     llm2_reinvoke_started = time.perf_counter()
@@ -326,7 +344,7 @@ async def _deliver_subagent_result(
       reply_msg = await responder.generate(
         reinvoke_history,
         current,
-        current_payload=current_payload,
+        current_payload=reinvoke_payload,
         group_description=group_description,
         prompt_override=db_prompt,
         chat_type=chat_type,

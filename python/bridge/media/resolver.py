@@ -105,25 +105,14 @@ def _resolve_quoted_media_attachments(
   Otherwise, if the quoted message had previously-tracked media files,
   build attachment dicts from the stored paths and return them.
   """
-  # First: check if current payload already has visual attachments
+  # The current payload may already carry its own visual attachment(s); we
+  # still append the quoted message's media on top (deduped by path) so a reply
+  # like "make this a sticker" + a new image, or simply a reply TO a
+  # sticker/image, both reach the model. (Previously the current visual caused
+  # an early return that dropped the replied-to media entirely.)
   atts = list(payload.get("attachments") or [])
-  visual_kinds = {"image", "sticker"}
-  has_visual = any(
-    isinstance(att, dict) and (
-      str(att.get("kind", "")).lower() in visual_kinds
-      or (str(att.get("kind", "")).lower() == "document" and att.get("jpegThumbnail"))
-    )
-    for att in atts
-  )
-  if has_visual:
-    logger.debug(
-      "resolve_quoted_media: current payload has %d visual attachment(s), using those",
-      sum(1 for a in atts if isinstance(a, dict) and str(a.get("kind", "")).lower() in visual_kinds),
-      extra={"chat_id": chat_id},
-    )
-    return atts  # Already has visual attachments from the current message
 
-  # Second: check quoted message for previously tracked media
+  # Check quoted message for previously tracked media
   quoted = payload.get("quoted") or {}
   quoted_ctx_id = quoted.get("contextMsgId")
   if not quoted_ctx_id:
@@ -289,6 +278,60 @@ async def materialize_visual_media(sock, payload: dict, media_paths_by_chat: dic
       changed = True
   if changed:
     _store_media_path(media_paths_by_chat, payload)
+
+
+async def materialize_quoted_media(sock, payload: dict, media_paths_by_chat: dict) -> None:
+  """Lazy media: download the REPLIED-TO message's visual bytes on demand.
+
+  A user can reply to an image/sticker that arrived earlier and was never
+  downloaded (lazy media forwards metadata only). The quoted payload carries
+  only the quoted ``contextMsgId``; if no file is on disk for it yet, fetch it
+  so :func:`_resolve_quoted_media_attachments` can hand it to the vision model.
+  Failures degrade gracefully (the reply simply has no resolved media).
+  """
+  if sock is None:
+    return
+  chat_id = payload.get("chatId")
+  quoted = payload.get("quoted") or {}
+  quoted_ctx_id = quoted.get("contextMsgId")
+  quoted_message_id = quoted.get("messageId")
+  if not chat_id or not (quoted_ctx_id or quoted_message_id):
+    return
+  # Already on disk? Nothing to do.
+  existing = media_paths_by_chat.get(chat_id, {}).get(quoted_ctx_id) if quoted_ctx_id else None
+  if isinstance(existing, list) and any(
+    isinstance(e, dict) and e.get("path") and os.path.isfile(e["path"]) for e in existing
+  ):
+    return
+  if isinstance(existing, str) and os.path.isfile(existing):
+    return
+  try:
+    result = await sock.download_media(
+      chat_id, context_msg_id=quoted_ctx_id, message_id=quoted_message_id
+    )
+  except Exception as err:  # NotFoundError / TimeoutError / proto evicted
+    logger.info(
+      "materialize_quoted_media: download failed ctx=%s: %s",
+      quoted_ctx_id, err, extra={"chat_id": chat_id},
+    )
+    return
+  path = result.get("path") if isinstance(result, dict) else None
+  if not path or not os.path.isfile(path):
+    return
+  store_ctx_id = quoted_ctx_id or quoted_message_id
+  media_paths_by_chat.setdefault(chat_id, {})[store_ctx_id] = [{
+    "kind": str(result.get("kind", "")).lower(),
+    "mime": result.get("mime", ""),
+    "fileName": result.get("fileName", ""),
+    "originalFileName": result.get("originalFileName") or None,
+    "jpegThumbnail": result.get("jpegThumbnail") or None,
+    "path": path,
+    "received_at": time.time(),
+  }]
+  logger.info(
+    "materialize_quoted_media: downloaded quoted ctx=%s kind=%s -> %s",
+    store_ctx_id, result.get("kind"), path, extra={"chat_id": chat_id},
+  )
 
 
 async def materialize_media_for_subagent(
