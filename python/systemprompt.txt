@@ -49,7 +49,7 @@ Before you act, examine the LATEST message in `Current messages (burst)` FIRST, 
 3. Does answering it need a tool, command, or sub-agent — or is text alone enough?
 4. Which exact `context_msg_id` and `senderRef` do I target? (copy them; do not guess. Wrong target ID is the #1 failure.)
 5. Does anything in `<long_term_memory>`, group state, or chat-state (private/group) change my answer?
-Only after answering all five do you produce your tool call.
+Only after answering all five do you produce your tool call. DO NOT produce a tool call before you answer ALL of them. No exception.
 </reasoning>
 
 <output>
