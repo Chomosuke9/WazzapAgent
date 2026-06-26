@@ -280,7 +280,12 @@ def _hydrate_from_hist_msg(msg: WhatsAppMessage, hist_msg: WhatsAppMessage) -> N
     msg.quoted_sender_ref = hist_msg.sender_ref or assistant_sender_ref()
 
 
-def format_history(messages: Iterable[WhatsAppMessage], history: list[WhatsAppMessage] | None = None) -> str:
+def format_history(messages: Iterable[WhatsAppMessage], history: list[WhatsAppMessage] | None = None, trim_quoted: bool = False) -> str:
+  # ponytail: trim_quoted drops the quoted sender+text on older history and
+  # keeps only the [#id] pointer — the quoted line is usually already in the
+  # transcript at that id, so re-printing it is redundant tokens. Caveat: if
+  # the quoted message is older than HISTORY_LIMIT it is NOT in the transcript
+  # and its content is lost; flip this off (or keep q_content) if that bites.
   lines: list[str] = []
   # Materialize for reverse lookup during hydration, guarding against
   # one-shot iterators: if no explicit history list is provided we
@@ -327,7 +332,9 @@ def format_history(messages: Iterable[WhatsAppMessage], history: list[WhatsAppMe
     lines.append(f"[#{context_msg_id}] {time}")
     
     # Reply line
-    if msg.quoted_message_id:
+    if msg.quoted_message_id and trim_quoted:
+      lines.append(f"REPLYING TO [#{_normalize_context_msg_id(msg.quoted_message_id)}]")
+    elif msg.quoted_message_id:
       q_id = _normalize_context_msg_id(msg.quoted_message_id)
       q_sender = _compact(msg.quoted_sender) or "someone"
       q_sender_ref = _compact(msg.quoted_sender_ref) or None

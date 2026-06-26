@@ -185,7 +185,7 @@ def build_llm1_prompt(
     history_list = list(history)[-history_limit:]
     prompt_history = [_truncate_message(msg, message_max_chars) for msg in history_list]
     current_prompt_msg = _truncate_message(current, message_max_chars)
-    hist_text = format_history(prompt_history, history=prompt_history) or "(no older messages)"
+    hist_text = format_history(prompt_history, history=prompt_history, trim_quoted=True) or "(no older messages)"
     current_line = _format_current_window(current_prompt_msg) or "(no current messages)"
     group_text = _group_description_block(group_description)
     context_messages = f"Older messages:\n{hist_text}\n\nCurrent messages (burst):\n{current_line}\n"
