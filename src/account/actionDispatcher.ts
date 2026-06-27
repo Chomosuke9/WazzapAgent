@@ -541,7 +541,6 @@ const handleSendCopyCode: ActionHandler = async (entry, payload, requestId, deps
 const handleDownloadMedia: ActionHandler = async (entry, payload, requestId, deps) => {
   const ctx = entry.ctx;
   const { chatId, contextMsgId, messageId } = payload;
-  const startMs = Date.now();
   try {
     let mid: string | null = (typeof messageId === 'string' && messageId) || null;
     if (!mid && contextMsgId) {
@@ -571,13 +570,6 @@ const handleDownloadMedia: ActionHandler = async (entry, payload, requestId, dep
       });
       return;
     }
-    // Time the actual fetch: this is the only branch that touches the network
-    // (Baileys downloadContentFromMessage). If a `download_media` ever stalls,
-    // this log pins the cost to the download itself vs. the surrounding lookup.
-    logger.info(
-      { requestId, chatId, contextMsgId, messageId: mid, contentType, folderPath: entry.folderPath },
-      'download_media: starting fetch',
-    );
     const attachment = await deps.saveMedia(contentType, content, mid as string, withTimeout, ctx.mediaDir);
     if (!attachment) {
       emitActionAck(entry, {
@@ -589,10 +581,6 @@ const handleDownloadMedia: ActionHandler = async (entry, payload, requestId, dep
       });
       return;
     }
-    logger.info(
-      { requestId, chatId, messageId: mid, size: attachment.size, elapsedMs: Date.now() - startMs, folderPath: entry.folderPath },
-      'download_media: fetch complete',
-    );
     emitActionAck(entry, {
       requestId,
       action: 'download_media',
@@ -601,10 +589,6 @@ const handleDownloadMedia: ActionHandler = async (entry, payload, requestId, dep
       result: { contextMsgId: contextMsgId ?? null, messageId: mid, ...attachment },
     });
   } catch (err) {
-    logger.warn(
-      { err, requestId, chatId, contextMsgId, messageId, elapsedMs: Date.now() - startMs, folderPath: entry.folderPath },
-      'download_media: failed',
-    );
     emitActionError(entry, { requestId, action: 'download_media', err });
   }
 };

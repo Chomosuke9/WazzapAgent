@@ -121,7 +121,6 @@ class WaSocket:
         *,
         transport: Optional[WSClientTransport] = None,
         ack_timeout: float = 30.0,
-        download_ack_timeout: float = 75.0,
         **transport_options: Any,
     ) -> None:
         self._folder_path = folder_path
@@ -129,12 +128,6 @@ class WaSocket:
         self._pending = PendingAcks()
         self._handlers: Dict[str, List[Handler]] = {}
         self._ack_timeout = ack_timeout
-        # `download_media` re-downloads bytes from WhatsApp on demand (gateway
-        # budget DOWNLOAD_TIMEOUT_MS, default 60s). Its ack window must exceed
-        # that budget, or a slow download is abandoned before the gateway can
-        # ack and the file silently never lands. Kept distinct from the generic
-        # 30s ack so every other action still fails fast.
-        self._download_ack_timeout = max(download_ack_timeout, ack_timeout)
         # True only between a successful handshake ("open") and the next "close".
         self._handshake_done = False
 
@@ -510,13 +503,7 @@ class WaSocket:
         proto and returns the attachment ActionResult (``{path, mime, kind,
         fileName, ...}``). Identify the message by ``context_msg_id`` or
         ``message_id``. Raises ``NotFoundError`` (proto evicted / no media),
-        ``InvalidTargetError`` or ``TimeoutError``.
-
-        Uses a longer ack window than the generic action timeout: the gateway
-        re-downloads the bytes from WhatsApp on demand (budget
-        ``DOWNLOAD_TIMEOUT_MS``, default 60s), so a 30s ack wait would abandon
-        a still-in-progress download — the file would never land and the caller
-        (vision / sticker / sub-agent) would silently get nothing."""
+        ``InvalidTargetError`` or ``TimeoutError``."""
         rid = request_id if request_id is not None else make_request_id("dl")
         frame = protocol.DownloadMediaAction(
             request_id=rid,
@@ -525,10 +512,7 @@ class WaSocket:
             message_id=message_id,
         )
         return await self._dispatch_action(
-            frame,
-            rid,
-            caller_supplied=request_id is not None,
-            timeout=self._download_ack_timeout,
+            frame, rid, caller_supplied=request_id is not None
         )
 
     # ------------------------------------------------------------------ #
@@ -536,12 +520,7 @@ class WaSocket:
     # ------------------------------------------------------------------ #
 
     async def _dispatch_action(
-        self,
-        action_frame: Any,
-        request_id: str,
-        *,
-        caller_supplied: bool,
-        timeout: Optional[float] = None,
+        self, action_frame: Any, request_id: str, *, caller_supplied: bool
     ) -> Optional[dict]:
         """Send an action frame, routing it through :class:`PendingAcks`.
 
@@ -563,9 +542,7 @@ class WaSocket:
           so a timeout/disconnect rejection is never logged as an unretrieved
           exception.
         """
-        future = self._pending.register(
-            request_id, timeout=timeout if timeout is not None else self._ack_timeout
-        )
+        future = self._pending.register(request_id, timeout=self._ack_timeout)
         if caller_supplied:
             future.add_done_callback(_retrieve_future_outcome)
             await self._transport.send(action_frame)
@@ -719,7 +696,6 @@ def make_wa_socket(
     folder_path: str,
     *,
     ack_timeout: float = 30.0,
-    download_ack_timeout: float = 75.0,
     **transport_options: Any,
 ) -> WaSocket:
     """Factory: build a :class:`WaSocket` for ``folder_path`` (CONTRACT §4).
@@ -728,17 +704,8 @@ def make_wa_socket(
     ``jitter_ratio``, ``heartbeat_interval_ms``) are forwarded to the underlying
     :class:`~wasocket.transport.WSClientTransport`. These are additive knobs;
     the contract signature is ``make_wa_socket(folder_path) -> WaSocket``.
-
-    ``download_ack_timeout`` is the longer ack window for ``download_media``
-    only (the gateway re-downloads bytes from WhatsApp on demand); it must
-    exceed the gateway ``DOWNLOAD_TIMEOUT_MS`` budget (default 60s).
     """
-    return WaSocket(
-        folder_path,
-        ack_timeout=ack_timeout,
-        download_ack_timeout=download_ack_timeout,
-        **transport_options,
-    )
+    return WaSocket(folder_path, ack_timeout=ack_timeout, **transport_options)
 
 
 __all__ = ["make_wa_socket", "WaSocket", "VALID_EVENTS"]
