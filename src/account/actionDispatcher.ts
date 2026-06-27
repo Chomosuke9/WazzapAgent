@@ -578,7 +578,9 @@ const handleDownloadMedia: ActionHandler = async (entry, payload, requestId, dep
       { requestId, chatId, contextMsgId, messageId: mid, contentType, folderPath: entry.folderPath },
       'download_media: starting fetch',
     );
-    const attachment = await deps.saveMedia(contentType, content, mid as string, withTimeout, ctx.mediaDir);
+    const attachment = await deps.saveMedia(contentType, content, mid as string, withTimeout, ctx.mediaDir,
+      entry.sock ? { fullMessage: cached, sock: entry.sock } : undefined,
+    );
     if (!attachment) {
       emitActionAck(entry, {
         requestId,

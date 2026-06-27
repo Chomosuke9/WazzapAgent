@@ -1,10 +1,11 @@
 import path from 'path';
 import fs from 'fs-extra';
-import { downloadContentFromMessage } from 'baileys';
-import type { MediaType } from 'baileys';
-import logger from './logger.js';
+import { downloadContentFromMessage, downloadMediaMessage } from 'baileys';
+import type { MediaType, WAMessage } from 'baileys';
+import logger, { baileysLogger } from './logger.js';
 import config from './config.js';
 import { streamToFile } from './utils/index.js';
+import type { WaSocketLike } from './protocol/ports.js';
 
 /**
  * Concrete media kinds saveMedia knows how to persist.
@@ -262,7 +263,37 @@ async function downloadMediaToFile(
   mediaKind: MediaType,
   filepath: string,
   withTimeout: WithTimeout,
+  refresh?: { fullMessage: WAMessage; sock: Pick<WaSocketLike, 'updateMediaMessage'> },
 ): Promise<number> {
+  // When the full message + socket are available (the lazy-media `download_media`
+  // path re-downloads a PREVIOUSLY-received message whose WhatsApp CDN URL may
+  // have expired), use Baileys' `downloadMediaMessage` with a `reuploadRequest`.
+  // It transparently asks WhatsApp to re-upload the media and refresh the URL on
+  // an expired/`410`/stalled fetch, then retries — exactly the case that made an
+  // older `download_media` hang until the timeout while fresh media worked. The
+  // low-level `downloadContentFromMessage` below has no URL-refresh and is kept
+  // for callers that only hold the raw content node (sticker/addsticker, which
+  // operate on just-received media).
+  if (refresh) {
+    const stream = (await withTimeout(
+      downloadMediaMessage(
+        refresh.fullMessage,
+        'stream',
+        {},
+        {
+          logger: baileysLogger,
+          reuploadRequest: refresh.sock.updateMediaMessage,
+        },
+      ),
+      config.downloadTimeoutMs,
+      `downloadMediaMessage(${mediaKind})`,
+    )) as unknown as NodeJS.ReadableStream;
+    return withTimeout(
+      streamToFile(stream, filepath),
+      config.downloadTimeoutMs,
+      `streamToFile(${mediaKind})`,
+    );
+  }
   const stream = await withTimeout(
     downloadContentFromMessage(content, mediaKind),
     config.downloadTimeoutMs,
@@ -352,6 +383,7 @@ async function saveMedia(
   messageId: string,
   withTimeout: WithTimeout,
   mediaDir: string = config.mediaDir,
+  refresh?: { fullMessage: WAMessage; sock: Pick<WaSocketLike, 'updateMediaMessage'> },
 ): Promise<SavedAttachment | null> {
   const kind = mapMediaKind(contentType);
   if (kind === 'unknown') return null;
@@ -371,13 +403,13 @@ async function saveMedia(
 
   let size: number;
   try {
-    size = await downloadMediaToFile(content, kind, filepath, withTimeout);
+    size = await downloadMediaToFile(content, kind, filepath, withTimeout, refresh);
   } catch (err) {
     if (kind !== 'sticker' || !shouldRetryStickerAsImage(err)) throw err;
     logger.warn({ err, messageId }, 'sticker decrypt failed with kind=sticker, retry as image');
     await fs.remove(filepath).catch(() => {});
     usedImageFallback = true;
-    size = await downloadMediaToFile(content, 'image', filepath, withTimeout);
+    size = await downloadMediaToFile(content, 'image', filepath, withTimeout, refresh);
   }
 
   const shouldUseDetectedMime = !declaredMime || declaredMime === 'application/octet-stream' || usedImageFallback;
