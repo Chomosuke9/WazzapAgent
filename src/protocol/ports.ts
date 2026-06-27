@@ -41,7 +41,6 @@ export type WaSocketLike = Pick<
   | "groupFetchAllParticipating"
   | "groupAcceptInvite"
   | "waUploadToServer"
-  | "updateMediaMessage"
   | "user"
   | "ev"
 >;

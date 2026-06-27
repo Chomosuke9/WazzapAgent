@@ -64,44 +64,6 @@ test('download_media downloads on demand for a cached message (feature 8)', asyn
   remove(folder);
 });
 
-test('download_media passes the cached message + socket so expired URLs can refresh', async () => {
-  const folder = '/tenants/dl-refresh';
-  const { entry, client } = makeAccount(folder);
-
-  const cachedMsg = {
-    key: { id: 'wamid-img-2', remoteJid: '123@g.us' },
-    message: { imageMessage: { mimetype: 'image/jpeg' } },
-  };
-  entry.ctx.messageCache.set('wamid-img-2', cachedMsg as any);
-
-  let refreshArg: any;
-  const deps: Partial<DispatchDeps> = {
-    saveMedia: (async (_ct: any, _content: any, _mid: any, _wt: any, _dir: any, refresh: any) => {
-      refreshArg = refresh;
-      return {
-        kind: 'image', mime: 'image/jpeg', fileName: 'wamid-img-2_image.jpg',
-        originalFileName: null, jpegThumbnail: null, size: 10,
-        path: '/data/media/wamid-img-2_image.jpg', isAnimated: false,
-      };
-    }) as DispatchDeps['saveMedia'],
-  };
-
-  await dispatchAction(
-    entry,
-    { type: 'download_media', payload: { requestId: 'dl-3', chatId: '123@g.us', messageId: 'wamid-img-2' } },
-    deps,
-  );
-
-  // The refresh option carries the FULL cached message (not just the content
-  // node) and the live socket — that pair is what lets saveMedia use Baileys'
-  // downloadMediaMessage(reuploadRequest) to refresh an expired CDN URL.
-  assert.ok(refreshArg, 'saveMedia received the refresh option');
-  assert.equal(refreshArg.fullMessage, cachedMsg, 'full cached message threaded through');
-  assert.equal(refreshArg.sock, entry.sock, 'live socket threaded through');
-
-  remove(folder);
-});
-
 test('download_media replies not_found when the proto was evicted', async () => {
   const folder = '/tenants/dl-miss';
   const { entry, client } = makeAccount(folder);
