@@ -404,9 +404,16 @@ LLM2_SUBAGENT_TOOL = {
                 "confirmation_text": {
                     "type": "string",
                     "description": (
-                        "A brief confirmation message to the user that the task has started. "
-                        "If input files are provided via context_msg_ids, this message will "
-                        "be sent as a reply to the last file ID to acknowledge receipt."
+                        "A brief confirmation message to the user that SPECIFICALLY states "
+                        "what you are about to do, in their language and WhatsApp formatting. "
+                        "Say the concrete action, e.g. \"Converting your PDF to Word now\" or "
+                        "\"Fixing the chart colors and re-rendering it\". "
+                        "Do NOT send vague filler like \"let me try again\", \"ok\", or "
+                        "\"working on it\" — the user should understand what is happening from "
+                        "this message alone. On a correction re-dispatch, name what you are "
+                        "correcting (e.g. \"That came back in the wrong format — redoing it as "
+                        "a spreadsheet\"). If input files are provided via context_msg_ids, "
+                        "this message is sent as a reply to the last file ID to acknowledge receipt."
                     ),
                     "minLength": 1,
                 },
