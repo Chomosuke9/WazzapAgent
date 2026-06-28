@@ -2,10 +2,54 @@
 from __future__ import annotations
 
 import os
+import threading
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
-load_dotenv()
+_DOTENV_PATH = find_dotenv(usecwd=True)
+load_dotenv(_DOTENV_PATH or None)
+
+
+def _watch_dotenv(poll_seconds: float = 2.0) -> None:
+  """Reload ``.env`` into ``os.environ`` whenever the file's mtime changes.
+
+  LLM configuration hot-reloads for free because every LLM_* / LLM1_* / LLM2_*
+  accessor below reads ``os.getenv`` at call-time and ``get_llm1``/``get_llm2``
+  rebuild the ``ChatOpenAI`` client on each invocation — so a reloaded endpoint,
+  model, key, temperature, timeout, etc. takes effect on the next LLM call.
+
+  HARD TO HOT-RELOAD (changing these in .env does NOTHING until a full restart):
+    - System/transport: NODE_URL, WS_* (sockets already dialed/bound),
+      ACCOUNTS_JSON / FOLDER_PATHS / FOLDER_PATH / DATA_DIR (tenants + DBs are
+      opened once at boot).
+    - HTTP servers already bound: DIRECT_INVOKE_* and SUBAGENT_WEBHOOK_* ports/host.
+    - Import-frozen constants in this file (HISTORY_LIMIT, *_DEBOUNCE_*,
+      REPLY_DEDUP_*, PROMPT_MAX_CHARS, REQUIRE_ACTIVATION): evaluated once at
+      import, so a reload won't move them. Make one of these a call-time
+      function (like the LLM_* accessors) if you need it to hot-reload.
+
+  ponytail: 2s mtime poll on one daemon thread; no watchdog dep. Switch to
+  watchdog/inotify only if 2s latency or the once-per-2s stat() ever matters.
+  """
+  if not _DOTENV_PATH:
+    return  # env provided some other way — nothing to watch
+
+  def _loop() -> None:
+    last = None
+    while True:
+      try:
+        mtime = os.path.getmtime(_DOTENV_PATH)
+        if mtime != last:
+          last = mtime
+          load_dotenv(_DOTENV_PATH, override=True)
+      except OSError:
+        pass  # transient unlink/rename during editor save; retry next tick
+      threading.Event().wait(poll_seconds)
+
+  threading.Thread(target=_loop, name="dotenv-watch", daemon=True).start()
+
+
+_watch_dotenv()
 
 
 # ---------------------------------------------------------------------------

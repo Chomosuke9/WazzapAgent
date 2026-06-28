@@ -3,7 +3,8 @@ import fs from 'fs-extra';
 import { fileURLToPath } from 'url';
 import { config as dotenvConfig } from 'dotenv';
 
-dotenvConfig();
+const ENV_PATH = path.resolve(process.cwd(), '.env');
+dotenvConfig({ path: ENV_PATH });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -108,7 +109,8 @@ export interface Config {
   subagentConfigured: boolean;
 }
 
-const config: Config = {
+function buildConfig(): Config {
+  return {
   instanceId: process.env.INSTANCE_ID || 'default',
   // Optional WhatsApp pairing-code flow (no QR). When set, the gateway requests
   // an 8-char pairing code for this number instead of printing a QR. Must be
@@ -179,7 +181,10 @@ const config: Config = {
   // so the presence of an explicit env value is the signal that the owner
   // actually set the service up. Used to reject /subagent on when unset.
   subagentConfigured: Boolean((process.env.SUBAGENT_URL || '').trim()),
-};
+  };
+}
+
+const config: Config = buildConfig();
 
 // Startup validation for required transport vars. Defaults exist
 // (WS_LISTEN_PORT=3000), so a successful boot with defaults is unaffected;
@@ -193,5 +198,25 @@ function validateConfig(c: Config): void {
 }
 
 validateConfig(config);
+
+// Hot reload: re-read .env on change and mutate the shared config object in
+// place so existing importers see updates. Only fields read fresh per-use
+// (footer, thresholds, flags, sticker params, etc.) actually take effect;
+// boot-consumed fields (ports, host, dirs, DB paths) are already bound, so
+// changing them here does nothing until restart.
+// ponytail: best-effort, last-writer-wins; no debounce. Add debounce if your
+// editor fires multiple write events and the reparse cost ever shows up.
+try {
+  fs.watch(ENV_PATH, () => {
+    try {
+      dotenvConfig({ path: ENV_PATH, override: true });
+      Object.assign(config, buildConfig());
+    } catch {
+      // keep last-good config on a malformed save mid-write
+    }
+  });
+} catch {
+  // .env absent (env vars set another way) — nothing to watch
+}
 
 export default config;
