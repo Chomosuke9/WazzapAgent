@@ -38,12 +38,11 @@ import logger, { baileysLogger } from "../logger.js";
 import config from "../config.js";
 import { createAccountContext } from "./accountContext.js";
 import type { AccountContext } from "./accountContext.js";
-import { forwardStatus, bindForwarder } from "./eventForwarder.js";
+import { forwardStatus, bindForwarder, normalizeWaStatus } from "./eventForwarder.js";
 import * as registry from "../server/accountRegistry.js";
 import type {
   AccountEntry,
   BaileysFactoryOptions,
-  WaStatus,
 } from "../protocol/types.js";
 import { Database } from "../db/Database.js";
 import { createRepositories } from "../db/repositories/index.js";
@@ -169,17 +168,6 @@ export function resolveTenantMediaDirs(
     stickersDir: layout.stickersDir,
     stickerUploadDir: path.join(folderPath, "stickers_user"),
   };
-}
-
-/**
- * Normalize a Baileys `connection.update` connection value to the CONTRACT.md
- * {@link WaStatus}: `"open"→"open"`, `"close"/"closed"→"close"`,
- * `"connecting"/undefined→"connecting"`.
- */
-function normalizeWaStatus(connection: string | undefined | null): WaStatus {
-  if (connection === "open") return "open";
-  if (connection === "close" || connection === "closed") return "close";
-  return "connecting";
 }
 
 // ---------------------------------------------------------------------------

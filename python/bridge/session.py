@@ -141,13 +141,6 @@ _DIRECT_INVOKE_BLOCK_INSTRUCTIONS = (
 )
 
 
-def _compute_idle_trigger(min_val: int, max_val: int, msg_count: int) -> bool:
-  """Backwards-compatible shim — the implementation now lives in
-  :meth:`bridge.agent.idle_trigger.IdleTrigger.compute` (Step 08). Retained as a
-  thin module-level alias so any external reference keeps working."""
-  return IdleTrigger.compute(min_val, max_val, msg_count)
-
-
 class AgentSession:
   """Encapsulates all per-account agent state + handler wiring for one
   :class:`~wasocket.socket.WaSocket` (one WhatsApp account).

@@ -70,6 +70,5 @@ export async function useCachedAuthState(folder: string) {
   return {
     state: { ...state, keys: cachedKeys },
     saveCreds,
-    getCache: () => cache, // optional, for monitoring
   };
 }

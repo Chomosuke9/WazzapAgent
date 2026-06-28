@@ -10,7 +10,7 @@
 // those `@types/*` dev dependencies instead of hand-writing stubs here, per the
 // step's preference for `@types/*` over manual shims.
 //
-// Deps that already ship their own types (baileys, pino, sharp, axios, dotenv)
+// Deps that already ship their own types (baileys, pino, sharp, dotenv)
 // or already have `@types/*` installed (ws) intentionally have NO declaration
 // here.
 

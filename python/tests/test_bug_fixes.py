@@ -39,7 +39,6 @@ from bridge.history import (
 from bridge.messaging.processing import (
   _build_burst_current,
   _resolve_quoted_mentions,
-  _hydrate_quoted_from_history_payload,
 )
 
 
@@ -481,31 +480,6 @@ class TestHydrateQuotedFromHistory(unittest.TestCase):
     )
     hydrate_quoted_from_history(msg_pending, [])
     # Should not crash and should not modify anything
-
-  def test_delegation_from_processing(self) -> None:
-    """_hydrate_quoted_from_history_payload should delegate to the shared
-    hydrate_quoted_from_history function."""
-    history = deque([
-      WhatsAppMessage(
-        timestamp_ms=1730000000000,
-        sender="Bob",
-        context_msg_id="000999",
-        sender_ref="b2",
-        text="from deque",
-      ),
-    ])
-    msg = WhatsAppMessage(
-      timestamp_ms=1730000001000,
-      sender="Alice",
-      context_msg_id="001000",
-      sender_ref="a1",
-      text="reply",
-      quoted_message_id="000999",
-      quoted_sender="Bob",
-    )
-    _hydrate_quoted_from_history_payload(msg, history)
-    self.assertEqual(msg.quoted_text, "from deque")
-    self.assertEqual(msg.quoted_sender_ref, "b2")
 
 
 # ---------------------------------------------------------------------------

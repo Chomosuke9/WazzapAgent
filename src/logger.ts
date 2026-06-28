@@ -20,8 +20,8 @@ import { formatRecord } from './logFormat.js';
  *  then TTY auto-detection. Mirrors the Python bridge so both agree. */
 function resolveColor(): boolean {
   const mode = (config.logColor || 'auto').toLowerCase();
-  if (['1', 'true', 'always', 'yes', 'on'].includes(mode)) return true;
-  if (['0', 'false', 'never', 'no', 'off'].includes(mode)) return false;
+  if (mode === 'always') return true;
+  if (mode === 'never') return false;
   // NO_COLOR convention: any non-empty value disables color.
   if (process.env.NO_COLOR != null && process.env.NO_COLOR !== '') return false;
   return Boolean(process.stdout.isTTY);

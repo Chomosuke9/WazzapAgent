@@ -751,82 +751,25 @@ class SubAgentCoordinator:
     ctx_ids = action.get("contextMsgIds", [])
     high_quality = action.get("high_quality", False)
 
-    # Resolve contextMsgIds -> media file paths AND/OR text content.
-    # Media comes from ``media_paths_by_chat``; text comes from the
-    # in-memory history deque (``per_chat[chat_id]``, already bound
-    # to ``history`` above). A single contextMsgId can carry both a
-    # media attachment *and* text (e.g. an image with a caption), so
-    # both branches run independently for each cid.
-    local_input_files: list[str] = []
-    # Lazy media (feature 8): inbound only forwards attachment metadata, and
-    # the visual on-demand path (``materialize_visual_media``) downloads
-    # image/sticker only. Documents/audio/video the user wants the sub-agent
-    # to work on therefore have no bytes on disk yet. Download them now (any
-    # kind) so the resolution loop below finds a real file. Without this the
-    # sub-agent silently receives no input file.
-    await materialize_media_for_subagent(ws, chat_id, ctx_ids, media_paths_by_chat, history)
-    chat_store = media_paths_by_chat.get(chat_id, {})
-    tmp_dir = tempfile.mkdtemp(prefix="subagent_ctx_")
-    try:
-      file_idx = 1
-
-      for cid in ctx_ids:
-        # --- media resolution ---
-        atts = chat_store.get(cid)
-        media_path = None
-        if isinstance(atts, list) and atts:
-          first = atts[0]
-          p = first.get("path") if isinstance(first, dict) else None
-          if p and os.path.isfile(p):
-            media_path = p
-        elif isinstance(atts, str) and os.path.isfile(atts):
-          media_path = atts
-
-        if media_path:
-          ext = os.path.splitext(media_path)[1] or ".bin"
-          renamed = os.path.join(tmp_dir, f"media{file_idx}{ext}")
-          shutil.copyfile(media_path, renamed)
-          local_input_files.append(renamed)
-          file_idx += 1
-
-        # --- text resolution (on-demand scan of history deque) ---
-        msg_text = None
-        for msg in history:
-          if msg.context_msg_id == cid and msg.text:
-            msg_text = msg.text
-            break
-
-        if msg_text:
-          txt_path = os.path.join(tmp_dir, f"user_message{file_idx}.txt")
-          with open(txt_path, "w", encoding="utf-8") as f:
-            f.write(msg_text)
-          local_input_files.append(txt_path)
-          file_idx += 1
-
-      # The bridge stores inbound media under MEDIA_DIR (e.g.
-      # ``data/media/...``), but the sub-agent process runs in a
-      # separate container/host that cannot read those paths. Stage
-      # them into the cross-process exchange directory so the paths
-      # we hand to /execute resolve on both sides. See
-      # ``subagent/output.py::input_staging_root`` for the contract.
-      input_files = stage_input_files(session_id, local_input_files)
-    finally:
-      shutil.rmtree(tmp_dir, ignore_errors=True)
+    # Resolve contextMsgIds -> staged input file paths (media AND/OR message
+    # text). Same resolution steering uses, so the primary and steering paths
+    # ship identical files. See :func:`_resolve_ctx_ids_to_input_files`.
+    input_files = await _resolve_ctx_ids_to_input_files(
+      ws, chat_id, ctx_ids, media_paths_by_chat, history, session_id,
+    )
 
     task = SubTask(session_id=session_id, instruction=instruction, chat_id=chat_id)
     subagent_tracker.register(task)
 
     logger.info(
-      "execute_subtask: submitting session=%s instruction=%s files=%d (staged=%d) high_quality=%s",
+      "execute_subtask: submitting session=%s instruction=%s files=%d high_quality=%s",
       session_id,
       instruction[:120],
-      len(local_input_files),
       len(input_files),
       high_quality,
       extra={
         "chat_id": chat_id,
         "session_id": session_id,
-        "local_input_files": local_input_files,
         "input_files": input_files,
         "high_quality": high_quality,
       },
@@ -1062,44 +1005,9 @@ context block from ``SubTaskTracker.format_context``).
                 await send_message(ws, chat_id, _conf_text, fallback_reply_to, request_id=_conf_rid)
                 session._dashboard.record_stat(chat_id, "responses_sent")
               _new_session_id = f"{chat_id}_{uuid.uuid4().hex[:8]}_{int(time.time())}"
-              _local_files: list[str] = []
-              # Same lazy-media materialization as the primary dispatch:
-              # download any non-visual files the correction references so
-              # they actually reach the sub-agent.
-              await materialize_media_for_subagent(ws, chat_id, _ctx_ids, media_paths_by_chat, history)
-              _tmp_dir = tempfile.mkdtemp(prefix="subagent_ctx_")
-              try:
-                _fidx = 1
-                for _cid in _ctx_ids:
-                  _atts = media_paths_by_chat.get(chat_id, {}).get(_cid)
-                  _media_path = None
-                  if isinstance(_atts, list) and _atts:
-                    _first = _atts[0]
-                    _p = _first.get("path") if isinstance(_first, dict) else None
-                    if _p and os.path.isfile(_p):
-                      _media_path = _p
-                  elif isinstance(_atts, str) and os.path.isfile(_atts):
-                    _media_path = _atts
-                  if _media_path:
-                    _ext = os.path.splitext(_media_path)[1] or ".bin"
-                    _renamed = os.path.join(_tmp_dir, f"media{_fidx}{_ext}")
-                    shutil.copyfile(_media_path, _renamed)
-                    _local_files.append(_renamed)
-                    _fidx += 1
-                  _msg_text = None
-                  for _msg in history:
-                    if _msg.context_msg_id == _cid and _msg.text:
-                      _msg_text = _msg.text
-                      break
-                  if _msg_text:
-                    _txt_path = os.path.join(_tmp_dir, f"user_message{_fidx}.txt")
-                    with open(_txt_path, "w", encoding="utf-8") as _f:
-                      _f.write(_msg_text)
-                    _local_files.append(_txt_path)
-                    _fidx += 1
-                _input_files = stage_input_files(_new_session_id, _local_files)
-              finally:
-                shutil.rmtree(_tmp_dir, ignore_errors=True)
+              _input_files = await _resolve_ctx_ids_to_input_files(
+                ws, chat_id, _ctx_ids, media_paths_by_chat, history, _new_session_id,
+              )
               _task = SubTask(session_id=_new_session_id, instruction=_instruction, chat_id=chat_id)
               subagent_tracker.register(_task)
               logger.info(

@@ -397,18 +397,6 @@ def _resolve_quoted_mentions(quoted: dict, quoted_text: str | None) -> str | Non
   return resolved if resolved is not None else quoted_text
 
 
-def _hydrate_quoted_from_history_payload(
-  msg: WhatsAppMessage,
-  history: Deque[WhatsAppMessage],
-) -> None:
-  """Look up the quoted message in history and fill in missing quoted fields.
-
-  Delegates to :func:`hydrate_quoted_from_history` from :mod:`bridge.history`
-  to avoid duplicating the hydration logic.
-  """
-  hydrate_quoted_from_history(msg, history)
-
-
 def _display_context_msg_id_from_payload(payload: dict) -> str:
   if _is_system_payload(payload):
     return SYSTEM_CONTEXT_TOKEN
@@ -640,7 +628,7 @@ def _append_or_merge_history_payload(
   payload: dict,
 ) -> None:
   msg = _payload_to_message(payload)
-  _hydrate_quoted_from_history_payload(msg, history)
+  hydrate_quoted_from_history(msg, history)
   if bool(payload.get("fromMe")) and _merge_fromme_echo_into_provisional(history, msg):
     return
   _append_history(history, msg)
