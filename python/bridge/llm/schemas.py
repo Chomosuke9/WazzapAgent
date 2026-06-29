@@ -161,12 +161,12 @@ LLM2_REPLY_TOOL = {
     "function": {
         "name": "reply_message",
         "description": (
-            "Send a text reply and optionally trigger a silent slash command in the same call. "
+            "Send a text reply and optionally trigger one or more silent slash commands in the same call. "
             "context_msg_id: message to quote-reply, or 'none'. "
             "Inline mentions: @Name (senderRef). "
-            "If command is set, command_context_msg_id MUST be explicitly set — "
-            "use context_msg_id's value if the command targets the same message, "
-            "or a different ID if not. Never null when command is non-null."
+            "When command is an array, each element is a full slash command line. "
+            "command_context_msg_id is a parallel array — each entry is the anchor for the "
+            "same-index command, or null to use context_msg_id."
         ),
         "parameters": {
             "type": "object",
@@ -180,34 +180,29 @@ LLM2_REPLY_TOOL = {
                     "description": "Reply text shown to the user.",
                     "minLength": 1,
                 },
-                # Strict mode: every property must appear in `required`. To keep
-                # `command` optional, we accept `null` and downstream extraction
-                # treats null/empty as "no command".
                 "command": {
-                    "type": ["string", "null"],
+                    "type": ["array", "null"],
+                    "items": {"type": "string"},
                     "description": (
-                        "Slash command that runs automatically alongside the reply, e.g. '/sticker' or "
-                        "'/help'. A leading '/' is recommended but optional (it is added automatically "
+                        "One or more slash commands that run automatically alongside the reply, "
+                        "e.g. ['/memory add The user likes cats.', '/help']. "
+                        "A leading '/' is recommended but optional (it is added automatically "
                         "if missing). Set to null when not needed. "
-                        "Only use a command when the user explicitly asks for something a command can do "
+                        "Only use commands when the user explicitly asks for something a command can do "
                         "(see the command list). "
-                        "CRITICAL: Always append the required arguments to the command itself — "
+                        "CRITICAL: Always append the required arguments to each command itself — "
                         "for example '/schedule-task 30M ping the group', not just '/schedule-task'. "
                         "A bare command with no arguments will fail."
                     ),
                 },
-                # Strict mode: must appear in `required`. Pass null only when command is null.
-                # Set to context_msg_id if both targets are the same message.
-                # Set to a different ID when the command targets a different message —
-                # e.g. user replies to an image with "make this a sticker":
-                # context_msg_id = user's instruction, command_context_msg_id = image's ID
-                # (shown as REPLYING TO [#NNNNNN] in the user's message).
                 "command_context_msg_id": {
-                    "type": ["string", "null"],
+                    "type": ["array", "null"],
+                    "items": {"type": "string"},
                     "description": (
-                        "6-digit contextMsgId the command operates on. "
-                        "REQUIRED (non-null) when command is set. "
-                        "Pass null only when command is null."
+                        "Parallel array of 6-digit contextMsgIds, one per command. "
+                        "Each entry is the anchor for the same-index command. "
+                        "Pass null when no commands need a target, "
+                        "or use an array aligned with command entries."
                     ),
                 },
             },

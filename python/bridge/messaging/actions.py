@@ -369,50 +369,63 @@ def _extract_actions_from_tool_calls(
         "replyTo": reply_to,
       })
 
-      # Optional `command` parameter: dispatched to the Node gateway as a
-      # `run_command` action *after* the text reply. The command runs
-      # silently — it is NOT posted as a WhatsApp message. Strict-mode
+      # Optional `command` parameter: dispatched to the Node gateway as
+      # `run_command` action(s) *after* the text reply. Commands run
+      # silently — they are NOT posted as WhatsApp messages. Strict-mode
       # tool calls always populate `command` (with `null` when unused),
       # so we treat null/empty as "no command".
       #
-      # The command's anchor (which message it operates on, e.g. which
+      # The command anchor (which message it operates on, e.g. which
       # image `/sticker` should turn into a sticker) defaults to the
       # same message as the text reply (`reply_to`). The model can
-      # override this via `command_context_msg_id` when the reply
-      # target and the command target are DIFFERENT messages — e.g.
-      # the bot replies to the user's instruction "make this a sticker"
-      # but `/sticker` must operate on the image the user was quoting.
+      # override this via `command_context_msg_id` — either a parallel
+      # array (one anchor per command) or a single value for all.
       raw_command = args.get("command")
-      command_text = str(raw_command or "").strip() if raw_command else ""
-      # Some models emit the literal string "null"/"none" (or a bare "/")
-      # instead of a real JSON null for the optional command. Treat those
-      # sentinels as "no command" so they aren't mistaken for a real slash
-      # command (which previously logged a noisy "must start with '/'" warning).
-      if command_text.lower() in {"null", "none", "nil", "/"}:
-        command_text = ""
-      if command_text:
-        # Be lenient about the leading slash: accept the command with OR
-        # without it and normalize by prepending '/' when missing, instead
-        # of rejecting it. (Scoped to the LLM-driven run_command path —
-        # human-typed messages still require an explicit '/'.)
-        if not command_text.startswith("/"):
-          command_text = "/" + command_text
+      command_texts: list[str] = []
+      if isinstance(raw_command, list):
+        for c in raw_command:
+          if c and isinstance(c, str):
+            t = c.strip()
+            if t.lower() in {"null", "none", "nil", "/"}:
+              continue
+            if t:
+              command_texts.append(t)
+      elif raw_command:
+        t = str(raw_command).strip()
+        if t.lower() not in {"null", "none", "nil", "/"} and t:
+          command_texts.append(t)
+
+      if command_texts:
         raw_command_ctx = args.get("command_context_msg_id")
-        if raw_command_ctx is None or (
-          isinstance(raw_command_ctx, str) and not raw_command_ctx.strip()
-        ):
-          command_anchor = reply_to
+        ctx_ids: list[str | None]
+        if isinstance(raw_command_ctx, list):
+          ctx_ids = list(raw_command_ctx)
+        elif isinstance(raw_command_ctx, str) and raw_command_ctx.strip():
+          ctx_ids = [raw_command_ctx] * len(command_texts)
         else:
-          command_anchor = _resolve_reply_target(
-            raw_command_ctx,
-            fallback_reply_to=reply_to,
-            allowed_context_ids=allowed_context_ids,
-          )
-        actions.append({
-          "type": "run_command",
-          "command": command_text,
-          "contextMsgId": command_anchor,
-        })
+          ctx_ids = [None] * len(command_texts)
+
+        # Extend ctx_ids with None if shorter than command_texts
+        while len(ctx_ids) < len(command_texts):
+          ctx_ids.append(None)
+
+        for i, command_text in enumerate(command_texts):
+          if not command_text.startswith("/"):
+            command_text = "/" + command_text
+          anchor = ctx_ids[i]
+          if anchor is None or not anchor.strip():
+            resolved_anchor = reply_to
+          else:
+            resolved_anchor = _resolve_reply_target(
+              anchor,
+              fallback_reply_to=reply_to,
+              allowed_context_ids=allowed_context_ids,
+            )
+          actions.append({
+            "type": "run_command",
+            "command": command_text,
+            "contextMsgId": resolved_anchor,
+          })
 
     elif name == "react_to_message":
       emoji = str(args.get("emoji") or "").strip()
