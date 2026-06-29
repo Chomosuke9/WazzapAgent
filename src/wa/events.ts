@@ -228,6 +228,31 @@ function emitBotActionContextEvent(ctx: AccountContext, {
   ctx.forwarder!.forwardIncoming(payload as unknown as WhatsAppMessagePayload);
 }
 
+// ponytail: no interface — just destructure `any`
+async function emitBotAddedEvent(ctx: AccountContext, args: Record<string, any>): Promise<void> {
+  const chatId = args.chatId;
+  const sock = ctx.sock;
+  if (!sock || !chatId || !chatId.endsWith('@g.us')) return;
+  const group = await getGroupContext(ctx, chatId, { forceRefresh: true });
+  const actorId = normalizeJid(args.actorId);
+  const senderId = actorId || 'group-system@wazzap.local';
+  ctx.forwarder!.forwardIncoming({
+    messageId: makeEventMessageId('bot_added'), instanceId: config.instanceId,
+    chatId, chatName: group.name || chatId, chatType: 'group',
+    senderId, senderRef: rememberSenderRef(ctx, chatId, senderId, senderId) || 'unknown',
+    senderName: args.actorName || 'Group System',
+    senderIsAdmin: roleFlagsForJid(group?.participantRoles, senderId).isAdmin || roleFlagsForJid(group?.participantRoles, senderId).isSuperAdmin,
+    isGroup: true, botIsAdmin: Boolean(group?.botIsAdmin), botIsSuperAdmin: Boolean(group?.botIsSuperAdmin),
+    fromMe: false, timestampMs: Number(args.timestampMs) || Date.now(),
+    messageType: 'botAddedToGroup',
+    text: `Bot was added to the group${args.actorName ? ` by ${args.actorName}` : ''}.`,
+    contextOnly: true, triggerLlm1: false,
+    groupDescription: group.description,
+    groupEvent: { action: args.action || 'add', participants: compactParticipantJids(args.participants), actorId, actorName: args.actorName, source: args.source || 'group-participants.update' },
+  } as unknown as WhatsAppMessagePayload);
+  logger.info({ chatId, action: args.action }, 'emitted bot added event');
+}
+
 function emitBotRoleChangeEvent(ctx: AccountContext, {
   chatId,
   action,
@@ -290,4 +315,5 @@ export {
   emitGroupJoinContextEvent,
   emitBotActionContextEvent,
   emitBotRoleChangeEvent,
+  emitBotAddedEvent,
 };

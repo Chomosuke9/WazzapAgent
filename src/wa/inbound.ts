@@ -55,6 +55,7 @@ import {
   resolveParticipantLabel,
   emitGroupJoinContextEvent,
   emitBotRoleChangeEvent,
+  emitBotAddedEvent,
 } from './events.js';
 import { parseSlashCommand } from './commands/index.js';
 import { isActivationRequired, getActivationMessage } from './botConfig.js';
@@ -158,6 +159,21 @@ async function handleGroupParticipantsUpdate(ctx: AccountContext, update: any): 
   const action = normalizeGroupJoinAction(rawAction);
   const joinActions = new Set(['add', 'invite', 'join', 'approve']);
   if (!joinActions.has(action)) return;
+
+  // Check if bot itself is being added to the group
+  const botAliases = new Set(currentBotAliases(ctx));
+  const botBeingAdded = participants.some((p) => botAliases.has(normalizeJid(p) || p));
+  if (botBeingAdded) {
+    await emitBotAddedEvent(ctx, {
+      chatId,
+      action,
+      participants,
+      actorId,
+      timestampMs: Date.now(),
+      source: 'group-participants.update',
+    });
+    return;
+  }
 
   await emitGroupJoinContextEvent(ctx, {
     chatId,

@@ -609,3 +609,4 @@ export class SettingsRepository extends BaseRepository {
     return row?.name ?? null;
   }
 }
+

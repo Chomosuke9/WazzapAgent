@@ -121,6 +121,13 @@ def set_prompt(chat_id: str, prompt: Optional[str]) -> None:
     _prompt_cache[_tenant_cache_key(chat_id)] = prompt
   logger.info('DB set_prompt chat_id=%s len=%s', chat_id, len(prompt) if prompt else 0)
 
+# ponytail: no set_join_prompt — only Node writes via /prompt join
+def get_join_prompt() -> str:
+  row = _get_settings_conn().execute(
+    'SELECT value FROM bot_config WHERE key = ?', ('join_prompt',)
+  ).fetchone()
+  return row['value'] if row and row['value'] else "Introduce yourself to this group. Tell them your name and what you can do."
+
 @_db_resilient('settings')
 def get_memories(chat_id: str) -> list[str]:
   """Return the effective long-term memory list for *chat_id*.

@@ -53,6 +53,7 @@ from ..db import (
   get_subagent_enabled as db_get_subagent_enabled,
   is_chat_activated as db_is_chat_activated,
   get_model_vision_support as db_get_model_vision_support,
+  get_join_prompt as db_get_join_prompt,
 )
 from ..stickers import resolve_sticker
 from ..messaging.processing import (
@@ -1597,6 +1598,17 @@ class BatchProcessor:
           request_id=_make_request_id("role_notify"),
         )
         logger.info("bot demoted in chat_id=%s; permission reset to 0", chat_id)
+      return
+
+    # ponytail: inline the one DB read
+    if _mute_msg_type == "botaddedtogroup":
+      logger.info("bot added to group chat_id=%s; re-invoking", chat_id)
+      await self._session._reinvoker.reinvoke(
+        chat_id, db_get_join_prompt(),
+        system_label="BOT ADDED", block_title="Bot added to group",
+        block_instructions="You have just been added to this group chat. Write a short introduction introducing yourself.",
+        log_kind="bot_added",
+      )
       return
 
     pending = pending_by_chat[chat_id]

@@ -119,6 +119,26 @@ async function handlePrompt({
   account,
   msg,
 }: CommandContext): Promise<void> {
+  // ponytail: inline join-prompt handling — YAGNI a separate function
+  if (args) {
+    const tok = args.trim().split(/\s+/)[0]?.toLowerCase();
+    if (tok === "join") {
+      if (!senderIsOwner) { try { await sock.sendMessage(chatId, { text: "Only bot owner can set the join prompt." }); } catch { /* ignore */ } return; }
+      const val = args.trim().slice(4).trim(); // skip "join"
+      if (!val || val === "join") { const c = repos!.settings.getBotConfig("join_prompt"); try { await sock.sendMessage(chatId, { text: c ? `Join prompt:\n${c}` : "No join prompt set." }); } catch { /* ignore */ } return; }
+      if (["-", "clear", "reset"].includes(val.toLowerCase())) {
+        repos!.settings.setBotConfig("join_prompt", null);
+        registry.sendReliableToClient(folderPath, { type: "invalidate_chat_settings", folderPath, chatId: "global" });
+        try { await sock.sendMessage(chatId, { text: "Join prompt cleared." }); } catch { /* ignore */ }
+        return;
+      }
+      repos!.settings.setBotConfig("join_prompt", val);
+      registry.sendReliableToClient(folderPath, { type: "invalidate_chat_settings", folderPath, chatId: "global" });
+      try { await sock.sendMessage(chatId, { text: val.length > 200 ? `Join prompt updated:\n${val.slice(0, 197)}...` : `Join prompt updated:\n${val}` }); } catch { /* ignore */ }
+      return;
+    }
+  }
+
   if (!args) {
     const current = repos!.settings.getPrompt(chatId);
     if (current) {
@@ -244,7 +264,7 @@ export { handlePrompt, rewritePromptMentions, renderStoredMentions };
 export const promptCommand: CommandHandler = {
   commands: ["prompt", "prompts"],
   description:
-    "Set a custom instruction or personality for the bot in this chat (system prompt). Without arguments it shows the current prompt. Use /prompt clear to remove it. Example: /prompt Reply concisely, politely, and in English.",
+    "Set a custom instruction or personality for the bot in this chat (system prompt). Without arguments it shows the current prompt. Use /prompt clear to remove it. Example: /prompt Reply concisely, politely, and in English.\nUse `/prompt join <text>` (owner only) to set the message the bot uses when added to a group.",
   permission: "isPrivate or fromMe or isAdmin or isOwner",
   run: (_sock, _message, ctx) => handlePrompt(ctx),
 };
