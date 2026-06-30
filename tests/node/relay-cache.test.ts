@@ -16,9 +16,9 @@ test('relayed messages are cached by wamid so a reply + /catch can resolve them'
   const relayed: Array<string | undefined> = [];
   ctx.sock = {
     user: { id: 'bot@s.whatsapp.net' },
-    relayMessage: async (_jid: string, _message: unknown, options: any) => {
-      relayed.push(options?.messageId);
-      return options?.messageId;
+    relayMessage: async (_jid: string, _message: unknown, options: Record<string, unknown>) => {
+      relayed.push(options?.messageId as string | undefined);
+      return options?.messageId as string | undefined;
     },
   } as never;
 
@@ -29,7 +29,7 @@ test('relayed messages are cached by wamid so a reply + /catch can resolve them'
   await ctx.sock!.relayMessage(jid, message as never, { messageId: 'wamid-int-1' } as never);
 
   assert.equal(relayed.length, 1, 'the original relayMessage must still run');
-  const cached: any = ctx.messageCache.get('wamid-int-1');
+  const cached: Record<string, unknown> | undefined = ctx.messageCache.get('wamid-int-1');
   assert.ok(cached, 'relayed interactive message must be cached for /catch');
   assert.strictEqual(cached.message, message, 'cached proto must carry the relayed content');
   assert.equal(cached.key.id, 'wamid-int-1');

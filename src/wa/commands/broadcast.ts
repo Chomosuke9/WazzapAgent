@@ -1,5 +1,6 @@
 import logger from "../../logger.js";
 import { withJidQueue } from "../sendQueue.js";
+import type { WAMessage } from "baileys";
 import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 import type { AccountContext } from "../../account/accountContext.js";
 import type { WaSocketLike } from "../../protocol/ports.js";
@@ -8,7 +9,7 @@ async function reconstructAndSend(
   ctx: AccountContext,
   sock: WaSocketLike,
   targetJid: string,
-  cachedMsg: any,
+  cachedMsg: WAMessage,
 ): Promise<{ ok: boolean; reason?: string }> {
   const msg = cachedMsg.message;
   if (!msg) {

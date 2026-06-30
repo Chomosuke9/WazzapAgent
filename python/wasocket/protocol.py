@@ -25,7 +25,7 @@ import dataclasses
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Optional, get_origin
+from typing import Optional, get_origin
 
 # ---------------------------------------------------------------------------
 # Dataclasses — CONTRACT.md §6 (mirror of src/protocol/types.ts §5)
@@ -313,7 +313,7 @@ def camel_to_snake(name: str) -> str:
     return _CAMEL_BOUNDARY.sub("_", name).lower()
 
 
-def _to_wire_body(frame: Any) -> dict:
+def _to_wire_body(frame: object) -> dict:
     """dataclass -> camelCase wire dict (all fields, snake->camel keys)."""
     body: dict = {}
     for f in dataclasses.fields(frame):
@@ -329,7 +329,7 @@ def _to_wire_body(frame: Any) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def encode(frame: Any) -> str:
+def encode(frame: object) -> str:
     """Serialize a frame dataclass to a JSON wire string.
 
     Actions/acks/events use ``{type, payload}``; §1.5 control events place their

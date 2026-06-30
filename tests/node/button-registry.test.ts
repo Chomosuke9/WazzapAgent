@@ -32,9 +32,9 @@ import type { ButtonContext, ButtonHandler } from '../../src/wa/command/ButtonCo
 
 /** Minimal fake Baileys socket: records every sendMessage call. */
 function makeSock() {
-  const calls: { chatId: string; content: any }[] = [];
+  const calls: { chatId: string; content: Record<string, unknown> }[] = [];
   return {
-    sendMessage: async (chatId: string, content: any) => {
+    sendMessage: async (chatId: string, content: Record<string, unknown>) => {
       calls.push({ chatId, content });
       return { key: { id: 'sent' } };
     },
@@ -43,15 +43,15 @@ function makeSock() {
 }
 
 /** Build a ButtonContext with overridable gate-relevant fields. */
-function makeBc(over: Partial<ButtonContext> & { sock: any }): ButtonContext {
+function makeBc(over: Partial<ButtonContext> & { sock: Record<string, unknown> }): ButtonContext {
   return {
     sock: over.sock,
     account: over.account ?? ({
       folderPath: '/tenants/btnreg',
       // Chat is NOT activated, so the activation gate (when active) blocks.
       repos: { activation: { isChatActivated: () => false } },
-    } as any),
-    msg: {} as any,
+    } as Record<string, unknown>),
+    msg: {} as Record<string, unknown>,
     chatId: over.chatId ?? '111@s.whatsapp.net',
     senderId: over.senderId ?? '999@s.whatsapp.net',
     isGroup: over.isGroup ?? false,

@@ -363,19 +363,17 @@ async function sendRichMessage(
     hasMediaAttachment: boolean;
     title?: string;
     subtitle?: string;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    imageMessage?: { url: any };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    videoMessage?: { url: any };
+    imageMessage?: { url: string };
+    videoMessage?: { url: string };
   } = { hasMediaAttachment: false };
   if (options.title) headerFields.title = options.title;
   if (options.subtitle) headerFields.subtitle = options.subtitle;
   if (options.image) {
     headerFields.hasMediaAttachment = true;
-    headerFields.imageMessage = { url: (options.image as { url?: string }).url ?? options.image };
+    headerFields.imageMessage = { url: (options.image as { url?: string }).url ?? String(options.image) };
   } else if (options.video) {
     headerFields.hasMediaAttachment = true;
-    headerFields.videoMessage = { url: (options.video as { url?: string }).url ?? options.video };
+    headerFields.videoMessage = { url: (options.video as { url?: string }).url ?? String(options.video) };
   }
 
   return _sendInteractive(sock, jid, proto.Message.InteractiveMessage.create({

@@ -30,7 +30,7 @@ class FakeWebSocket {
 }
 
 /** Build a minimal incoming-message payload (tests are not type-checked). */
-function makePayload(text: string): any {
+function makePayload(text: string): Record<string, unknown> {
   return {
     instanceId: 'test-instance',
     chatId: '123@g.us',
@@ -67,7 +67,7 @@ test('forwardIncoming delivers ONLY to the bound account client and stamps folde
   bindClient(folderB, clientB as unknown as WebSocket);
 
   try {
-    forwardIncoming(entryA, makePayload('hello A') as any);
+    forwardIncoming(entryA, makePayload('hello A') as unknown as Parameters<typeof forwardIncoming>[1]);
 
     // Only A's client received the frame; B is untouched.
     assert.equal(clientA.sent.length, 1, "A's client must receive exactly one frame");
@@ -91,7 +91,7 @@ test('forwardStatus normalizes a close connection.update to status "close" (not 
 
   try {
     // Feed the RAW Baileys close value to prove closed->close normalization.
-    forwardStatus(entryA, 'closed' as any, 401);
+    forwardStatus(entryA, 'closed' as unknown as Parameters<typeof forwardStatus>[1], 401);
 
     assert.equal(clientA.sent.length, 1, 'whatsapp_status delivered to bound client');
     const frame = JSON.parse(clientA.sent[0]);

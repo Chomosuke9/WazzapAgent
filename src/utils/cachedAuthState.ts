@@ -1,4 +1,5 @@
 import { useMultiFileAuthState } from 'baileys';
+import type { SignalDataSet } from 'baileys/lib/Types/Auth.js';
 import logger from '../logger.js';
 
 /**
@@ -17,14 +18,14 @@ export async function useCachedAuthState(folder: string) {
   const { state, saveCreds } = await useMultiFileAuthState(folder);
 
   // Map<type, Map<id, value>>
-  const cache = new Map<string, Map<string, any>>();
+  const cache = new Map<string, Map<string, unknown>>();
 
   const cachedKeys = {
-    get: async (type: any, ids: string[]) => {
+    get: async (type: string, ids: string[]) => {
       if (!cache.has(type)) cache.set(type, new Map());
       const typeCache = cache.get(type)!;
 
-      const result: Record<string, any> = {};
+      const result: Record<string, unknown> = {};
       const missing: string[] = [];
 
       for (const id of ids) {
@@ -36,11 +37,12 @@ export async function useCachedAuthState(folder: string) {
       }
 
       if (missing.length > 0) {
-        const fromDisk = await state.keys.get(type, missing);
+        const fromDisk = await state.keys.get(type as never, missing);
         for (const id of missing) {
-          if (fromDisk?.[id] != null) {
-            result[id] = fromDisk[id];
-            typeCache.set(id, fromDisk[id]); // cache miss → fill cache
+          if (fromDisk?.[id as keyof typeof fromDisk] != null) {
+            const val = fromDisk[id as keyof typeof fromDisk];
+            result[id] = val;
+            typeCache.set(id, val);
           }
         }
       }
@@ -48,12 +50,13 @@ export async function useCachedAuthState(folder: string) {
       return result;
     },
 
-    set: async (data: any) => {
+    set: async (data: SignalDataSet) => {
       // Update cache + persist to disk
       for (const [type, typeData] of Object.entries(data)) {
         if (!cache.has(type)) cache.set(type, new Map());
         const typeCache = cache.get(type)!;
-        for (const [id, val] of Object.entries(typeData as Record<string, any>)) {
+        const entries = Object.entries(typeData as Record<string, unknown>);
+        for (const [id, val] of entries) {
           if (val != null) typeCache.set(id, val);
           else typeCache.delete(id); // null = key removed
         }

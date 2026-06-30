@@ -14,7 +14,7 @@ process.env.REQUIRE_ACTIVATION = 'false';
 import { getDevice } from 'baileys';
 import { resolveCallerTier, deviceToTier, tierAllows } from '../../src/wa/interactive/compat.js';
 
-function reposWithCompat(mode: string): any {
+function reposWithCompat(mode: string): { settings: { getCompatibilityMode: (_chatId: string) => string } } {
   return { settings: { getCompatibilityMode: (_chatId: string) => mode } };
 }
 

@@ -13,17 +13,10 @@ import base64
 import mimetypes
 import os
 from pathlib import Path
-from typing import Any
 
-try:
-  from ..log import setup_logging
-except ImportError:
-  from bridge.log import setup_logging  # type: ignore
+from ..log import setup_logging
 
-try:
-  from ..config import _parse_positive_int
-except ImportError:
-  from bridge.config import _parse_positive_int  # type: ignore
+from ..config import _parse_positive_int
 
 logger = setup_logging()
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -51,7 +44,7 @@ def media_max_bytes() -> int:
   return _parse_positive_int(os.getenv("LLM_MEDIA_MAX_BYTES"), 5 * 1024 * 1024)
 
 
-def _resolve_local_path(path_value: Any) -> Path | None:
+def _resolve_local_path(path_value: object) -> Path | None:
   if not isinstance(path_value, str) or not path_value.strip():
     return None
   path_obj = Path(path_value).expanduser()
@@ -105,7 +98,7 @@ def build_visual_parts(
   *,
   max_items: int | None = None,
   max_bytes: int | None = None,
-) -> tuple[list[dict[str, Any]], list[str]]:
+) -> tuple[list[dict[str, object]], list[str]]:
   if not payload:
     logger.debug('build_visual_parts: no payload, returning empty')
     return [], []
@@ -117,7 +110,7 @@ def build_visual_parts(
 
   item_limit = max_items or media_max_items()
   size_limit = max_bytes or media_max_bytes()
-  parts: list[dict[str, Any]] = []
+  parts: list[dict[str, object]] = []
   notes: list[str] = []
   skipped_count = 0
 
@@ -189,13 +182,13 @@ def build_visual_parts(
   return parts, notes
 
 
-def redact_multimodal_content(content: Any) -> Any:
+def redact_multimodal_content(content: object) -> object:
   if isinstance(content, str):
     return content
   if not isinstance(content, list):
     return content
 
-  redacted: list[Any] = []
+  redacted: list[object] = []
   for part in content:
     if not isinstance(part, dict):
       redacted.append(part)

@@ -77,6 +77,11 @@ async def _drain(session: AgentSession, timeout: float = 5.0) -> None:
   """Await all background tasks the session has spawned (the flush worker),
   bounded so a hang can never wedge the suite."""
   pending = [t for t in list(session.tasks) if not t.done()]
+  # Also drain per-chat flush tasks (stored in pending_by_chat, not in
+  # session.tasks) so test assertions see the processed history.
+  for pbc in session.pending_by_chat.values():
+    if pbc.task is not None and not pbc.task.done():
+      pending.append(pbc.task)
   if pending:
     await asyncio.wait_for(asyncio.gather(*pending, return_exceptions=True), timeout=timeout)
 

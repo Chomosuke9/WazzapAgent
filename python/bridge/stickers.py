@@ -27,10 +27,7 @@ from .log import setup_logging
 from .sticker_db import get_sticker as _db_get_sticker
 from .sticker_db import list_stickers as _db_list_stickers
 
-try:
-  from .db import current_tenant_db_root as _current_tenant_db_root
-except ImportError:  # pragma: no cover - import path fallback
-  from bridge.db import current_tenant_db_root as _current_tenant_db_root  # type: ignore
+from .db import current_tenant_db_root as _current_tenant_db_root
 
 logger = setup_logging()
 

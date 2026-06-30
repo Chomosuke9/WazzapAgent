@@ -13,13 +13,13 @@ class FakeWebSocket {
   readyState = OPEN;
   sent: string[] = [];
   send(data: string): void { this.sent.push(data); }
-  frames(): any[] { return this.sent.map((s) => JSON.parse(s)); }
+  frames(): Record<string, unknown>[] { return this.sent.map((s) => JSON.parse(s)); }
 }
 
 function makeAccount(folderPath: string): { entry: AccountEntry; client: FakeWebSocket } {
   const entry = getOrCreate(folderPath);
   entry.ctx = createAccountContext(folderPath);
-  entry.sock = { user: { id: 'bot@s.whatsapp.net' } } as any;
+  entry.sock = { user: { id: 'bot@s.whatsapp.net' } } as unknown as NonNullable<AccountEntry['sock']>;
   const client = new FakeWebSocket();
   bindClient(folderPath, client as unknown as WebSocket);
   return { entry, client };
@@ -30,10 +30,10 @@ test('download_media downloads on demand for a cached message (feature 8)', asyn
   const { entry, client } = makeAccount(folder);
 
   // Seed a cached image message proto.
-  entry.ctx.messageCache.set('wamid-img-1', {
+  entry.ctx.messageCache.set('wamid-img-1' as unknown as never, {
     key: { id: 'wamid-img-1', remoteJid: '123@g.us' },
     message: { imageMessage: { mimetype: 'image/jpeg' } },
-  } as any);
+  } as unknown as never);
 
   let saveCalled = 0;
   const deps: Partial<DispatchDeps> = {

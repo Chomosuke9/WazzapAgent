@@ -479,7 +479,7 @@ function attachConnectionListener(
       // rendering a QR. The `qr` event is the signal that the socket is ready to
       // issue a pairing code. Falls back to QR if the request fails.
       const pairingNumber = config.pairingNumber;
-      const registered = Boolean((sock as any)?.authState?.creds?.registered);
+      const registered = Boolean(sock?.authState?.creds?.registered);
       if (pairingNumber && !registered) {
         if (!pairingRequested) {
           pairingRequested = true;
@@ -505,7 +505,7 @@ function attachConnectionListener(
     entry.waStatus = status;
 
     if (status === "close") {
-      const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
+      const statusCode = (lastDisconnect?.error as { output?: { statusCode?: number } } | undefined)?.output?.statusCode;
       const reason = lastDisconnect?.error;
       logger.warn({ statusCode, reason, folderPath }, "connection closed");
       // Step 18: forward the normalized `whatsapp_status` exactly once via the

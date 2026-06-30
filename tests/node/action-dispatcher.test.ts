@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type WebSocket from 'ws';
-import type { AccountEntry } from '../../src/protocol/types.ts';
+import type { AccountEntry, AccountContext } from '../../src/protocol/types.ts';
 
 import {
   getOrCreate,
@@ -21,14 +21,20 @@ const OPEN = 1;
  * Minimal fake of a `ws` WebSocket: OPEN readyState plus a send() that records
  * every transmitted (string) frame so tests can assert delivery + ordering.
  */
+/** Shape of a parsed WS frame sent by the test subject. */
+interface ParsedFrame {
+  type: string;
+  payload: Record<string, unknown>;
+}
+
 class FakeWebSocket {
   readyState = OPEN;
   sent: string[] = [];
   send(data: string): void {
     this.sent.push(data);
   }
-  frames(): any[] {
-    return this.sent.map((s) => JSON.parse(s));
+  frames(): ParsedFrame[] {
+    return this.sent.map((s) => JSON.parse(s) as ParsedFrame);
   }
 }
 
@@ -39,7 +45,7 @@ class FakeWebSocket {
 function makeAccount(folderPath: string): { entry: AccountEntry; client: FakeWebSocket } {
   const entry = getOrCreate(folderPath);
   entry.ctx = createAccountContext(folderPath);
-  entry.sock = { user: { id: 'bot@s.whatsapp.net' } } as any;
+  entry.sock = { user: { id: 'bot@s.whatsapp.net' } } as unknown as NonNullable<AccountEntry['sock']>;
   const client = new FakeWebSocket();
   bindClient(folderPath, client as unknown as WebSocket);
   return { entry, client };
@@ -58,7 +64,7 @@ test('send_message routes to account A and emits action_ack(ok, result.sent) + s
     replyTo: null,
   };
   const deps: Partial<DispatchDeps> = {
-    sendOutgoing: (async (ctx: any) => {
+    sendOutgoing: (async (ctx: AccountContext) => {
       seenFolderPath = ctx.folderPath;
       return sentResult;
     }) as DispatchDeps['sendOutgoing'],
@@ -76,17 +82,18 @@ test('send_message routes to account A and emits action_ack(ok, result.sent) + s
   const frames = clientA.frames();
   assert.equal(frames.length, 2, 'exactly action_ack + send_ack');
 
-  const ack = frames.find((f) => f.type === 'action_ack');
+  const ack = frames.find((f) => f.type === 'action_ack') as ParsedFrame | undefined;
   assert.ok(ack, 'action_ack present');
-  assert.equal(ack.payload.action, 'send_message');
-  assert.equal(ack.payload.ok, true);
-  assert.equal(ack.payload.detail, 'sent');
-  assert.equal(ack.payload.requestId, 'send-1');
-  assert.deepEqual(ack.payload.result, sentResult, 'result carries the sent[] shape');
+  const ackP = ack!.payload;
+  assert.equal(ackP.action, 'send_message');
+  assert.equal(ackP.ok, true);
+  assert.equal(ackP.detail, 'sent');
+  assert.equal(ackP.requestId, 'send-1');
+  assert.deepEqual(ackP.result, sentResult, 'result carries the sent[] shape');
 
-  const sendAck = frames.find((f) => f.type === 'send_ack');
+  const sendAck = frames.find((f) => f.type === 'send_ack') as ParsedFrame | undefined;
   assert.ok(sendAck, 'legacy send_ack present');
-  assert.equal(sendAck.payload.requestId, 'send-1');
+  assert.equal(sendAck!.payload.requestId, 'send-1');
 
   // Account B's client must receive nothing — strict per-account isolation.
   assert.equal(clientB.sent.length, 0, 'account B client untouched');
@@ -133,22 +140,24 @@ test('kick_member failure emits action_ack(ok:false) with priority code + matchi
   );
 
   const frames = client.frames();
-  const ack = frames.find((f) => f.type === 'action_ack');
+  const ack = frames.find((f) => f.type === 'action_ack') as ParsedFrame | undefined;
   assert.ok(ack, 'action_ack present');
-  assert.equal(ack.payload.action, 'kick_member');
-  assert.equal(ack.payload.ok, false);
-  assert.equal(ack.payload.code, 'permission_denied', 'priority-ordered code wins over send_failed');
+  const ackP = ack!.payload;
+  assert.equal(ackP.action, 'kick_member');
+  assert.equal(ackP.ok, false);
+  assert.equal(ackP.code, 'permission_denied', 'priority-ordered code wins over send_failed');
   // detail comes from the first failure row with a truthy detail.
-  assert.equal(ack.payload.detail, 'network blip');
-  assert.deepEqual(ack.payload.result, kickResult, 'raw kick result echoed');
+  assert.equal(ackP.detail, 'network blip');
+  assert.deepEqual(ackP.result, kickResult, 'raw kick result echoed');
 
-  const err = frames.find((f) => f.type === 'error');
+  const err = frames.find((f) => f.type === 'error') as ParsedFrame | undefined;
   assert.ok(err, 'matching error frame present');
-  assert.equal(err.payload.code, 'permission_denied');
-  assert.equal(err.payload.action, 'kick_member');
-  assert.equal(err.payload.requestId, 'kick-1');
-  assert.equal(err.payload.message, 'kick_member failed');
-  assert.equal(err.payload.detail, 'network blip');
+  const errP = err!.payload;
+  assert.equal(errP.code, 'permission_denied');
+  assert.equal(errP.action, 'kick_member');
+  assert.equal(errP.requestId, 'kick-1');
+  assert.equal(errP.message, 'kick_member failed');
+  assert.equal(errP.detail, 'network blip');
 
   remove(folder);
 });

@@ -258,13 +258,13 @@ function shouldRetryStickerAsImage(err: unknown): boolean {
 }
 
 async function downloadMediaToFile(
-  content: any,
+  content: Record<string, unknown>,
   mediaKind: MediaType,
   filepath: string,
   withTimeout: WithTimeout,
 ): Promise<number> {
   const stream = await withTimeout(
-    downloadContentFromMessage(content, mediaKind),
+    downloadContentFromMessage(content as unknown as Parameters<typeof downloadContentFromMessage>[0], mediaKind),
     config.downloadTimeoutMs,
     `downloadContentFromMessage(${mediaKind})`
   );
@@ -288,7 +288,7 @@ function mapMediaKind(contentType: string | null | undefined): MediaKindOrUnknow
  * Extract the JPEG thumbnail (document/image preview) as a base64 string, if
  * present. Baileys decodes the proto `bytes` field as a Buffer/Uint8Array.
  */
-function extractJpegThumbnail(content: any): string | null {
+function extractJpegThumbnail(content: Record<string, unknown> | null | undefined): string | null {
   const raw = content?.jpegThumbnail;
   if (!raw) return null;
   if (typeof raw === 'string' && raw.length > 0) return raw;
@@ -324,7 +324,7 @@ export interface PendingAttachment {
 
 function buildAttachmentMetadata(
   contentType: string | null | undefined,
-  content: any,
+  content: Record<string, unknown> | null | undefined,
   messageId: string,
 ): PendingAttachment | null {
   const kind = mapMediaKind(contentType);
@@ -337,7 +337,7 @@ function buildAttachmentMetadata(
     kind,
     mime,
     fileName: `${messageId}_${kind}.${ext}`,
-    originalFileName: content?.fileName || null,
+    originalFileName: typeof content?.fileName === 'string' ? content.fileName : null,
     jpegThumbnail: extractJpegThumbnail(content),
     size: Number.isFinite(sizeRaw) && sizeRaw > 0 ? sizeRaw : 0,
     isAnimated: Boolean(content?.isAnimated),
@@ -348,14 +348,14 @@ function buildAttachmentMetadata(
 
 async function saveMedia(
   contentType: string | null | undefined,
-  content: any,
+  content: Record<string, unknown> | null | undefined,
   messageId: string,
   withTimeout: WithTimeout,
   mediaDir: string = config.mediaDir,
 ): Promise<SavedAttachment | null> {
   const kind = mapMediaKind(contentType);
-  if (kind === 'unknown') return null;
-  const declaredMime = normalizeMime(content?.mimetype);
+  if (kind === 'unknown' || !content) return null;
+  const declaredMime = normalizeMime(content.mimetype as string | undefined);
   let mime = declaredMime || (kind === 'sticker' ? 'image/webp' : 'application/octet-stream');
   let ext = inferExtension(mime);
   let filename = `${messageId}_${kind}.${ext}`;
@@ -364,7 +364,7 @@ async function saveMedia(
 
   // Preserve the original filename from WhatsApp (e.g. documentMessage.fileName).
   // Falls back to null for media types that don't carry a fileName.
-  const originalFileName: string | null = content?.fileName || null;
+  const originalFileName: string | null = typeof content.fileName === 'string' ? content.fileName : null;
 
   // Preserve the JPEG thumbnail for document previews (base64 for JSON transport).
   const jpegThumbnail: string | null = extractJpegThumbnail(content);
@@ -402,7 +402,7 @@ async function saveMedia(
     jpegThumbnail,
     size,
     path: filepath,
-    isAnimated: Boolean(content?.isAnimated),
+    isAnimated: Boolean(content.isAnimated),
   };
 }
 

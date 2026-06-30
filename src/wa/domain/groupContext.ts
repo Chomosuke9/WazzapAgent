@@ -191,7 +191,7 @@ async function getGroupContext(
   const fetchPromise = (async (): Promise<GroupContextValue> => {
     try {
       const { withTimeout } = await import('../index.js');
-      const meta: any = await withTimeout(
+      const meta = await withTimeout(
         sock.groupMetadata(jid),
         config.groupMetadataTimeoutMs,
         `groupMetadata(${jid})`

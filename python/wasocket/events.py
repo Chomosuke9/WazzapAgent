@@ -21,7 +21,7 @@
 #   - No event-dispatch / `on()` logic (that is Step 27).
 
 from dataclasses import dataclass, field, fields
-from typing import Any, Optional
+from typing import Optional
 
 # ---------------------------------------------------------------------------
 # Event-name constants
@@ -114,7 +114,7 @@ class WhatsAppMessage:
         simply fall back to `None` (or `[]` for `attachments`).
         """
         payload = payload or {}
-        kwargs: dict[str, Any] = {}
+        kwargs: dict[str, object] = {}
         for f in fields(cls):
             if f.name == "raw":
                 continue

@@ -23,6 +23,7 @@
 import path from "path";
 import fs from "fs-extra";
 import Database from "better-sqlite3";
+type StickerDatabase = InstanceType<typeof Database>;
 import config from "../../config.js";
 import { parseConfigScope, type ConfigScope } from "./configScope.js";
 
@@ -46,10 +47,10 @@ export function stickerDbPath(folderPath: string | null | undefined): string {
 }
 
 // Per-resolved-path connection cache (one handle per tenant DB file).
-const _dbByPath = new Map<string, any>();
+const _dbByPath = new Map<string, StickerDatabase>();
 
 /** Lazily open (and cache) the WAL-mode connection for this tenant's DB. */
-function getStickerDb(folderPath: string | null | undefined): any {
+function getStickerDb(folderPath: string | null | undefined): StickerDatabase {
   const dbPath = stickerDbPath(folderPath);
   const cached = _dbByPath.get(dbPath);
   if (cached) return cached;

@@ -32,6 +32,7 @@ import { unwrapMessage } from "../domain/messageParser.js";
 import { downloadMediaToFile } from "../../mediaHandler.js";
 import config from "../../config.js";
 import { withTimeout } from "../utils.js";
+import type { proto, DownloadableMessage } from "baileys";
 import {
   STICKER_NAME_RE,
   parseStickerScope,
@@ -52,7 +53,7 @@ import type {
  * Lottie stickers are wrapped as lottieStickerMessage, or their inner
  * stickerMessage has isLottie=true or mimetype="application/was".
  */
-function isLottieSticker(msgObj: any): boolean {
+function isLottieSticker(msgObj: proto.IMessage | null | undefined): boolean {
   if (!msgObj) return false;
   if (msgObj.lottieStickerMessage) return true;
   const sc = msgObj.stickerMessage;
@@ -66,7 +67,7 @@ function isLottieSticker(msgObj: any): boolean {
  * We store the lottieStickerMessage wrapper object (or a synthesised one
  * if the sticker arrived as a plain stickerMessage with isLottie=true).
  */
-function serializeLottiePayload(msgObj: any, stickerContent: any): string {
+function serializeLottiePayload(msgObj: proto.IMessage | null | undefined, stickerContent: proto.Message.IStickerMessage | null | undefined): string {
   if (msgObj?.lottieStickerMessage) {
     // Preferred: store the full lottieStickerMessage wrapper as-is.
     // When relaying we wrap it back in { lottieStickerMessage: ... }.
@@ -85,7 +86,7 @@ function serializeLottiePayload(msgObj: any, stickerContent: any): string {
  * Returns the temp file path, or null on failure.
  */
 async function downloadStickerToTemp(
-  stickerContent: any,
+  stickerContent: DownloadableMessage,
   messageId: string,
   mediaDir: string = config.mediaDir,
 ): Promise<string | null> {
@@ -101,8 +102,9 @@ async function downloadStickerToTemp(
         tempPath,
         withTimeout,
       );
-    } catch (firstErr: any) {
-      const msg = String(firstErr?.message || "").toLowerCase();
+    } catch (firstErr: unknown) {
+      const theErr = firstErr as Record<string, unknown> | null | undefined;
+      const msg = String(theErr?.message || "").toLowerCase();
       const isDecryptError =
         msg.includes("bad decrypt") ||
         msg.includes("unable to authenticate") ||
@@ -225,14 +227,14 @@ async function handleAddSticker({
   //    For regular: we download and store the .webp file.
   // ------------------------------------------------------------------
   const { message: innerMessage } = unwrapMessage(msg!.message) || {};
-  let stickerContent: any = null; // the stickerMessage proto object
-  let sourceMsgObj: any = null; // the raw message object containing the sticker
+  let stickerContent: proto.Message.IStickerMessage | null = null;
+  let sourceMsgObj: proto.IMessage | null = null;
   let messageIdForFile: string = msg!.key?.id || randomUUID();
 
   /**
    * Extract the stickerMessage content + the source msgObj from any wrapper.
    */
-  function extractSticker(msgObj: any): { content: any; msgObj: any } | null {
+  function extractSticker(msgObj: proto.IMessage | null | undefined): { content: proto.Message.IStickerMessage; msgObj: proto.IMessage } | null {
     if (!msgObj) return null;
     if (msgObj.stickerMessage)
       return { content: msgObj.stickerMessage, msgObj };
@@ -255,9 +257,9 @@ async function handleAddSticker({
   // Quoted message fallback
   if (!stickerContent) {
     const ctx =
-      (innerMessage as any)?.extendedTextMessage?.contextInfo ||
-      (innerMessage as any)?.stickerMessage?.contextInfo ||
-      (innerMessage as any)?.lottieStickerMessage?.message?.stickerMessage
+      innerMessage?.extendedTextMessage?.contextInfo ||
+      innerMessage?.stickerMessage?.contextInfo ||
+      innerMessage?.lottieStickerMessage?.message?.stickerMessage
         ?.contextInfo ||
       null;
     if (ctx?.quotedMessage) {
@@ -322,12 +324,12 @@ async function handleAddSticker({
             "The bot can use this animated sticker fully.",
         );
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       logger.error(
         { err, chatId, name: rawName },
         "addsticker: lottie save failed",
       );
-      await reply(`Failed to save Lottie sticker: ${err.message} ❌`);
+      await reply(`Failed to save Lottie sticker: ${err instanceof Error ? err.message : String(err)} ❌`);
     }
     return;
   }
@@ -381,9 +383,9 @@ async function handleAddSticker({
         `Sticker${scopeLabel} *${rawName}* added successfully! ✅\nThe bot can now use this sticker.`,
       );
     }
-  } catch (err: any) {
+  } catch (err: unknown) {
     logger.error({ err, chatId, name: rawName }, "addsticker: failed");
-    await reply(`Failed to save sticker: ${err.message} ❌`);
+    await reply(`Failed to save sticker: ${err instanceof Error ? err.message : String(err)} ❌`);
   } finally {
     if (tempPath) {
       try {

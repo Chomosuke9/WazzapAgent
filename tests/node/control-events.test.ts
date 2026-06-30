@@ -67,7 +67,7 @@ function makeSock() {
 }
 
 /** Synthesize a `model_select:` button-response message for `chatId`. */
-function makeModelSelectMsg(chatId: string, modelId: string): any {
+function makeModelSelectMsg(chatId: string, modelId: string): Record<string, unknown> {
   return {
     key: { remoteJid: chatId, fromMe: false, id: `btn_${Date.now()}` },
     message: {
@@ -94,10 +94,11 @@ test('/model (model_select) routes set_llm2_model + invalidate_llm2_model to ONL
   const sock = makeSock();
 
   try {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- mock Baileys socket
     const handled = await handleButtonResponse(
-      sock as any,
+      sock as unknown as Parameters<typeof handleButtonResponse>[0],
       ctxA,
-      makeModelSelectMsg(chatId, 'test-model') as any,
+      makeModelSelectMsg(chatId, 'test-model') as unknown as Parameters<typeof handleButtonResponse>[2],
       chatId,
       OWNER_JID,
     );
@@ -138,9 +139,9 @@ test('control event emitted while the account is unbound is queued, then flushed
 
   try {
     const handled = await handleButtonResponse(
-      sock as any,
+      sock as unknown as Parameters<typeof handleButtonResponse>[0],
       ctxC,
-      makeModelSelectMsg(chatId, 'queued-model') as any,
+      makeModelSelectMsg(chatId, 'queued-model') as unknown as Parameters<typeof handleButtonResponse>[2],
       chatId,
       OWNER_JID,
     );

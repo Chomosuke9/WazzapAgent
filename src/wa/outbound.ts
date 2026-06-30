@@ -17,7 +17,7 @@
  */
 import path from 'path';
 import logger from '../logger.js';
-import type { AnyMessageContent } from 'baileys';
+import type { AnyMessageContent, WAMessage } from 'baileys';
 import {
   normalizeJid,
   normalizeContextMsgId,
@@ -41,7 +41,7 @@ import { sendRichMessage } from './interactive/index.js';
 import { resolveTier, tierAllows } from './interactive/compat.js';
 import config from '../config.js';
 import type { GroupContextValue, ParticipantRoleFlags } from './domain/caches.js';
-import type { SentEntry } from '../protocol/types.js';
+import type { SentEntry, Attachment } from '../protocol/types.js';
 import type { AccountContext } from '../account/accountContext.js';
 
 /** Type accepted by mediaHandler's resolveAllowedAttachmentPath error factory. */
@@ -219,7 +219,7 @@ async function renderOutboundMentions(
  * For non-document kinds we additionally bias toward the kind's typical
  * mimetype when no other signal is available so Baileys' validation passes.
  */
-async function resolveAttachmentMimetype(att: any, filePath: string, kind: string): Promise<string | null> {
+async function resolveAttachmentMimetype(att: { mime?: string; mimetype?: string }, filePath: string, kind: string): Promise<string | null> {
   const declared = normalizeMime(att?.mime || att?.mimetype);
   if (declared && declared !== 'application/octet-stream') return declared;
 
@@ -279,7 +279,7 @@ async function sendOutgoing(ctx: AccountContext, {
 }: {
   chatId: string;
   text?: string;
-  attachments?: any[];
+  attachments?: (Attachment & { type?: string; mimetype?: string })[];
   replyTo?: string | null;
 }): Promise<{ sent: SentEntry[]; replyTo: string | null }> {
   const sock = ctx.sock;
@@ -324,7 +324,7 @@ async function sendOutgoing(ctx: AccountContext, {
       ? att.fileName.trim()
       : filePathBasename;
     const safeFileName = ensureFileNameHasExtension(fileName, resolvedMime, filePathBasename);
-    const content: Record<string, any> = {};
+    const content: Record<string, unknown> = {};
     // Decode the base64 thumbnail if provided — WhatsApp needs raw bytes
     // for the ``jpegThumbnail`` field.  The Python bridge sends the
     // thumbnail as a base64 string inside the JSON payload because b64
@@ -378,7 +378,7 @@ async function sendOutgoing(ctx: AccountContext, {
         content.mentions = renderedCaption.mentions;
       }
       if (renderedCaption.nonJidMentions > 0) {
-        content.contextInfo = { ...content.contextInfo, nonJidMentions: renderedCaption.nonJidMentions };
+        content.contextInfo = { ...(content.contextInfo as Record<string, unknown> | undefined), nonJidMentions: renderedCaption.nonJidMentions };
       }
       group = renderedCaption.groupContext || group;
     }
@@ -404,7 +404,7 @@ async function sendOutgoing(ctx: AccountContext, {
   if (normalizedText) {
     const renderedText = await renderOutboundMentions(ctx, chatId, normalizedText, group);
     group = renderedText.groupContext || group;
-    let sentMsg: any;
+    let sentMsg: WAMessage | undefined;
     // Device-aware gate: only use the interactive rich layout when the chat's
     // compatibility tier permits it. In `safe` (web/desktop/unknown, or an
     // explicit setting) fall through to plain text, which renders everywhere.
@@ -424,13 +424,13 @@ async function sendOutgoing(ctx: AccountContext, {
         } as Parameters<typeof sendRichMessage>[2]);
       } catch (err) {
         logger.warn({ err, chatId }, 'sendRichMessage failed, falling back to sendMessage');
-        const textPayload: Record<string, any> = { text: renderedText.text };
+        const textPayload: Record<string, unknown> = { text: renderedText.text };
         if (renderedText.mentions.length > 0) textPayload.mentions = renderedText.mentions;
         if (renderedText.nonJidMentions > 0) {
-          textPayload.contextInfo = { ...textPayload.contextInfo, nonJidMentions: renderedText.nonJidMentions };
+          textPayload.contextInfo = { ...(textPayload.contextInfo as Record<string, unknown> | undefined), nonJidMentions: renderedText.nonJidMentions };
         }
         if (renderedText.adminGroupMention) {
-          textPayload.contextInfo = { ...textPayload.contextInfo, groupMentions: [renderedText.adminGroupMention] };
+          textPayload.contextInfo = { ...(textPayload.contextInfo as Record<string, unknown> | undefined), groupMentions: [renderedText.adminGroupMention] };
         }
         sentMsg = await sock.sendMessage(chatId, textPayload as AnyMessageContent, quoted ? { quoted } : {});
       }
@@ -439,13 +439,13 @@ async function sendOutgoing(ctx: AccountContext, {
       const bodyText = config.llmReplyFooter
         ? `${renderedText.text}\n\n${config.llmReplyFooter}`
         : renderedText.text;
-      const textPayload: Record<string, any> = { text: bodyText };
+      const textPayload: Record<string, unknown> = { text: bodyText };
       if (renderedText.mentions.length > 0) textPayload.mentions = renderedText.mentions;
       if (renderedText.nonJidMentions > 0) {
-        textPayload.contextInfo = { ...textPayload.contextInfo, nonJidMentions: renderedText.nonJidMentions };
+        textPayload.contextInfo = { ...(textPayload.contextInfo as Record<string, unknown> | undefined), nonJidMentions: renderedText.nonJidMentions };
       }
       if (renderedText.adminGroupMention) {
-        textPayload.contextInfo = { ...textPayload.contextInfo, groupMentions: [renderedText.adminGroupMention] };
+        textPayload.contextInfo = { ...(textPayload.contextInfo as Record<string, unknown> | undefined), groupMentions: [renderedText.adminGroupMention] };
       }
       sentMsg = await sock.sendMessage(chatId, textPayload as AnyMessageContent, quoted ? { quoted } : {});
     }
@@ -497,9 +497,9 @@ async function sendLottieSticker(
   if (!sock) throw actionError('send_failed', 'WhatsApp socket not ready');
   if (!chatId) throw actionError('invalid_target', 'chatId is required');
 
-  let lottiePayload: any;
+  let lottiePayload: Record<string, unknown>;
   try {
-    lottiePayload = JSON.parse(lottiePayloadJson);
+    lottiePayload = JSON.parse(lottiePayloadJson) as Record<string, unknown>;
   } catch (err) {
     throw actionError('invalid_target', `Invalid Lottie payload JSON: ${(err as { message?: string })?.message}`);
   }
@@ -512,8 +512,8 @@ async function sendLottieSticker(
     if (quoted) {
       // The lottiePayload structure is: { message: { stickerMessage: { ... } } }
       // We inject contextInfo into the inner stickerMessage.
-      const innerSticker =
-        lottiePayload?.message?.stickerMessage || lottiePayload?.stickerMessage;
+      const lm = lottiePayload as { message?: { stickerMessage?: Record<string, unknown> }; stickerMessage?: Record<string, unknown> };
+      const innerSticker = lm?.message?.stickerMessage || lm?.stickerMessage;
       if (innerSticker) {
         innerSticker.contextInfo = {
           stanzaId: quoted.key?.id,
@@ -530,7 +530,7 @@ async function sendLottieSticker(
 
   const { generateWAMessageFromContent, generateMessageIDV2 } = await import('baileys');
 
-  const wrappedMsg = generateWAMessageFromContent(chatId, messageContent, {
+  const wrappedMsg = generateWAMessageFromContent(chatId, messageContent as Parameters<typeof generateWAMessageFromContent>[1], {
     userJid: sock.user?.id as string,
   });
 

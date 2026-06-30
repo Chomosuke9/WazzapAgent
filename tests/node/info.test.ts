@@ -14,15 +14,15 @@ import assert from 'node:assert/strict';
 
 const { handleInfoCommand } = await import('../../src/wa/commands/info.ts');
 
-function makeCtx(overrides: Record<string, any> = {}) {
-  const sent: any[] = [];
+function makeCtx(overrides: Record<string, unknown> = {}) {
+  const sent: Record<string, unknown>[] = [];
   const settings = {
     getMode: () => 'hybrid',
     getPermission: () => 2,
-    getBotConfig: () => null, // -> isActivationRequired falls back to env (false)
+    getBotConfig: () => null,
   };
   const activation = { isChatActivated: () => true };
-  const ctx: any = {
+  const ctx: Record<string, unknown> = {
     chatId: '123@g.us',
     chatType: 'group',
     senderId: '628000@s.whatsapp.net',
@@ -44,9 +44,9 @@ function makeCtx(overrides: Record<string, any> = {}) {
       botIsSuperAdmin: false,
       description: 'SHOULD NOT APPEAR',
     },
-    msg: { key: { id: 'ABCD1234567890' } },
+    msg: { key: { id: 'ABCD1234567890' } } as Record<string, unknown>,
     folderPath: '/data',
-    sock: { sendMessage: async (_j: string, m: any) => { sent.push(m); } },
+    sock: { sendMessage: async (_j: string, m: Record<string, unknown>) => { sent.push(m); } },
     repos: { settings, activation },
     ...overrides,
   };

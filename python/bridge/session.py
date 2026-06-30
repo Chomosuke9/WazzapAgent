@@ -80,7 +80,6 @@ from .messaging.actions import (
 )
 from .messaging.gateway import (
   send_delete_message,
-  send_message,
 )
 
 from .agent.idle_trigger import IdleTrigger
@@ -95,24 +94,14 @@ from .subagent import (
   SubAgentWebhookServer,
 )
 
-try:
-  from .config import (
-    REPLY_DEDUP_WINDOW_MS,
-    REPLY_DEDUP_MIN_CHARS,
-    direct_invoke_api_key,
-    direct_invoke_host,
-    direct_invoke_max_chars,
-    direct_invoke_port as _direct_invoke_base_port,
-  )
-except ImportError:
-  from bridge.config import (  # type: ignore
-    REPLY_DEDUP_WINDOW_MS,
-    REPLY_DEDUP_MIN_CHARS,
-    direct_invoke_api_key,
-    direct_invoke_host,
-    direct_invoke_max_chars,
-    direct_invoke_port as _direct_invoke_base_port,
-  )
+from .config import (
+  REPLY_DEDUP_WINDOW_MS,
+  REPLY_DEDUP_MIN_CHARS,
+  direct_invoke_api_key,
+  direct_invoke_host,
+  direct_invoke_max_chars,
+  direct_invoke_port as _direct_invoke_base_port,
+)
 
 logger = setup_logging()
 

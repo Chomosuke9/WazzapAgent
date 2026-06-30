@@ -20,18 +20,20 @@ const INVITE_LINK_RE = /chat\.whatsapp\.com\/([A-Za-z0-9_-]+)/;
  *   - or just a plain `err.message` containing the token.
  * We normalise all of these into one lower-cased haystack for matching.
  */
-function errorToken(err: any): { text: string; status: number | null } {
+function errorToken(err: unknown): { text: string; status: number | null } {
   const parts: string[] = [];
-  if (err?.message) parts.push(String(err.message));
-  if (err?.data) parts.push(String(err.data));
-  const payloadMsg =
-    err?.output?.payload?.message ?? err?.output?.payload?.error;
+  const e = err as Record<string, unknown> | null | undefined;
+  if (e?.message) parts.push(String(e.message));
+  if (e?.data) parts.push(String(e.data));
+  const output = e?.output as Record<string, unknown> | undefined;
+  const payload = output?.payload as Record<string, unknown> | undefined;
+  const payloadMsg = payload?.message ?? payload?.error;
   if (payloadMsg) parts.push(String(payloadMsg));
   const status =
-    typeof err?.output?.statusCode === "number"
-      ? err.output.statusCode
-      : typeof err?.status === "number"
-        ? err.status
+    typeof output?.statusCode === "number"
+      ? output.statusCode
+      : typeof e?.status === "number"
+        ? e.status
         : null;
   return { text: parts.join(" ").toLowerCase(), status };
 }
@@ -40,7 +42,7 @@ function errorToken(err: any): { text: string; status: number | null } {
  * Map a /join failure to a friendly English message. Falls back to a
  * generic message (without leaking the raw error) for unknown failures.
  */
-function joinErrorMessage(err: any): string {
+function joinErrorMessage(err: unknown): string {
   const { text, status } = errorToken(err);
 
   const has = (...tokens: string[]) => tokens.some((t) => text.includes(t));
@@ -111,7 +113,7 @@ async function handleJoinCommand({
       : "Successfully joined the group.";
     await sock.sendMessage(chatId, { text: reply });
     logger.info({ chatId, senderId, inviteCode, groupId }, "/join success");
-  } catch (err: any) {
+  } catch (err: unknown) {
     logger.error({ err, inviteCode, chatId }, "/join failed");
     try {
       await sock.sendMessage(chatId, { text: joinErrorMessage(err) });

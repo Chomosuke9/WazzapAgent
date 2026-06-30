@@ -59,7 +59,8 @@ import {
 } from './events.js';
 import { parseSlashCommand } from './commands/index.js';
 import { isActivationRequired, getActivationMessage } from './botConfig.js';
-import type { WhatsAppMessagePayload, AccountEntry } from '../protocol/types.js';
+import type { WAMessage } from 'baileys';
+import type { WhatsAppMessagePayload, AccountEntry, Attachment } from '../protocol/types.js';
 import type { AccountContext } from '../account/accountContext.js';
 
 // Per-(account,chat) cooldown for the "not activated" notice (feature 1) so a
@@ -125,7 +126,14 @@ async function buildMentionedParticipants(
   return rows.length > 0 ? rows : null;
 }
 
-async function handleGroupParticipantsUpdate(ctx: AccountContext, update: any): Promise<void> {
+async function handleGroupParticipantsUpdate(ctx: AccountContext, update: {
+  id?: string;
+  action?: string;
+  participants?: unknown[];
+  authorPn?: string;
+  author?: string;
+  authorUsername?: string;
+}): Promise<void> {
   const sock = ctx.sock;
   if (!sock) return;
   const chatId = update?.id;
@@ -201,7 +209,7 @@ async function handleGroupParticipantsUpdate(ctx: AccountContext, update: any): 
  */
 async function handleIncomingMessage(
   entry: AccountEntry,
-  msg: any,
+  msg: WAMessage,
   { precomputedContextMsgId = null }: { precomputedContextMsgId?: string | null } = {},
 ): Promise<void> {
   const ctx = entry.ctx;
@@ -236,7 +244,7 @@ async function handleIncomingMessage(
   );
   if (selfJid) botAliases.add(selfJid);
   const fromId = msg.key.participant || (fromMe ? selfJid : msg.key.remoteJid);
-  const senderId = normalizeJid(fromId) || fromId || normalizeJid(msg.key.remoteJid) || msg.key.remoteJid;
+  const senderId = normalizeJid(fromId) || fromId || normalizeJid(msg.key.remoteJid) || msg.key.remoteJid || '';
   const senderDisplay = msg.pushName || lookupParticipantName(ctx, senderId) || senderId;
   rememberParticipantName(ctx, fromId, msg.pushName || '');
   rememberParticipantName(ctx, senderId, senderDisplay);
@@ -274,7 +282,7 @@ async function handleIncomingMessage(
       }
     }
   }
-  const contextMsgId = normalizeContextMsgId(precomputedContextMsgId) || ensureContextMsgId(ctx, chatId, msg.key.id);
+  const contextMsgId = normalizeContextMsgId(precomputedContextMsgId) || ensureContextMsgId(ctx, chatId, msg.key.id!);
   const chatName = isGroup ? (group?.name || chatId) : chatId;
 
   const { contentType, message: innerMessage } = unwrapMessage(msg.message);
@@ -303,7 +311,7 @@ async function handleIncomingMessage(
   const baseText = extractText(innerMessage);
   const text = [baseText, locationText].filter(Boolean).join('\n') || null;
   const quotedStartMs = Date.now();
-  const quoted: any = await extractQuoted(ctx, innerMessage, chatId, {
+  const quoted = await extractQuoted(ctx, innerMessage, chatId, {
     allowGroupLookup: !fromMe,
     getGroupParticipantName: (cid, pid) => getGroupParticipantName(ctx, cid, pid),
   });
@@ -311,8 +319,8 @@ async function handleIncomingMessage(
   // Determine admin role for the quoted sender
   if (quoted && quoted.senderId && isGroup && group) {
     const quotedRole = roleFlagsForJid(group.participantRoles, quoted.senderId);
-    quoted.senderIsAdmin = Boolean(quotedRole?.isAdmin);
-    quoted.senderIsSuperAdmin = Boolean(quotedRole?.isSuperAdmin);
+    (quoted as unknown as Record<string, unknown>).senderIsAdmin = Boolean(quotedRole?.isAdmin);
+    (quoted as unknown as Record<string, unknown>).senderIsSuperAdmin = Boolean(quotedRole?.isSuperAdmin);
   }
   // Build mentionedParticipants for the quoted message for mention resolution
   let quotedMentionedParticipants: MentionedParticipant[] | null = null;
@@ -320,7 +328,7 @@ async function handleIncomingMessage(
     quotedMentionedParticipants = await buildMentionedParticipants(ctx, chatId, quoted.mentionedJids, botAliases);
   }
   if (quoted) {
-    quoted.mentionedParticipants = quotedMentionedParticipants;
+    (quoted as unknown as Record<string, unknown>).mentionedParticipants = quotedMentionedParticipants;
   }
   const mentionedJidsRaw = extractMentionedJids(innerMessage);
   const mentionedJids = Array.isArray(mentionedJidsRaw)
@@ -355,7 +363,7 @@ async function handleIncomingMessage(
   const quotedSenderId = normalizeJid(quoted?.senderId) || quoted?.senderId || null;
   const repliedToBot = Boolean(quotedSenderId && botAliases.has(quotedSenderId));
   if (quoted && repliedToBot) {
-    quoted.fromMe = true;
+    (quoted as unknown as Record<string, unknown>).fromMe = true;
   }
   // Quiz button replies (templateButtonReplyMessage with id starting "qz:")
   // must NOT be marked contextOnly — they need to trigger LLM2 for answer evaluation.
@@ -371,7 +379,7 @@ async function handleIncomingMessage(
   const isQuizReply = isInteractiveReply && Boolean(quoted?.messageId && ctx.quizMessageIds.has(quoted.messageId));
   const replyToInteractive = isInteractiveReply && !isQuizReply;
 
-  const attachments: any[] = [];
+  const attachments: unknown[] = [];
   const mediaKinds = [
     'imageMessage',
     'videoMessage',
@@ -385,7 +393,7 @@ async function handleIncomingMessage(
     // on demand (vision / sticker / sub-agent). Avoids downloading media that
     // is never used.
     const mediaStartMs = Date.now();
-    const meta = buildAttachmentMetadata(contentType, content, msg.key.id);
+    const meta = buildAttachmentMetadata(contentType, content as Record<string, unknown> | null | undefined, msg.key.id!);
     if (meta) attachments.push(meta);
     perf.mediaMs = Date.now() - mediaStartMs;
   }
@@ -442,7 +450,7 @@ async function handleIncomingMessage(
   const payload: WhatsAppMessagePayload = {
     folderPath: entry.folderPath,
     contextMsgId,
-    messageId: msg.key.id,
+    messageId: msg.key.id!,
     instanceId: config.instanceId,
     chatId,
     chatName,
@@ -464,10 +472,9 @@ async function handleIncomingMessage(
     text,
     // Runtime shapes are structurally looser than the Step 09 wire contract
     // (quoted carries mutated role fields; location uses lat/long keys).
-    // Reconciled in a later step. `attachments` is `any[]`, already structurally
-    // assignable to `Attachment[]`, so no cast is needed here.
-    quoted,
-    attachments,
+    // Reconciled in a later step.
+    quoted: quoted as unknown as WhatsAppMessagePayload['quoted'],
+    attachments: attachments as unknown as Attachment[],
     mentionedJids,
     mentionedParticipants: mentionedParticipants as WhatsAppMessagePayload['mentionedParticipants'],
     botMentioned,

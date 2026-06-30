@@ -23,16 +23,12 @@ import contextvars
 import json
 import logging
 import sys
-from typing import Any
+
 
 from dotenv import load_dotenv
 
-try:
-  from . import config
-  from .config import env_flag
-except ImportError:
-  from bridge import config  # type: ignore
-  from bridge.config import env_flag  # type: ignore
+from . import config
+from .config import env_flag
 
 
 LOG_RECORD_BUILTINS = {
@@ -144,7 +140,7 @@ CHAT_LABEL_CONTEXT: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 )
 
 
-def _normalize_chat_label(value: Any) -> str:
+def _normalize_chat_label(value: object) -> str:
   if value is None:
     return ""
   return " ".join(str(value).split()).strip()
@@ -213,7 +209,7 @@ def _paint(text: str, code: str) -> str:
   return f"{code}{text}{RESET}" if code else text
 
 
-def _stringify_value(value: Any) -> str:
+def _stringify_value(value: object) -> str:
   """Render one extra value as a compact, length-capped token."""
   if value is None:
     return "null"
@@ -323,7 +319,7 @@ def setup_logging() -> logging.Logger:
   return bridge_logger
 
 
-def trunc(value: Any, limit: int = 400) -> str:
+def trunc(value: object, limit: int = 400) -> str:
   """Stringify and truncate long values for debug logging."""
   text = str(value)
   if len(text) > limit:
@@ -331,7 +327,7 @@ def trunc(value: Any, limit: int = 400) -> str:
   return text
 
 
-def dump_json(obj: Any, limit: int = 4000) -> str:
+def dump_json(obj: object, limit: int = 4000) -> str:
   """Safe JSON dump with truncation for large payloads."""
   try:
     text = json.dumps(obj, ensure_ascii=False, default=str)

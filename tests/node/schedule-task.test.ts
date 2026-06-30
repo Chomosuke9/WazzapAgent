@@ -17,8 +17,8 @@ const { parseScheduleDuration, handleScheduleTask } = await import(
 const registry = await import('../../src/server/accountRegistry.ts');
 
 function makeCtx(args: string, folderPath: string) {
-  const sent: any[] = [];
-  const ctx: any = {
+  const sent: Record<string, unknown>[] = [];
+  const ctx: Record<string, unknown> = {
     chatId: '12345@g.us',
     chatType: 'group',
     senderId: 's@s.whatsapp.net',
@@ -34,9 +34,9 @@ function makeCtx(args: string, folderPath: string) {
     isGroup: true,
     fromMe: false,
     group: null,
-    msg: {} as any,
+    msg: {} as Record<string, unknown>,
     folderPath,
-    sock: { sendMessage: async (_jid: string, m: any) => { sent.push(m); } },
+    sock: { sendMessage: async (_jid: string, m: Record<string, unknown>) => { sent.push(m); } },
     repos: undefined,
   };
   return { ctx, sent };
@@ -74,7 +74,7 @@ test('handleScheduleTask emits a schedule_task frame with the parsed delay + pro
     const entry = registry.get(folderPath);
     assert.ok(entry, 'account entry must exist');
     assert.equal(entry!.reliableQueue.length, 1, 'exactly one schedule_task frame queued');
-    const frame: any = entry!.reliableQueue[0];
+    const frame = entry!.reliableQueue[0];
     assert.equal(frame.type, 'schedule_task');
     assert.equal(frame.folderPath, folderPath);
     assert.equal(frame.chatId, '12345@g.us');

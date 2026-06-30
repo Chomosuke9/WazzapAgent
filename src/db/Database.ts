@@ -200,8 +200,8 @@ function closeDb(db: SqliteDb | null): void {
   }
 }
 
-function isDbCorruptionError(err: any): boolean {
-  const msg = String(err?.message || err || "").toLowerCase();
+function isDbCorruptionError(err: unknown): boolean {
+  const msg = String((err as { message?: unknown } | null)?.message || err || "").toLowerCase();
   return DB_CORRUPTION_TOKENS.some((token) => msg.includes(token));
 }
 
@@ -271,16 +271,16 @@ function withRecoveryLock<T>(dbPath: string, fn: () => T): T {
         }
         throw writeErr;
       }
-    } catch (err: any) {
-      if (err.code !== "EEXIST") throw err;
+    } catch (err: unknown) {
+      if ((err as { code?: string } | null)?.code !== "EEXIST") throw err;
       try {
         const stat = fs.statSync(lockPath);
         if (Date.now() - stat.mtimeMs > SQLITE_RECOVERY_LOCK_STALE_MS) {
           fs.unlinkSync(lockPath);
           continue;
         }
-      } catch (statErr: any) {
-        if (statErr.code === "ENOENT") continue;
+      } catch (statErr: unknown) {
+        if ((statErr as { code?: string } | null)?.code === "ENOENT") continue;
         throw statErr;
       }
       if (Date.now() >= deadline) {

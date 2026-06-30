@@ -11,6 +11,7 @@ import { unwrapMessage } from '../domain/messageParser.js';
 import { downloadMediaToFile, mapMediaKind } from '../../mediaHandler.js';
 import config from '../../config.js';
 import { withTimeout } from '../utils.js';
+import type { DownloadableMessage } from 'baileys';
 import type { CommandContext, CommandHandler } from '../command/CommandContext.js';
 
 // ---------------------------------------------------------------------------
@@ -46,7 +47,7 @@ function parseStickerArgs(args: string | undefined): [string | null, string | nu
 // ---------------------------------------------------------------------------
 
 async function downloadMediaContent(
-  content: any,
+  content: DownloadableMessage,
   contentType: string | null | undefined,
   messageId: string | null | undefined,
   mediaDir: string = config.mediaDir,
@@ -324,9 +325,9 @@ async function handleSticker({ chatId, chatType: _chatType, senderIsAdmin: _send
 
   // Case 1: message IS the media (e.g. image sent with caption "/sticker")
   if (contentType === 'imageMessage') {
-    mediaPath = await downloadMediaContent(innerMessage![contentType], contentType, msg!.key.id, mediaDir);
+    mediaPath = await downloadMediaContent(innerMessage!.imageMessage!, contentType, msg!.key.id, mediaDir);
   } else if (contentType === 'videoMessage') {
-    mediaPath = await downloadMediaContent(innerMessage![contentType], contentType, msg!.key.id, mediaDir);
+    mediaPath = await downloadMediaContent(innerMessage!.videoMessage!, contentType, msg!.key.id, mediaDir);
     isAnimated = true;
   }
 
@@ -335,15 +336,15 @@ async function handleSticker({ chatId, chatType: _chatType, senderIsAdmin: _send
     // contextInfo can be on extendedTextMessage OR directly on imageMessage/videoMessage
     const contextInfo =
       innerMessage?.extendedTextMessage?.contextInfo ??
-      (contentType ? (innerMessage?.[contentType] as any)?.contextInfo : undefined);
+      innerMessage?.imageMessage?.contextInfo ??
+      innerMessage?.videoMessage?.contextInfo;
 
     if (contextInfo?.quotedMessage) {
       const { contentType: qType, message: qMsg } = unwrapMessage(contextInfo.quotedMessage) || {};
-      const qContent = qType ? qMsg?.[qType as keyof typeof qMsg] : null;
       if (qType === 'imageMessage') {
-        mediaPath = await downloadMediaContent(qContent, qType, contextInfo.stanzaId, mediaDir);
+        mediaPath = await downloadMediaContent(qMsg!.imageMessage!, qType, contextInfo.stanzaId, mediaDir);
       } else if (qType === 'videoMessage') {
-        mediaPath = await downloadMediaContent(qContent, qType, contextInfo.stanzaId, mediaDir);
+        mediaPath = await downloadMediaContent(qMsg!.videoMessage!, qType, contextInfo.stanzaId, mediaDir);
         isAnimated = true;
       }
     }
@@ -372,10 +373,10 @@ async function handleSticker({ chatId, chatType: _chatType, senderIsAdmin: _send
       replyTo: msg!.key.id as string,
     });
     logger.info({ chatId, isAnimated }, 'Sticker created and sent');
-  } catch (err: any) {
+  } catch (err: unknown) {
     logger.error({ err, chatId, isAnimated }, 'failed to create sticker');
     try {
-      await sock.sendMessage(chatId, { text: `Failed to create sticker: ${err.message}` });
+      await sock.sendMessage(chatId, { text: `Failed to create sticker: ${err instanceof Error ? err.message : String(err)}` });
     } catch (e) { /* ignore */ }
   } finally {
     // Cleanup the downloaded media file (input)

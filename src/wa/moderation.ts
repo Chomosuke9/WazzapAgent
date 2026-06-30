@@ -174,7 +174,7 @@ async function kickMembers(ctx: AccountContext, {
         // Baileys types the participant-update result as `{ status, jid, content }`,
         // but the runtime nodes also carry `id`/`participant`/`user`/`code`. Read
         // through a loose view to preserve the original (untyped) field probing.
-        const it = item as any;
+        const it = item as { status?: unknown; jid?: string; id?: string; participant?: string; user?: string; code?: unknown };
         const participantJid = normalizeJid(it?.jid || it?.id || it?.participant || it?.user);
         if (!participantJid) continue;
         statusByParticipant.set(participantJid, parseParticipantUpdateStatus(it?.status ?? it?.code));

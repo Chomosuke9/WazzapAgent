@@ -42,7 +42,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import logging
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
+from typing import Awaitable, Callable, Dict, List, Optional, Union
 
 from . import errors, events, protocol
 from .correlation import PendingAcks, make_request_id
@@ -53,7 +53,7 @@ from .transport import WSClientTransport
 logger = logging.getLogger("wasocket.socket")
 
 # A handler may be sync or async; it receives a single event-specific payload.
-Handler = Callable[[Any], Union[None, Awaitable[None]]]
+Handler = Callable[[object], Union[None, Awaitable[None]]]
 
 
 def _retrieve_future_outcome(future: "asyncio.Future") -> None:
@@ -121,7 +121,7 @@ class WaSocket:
         *,
         transport: Optional[WSClientTransport] = None,
         ack_timeout: float = 30.0,
-        **transport_options: Any,
+        **transport_options: object,
     ) -> None:
         self._folder_path = folder_path
         self._transport = transport or WSClientTransport(**transport_options)
@@ -520,7 +520,7 @@ class WaSocket:
     # ------------------------------------------------------------------ #
 
     async def _dispatch_action(
-        self, action_frame: Any, request_id: str, *, caller_supplied: bool
+        self, action_frame: object, request_id: str, *, caller_supplied: bool
     ) -> Optional[dict]:
         """Send an action frame, routing it through :class:`PendingAcks`.
 
@@ -664,7 +664,7 @@ class WaSocket:
             logger.exception("frame router error (type=%r): %r", type_str, err)
 
     @staticmethod
-    def _control_dict(type_str: str, parsed: Any) -> dict:
+    def _control_dict(type_str: str, parsed: object) -> dict:
         """Build the §1.5 top-level control-event dict (camelCase + type)."""
         body = {
             protocol.snake_to_camel(k): v
@@ -677,7 +677,7 @@ class WaSocket:
     # Internal: safe handler dispatch
     # ------------------------------------------------------------------ #
 
-    async def _emit(self, event: str, payload: Any) -> None:
+    async def _emit(self, event: str, payload: object) -> None:
         """Invoke every handler for ``event``, awaiting coroutine handlers.
 
         A handler raising must NOT propagate (it would otherwise kill the
@@ -696,7 +696,7 @@ def make_wa_socket(
     folder_path: str,
     *,
     ack_timeout: float = 30.0,
-    **transport_options: Any,
+    **transport_options: object,
 ) -> WaSocket:
     """Factory: build a :class:`WaSocket` for ``folder_path`` (CONTRACT §4).
 

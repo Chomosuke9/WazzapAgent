@@ -42,10 +42,10 @@ async function listeningPort(wss: WebSocketServer): Promise<number> {
 // hello_ack + a flushed control event) are NEVER dropped between awaits. The
 // previous `once(ws,'message')` approach lost any frame that landed while no
 // listener was registered, which hung the test forever.
-const readers = new WeakMap<WebSocket, { queue: any[]; waiters: Array<(f: any) => void> }>();
+const readers = new WeakMap<WebSocket, { queue: Record<string, unknown>[]; waiters: Array<(f: Record<string, unknown>) => void> }>();
 
 function attachReader(ws: WebSocket): void {
-  const state = { queue: [] as any[], waiters: [] as Array<(f: any) => void> };
+  const state = { queue: [] as Record<string, unknown>[], waiters: [] as Array<(f: Record<string, unknown>) => void> };
   readers.set(ws, state);
   ws.on('message', (data: WebSocket.RawData) => {
     const frame = JSON.parse(data.toString());
@@ -64,17 +64,17 @@ async function openClient(port: number, headers?: Record<string, string>): Promi
 }
 
 /** Pull the next buffered JSON frame, or wait (bounded) for one to arrive. */
-async function nextFrame(ws: WebSocket, timeoutMs = 5000): Promise<any> {
+async function nextFrame(ws: WebSocket, timeoutMs = 5000): Promise<Record<string, unknown>> {
   const state = readers.get(ws);
   if (!state) throw new Error('reader not attached to this client');
-  if (state.queue.length) return state.queue.shift();
-  return new Promise<any>((resolve, reject) => {
+  if (state.queue.length) return state.queue.shift()!;
+  return new Promise<Record<string, unknown>>((resolve, reject) => {
     const timer = setTimeout(() => {
       const i = state.waiters.indexOf(resolver);
       if (i >= 0) state.waiters.splice(i, 1);
       reject(new Error('timed out waiting for next ws frame'));
     }, timeoutMs);
-    const resolver = (f: any): void => {
+    const resolver = (f: Record<string, unknown>): void => {
       clearTimeout(timer);
       resolve(f);
     };
@@ -217,8 +217,7 @@ test('reconnect flush: queued reliable control event delivered AFTER hello_ack',
     assert.ok(get(folderPath)?.sock, 'Baileys socket kept alive across disconnect');
 
     // 3) Enqueue a reliable control event while no client is bound -> queues.
-    const controlFrame: any = { type: 'invalidate_chat_settings', folderPath, chatId: '123@g.us' };
-    sendReliableToClient(folderPath, controlFrame);
+    sendReliableToClient(folderPath, { type: 'invalidate_chat_settings', folderPath, chatId: '123@g.us' });
     assert.equal(get(folderPath)?.reliableQueue.length, 1, 'control event queued while unbound');
 
     // 4) Reconnect: hello -> hello_ack FIRST, then the queued control event.

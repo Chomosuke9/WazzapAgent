@@ -1,9 +1,20 @@
+import type { WAMessage } from "baileys";
 import logger from "../../logger.js";
 import { resolveQuotedMessage } from "../domain/identifiers.js";
+import type {
+  MessageIndexKey,
+} from "../domain/caches.js";
 import type {
   CommandContext,
   CommandHandler,
 } from "../command/CommandContext.js";
+
+/**
+ * The type returned from messageCache.get() or resolveQuotedMessage().
+ * resolveQuotedMessage can return a minimal fallback object when the
+ * full proto is no longer in the cache.
+ */
+export type CachedMessage = WAMessage | { key: MessageIndexKey; message: { conversation: string } };
 
 async function handleCatch({
   chatId,
@@ -22,7 +33,7 @@ async function handleCatch({
     return;
   }
 
-  let cachedMsg: any = account?.messageCache.get(quotedMessageId);
+  let cachedMsg: CachedMessage | null | undefined = account?.messageCache.get(quotedMessageId);
   if (!cachedMsg && account) {
     cachedMsg = resolveQuotedMessage(account, chatId, quotedMessageId);
   }

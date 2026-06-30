@@ -5,18 +5,35 @@ process.env.REQUIRE_ACTIVATION = 'false';
 
 import { handleGenerate } from '../../src/wa/commands/generate.js';
 
-function makeCtx(captured: any, msgId: string = 'A'.repeat(32), compatMode: string = 'auto') {
-  const sock: any = {
+interface Captured {
+  textMessages: Record<string, unknown>[];
+  relayed: Record<string, unknown>[];
+  gen: { type: string; days: number } | null;
+}
+
+function makeCtx(captured: Captured, msgId: string = 'A'.repeat(32), compatMode: string = 'auto') {
+  const sock: {
+    user: { id: string; name: string };
+    sendMessage: (jid: string, content: Record<string, unknown>) => Promise<{ key: { id: string } }>;
+    relayMessage: (jid: string, message: Record<string, unknown>) => void;
+  } = {
     user: { id: '123:1@s.whatsapp.net', name: 'TestBot' },
-    sendMessage: async (_jid: string, content: any) => {
+    sendMessage: async (_jid: string, content: Record<string, unknown>) => {
       captured.textMessages.push(content);
       return { key: { id: 'm1' } };
     },
-    relayMessage: async (_jid: string, message: any) => {
+    relayMessage: async (_jid: string, message: Record<string, unknown>) => {
       captured.relayed.push(message);
     },
   };
-  const repos: any = {
+  const repos: {
+    activation: {
+      generateActivationCode: (type: string, days: number) => { code: string };
+    };
+    settings: {
+      getCompatibilityMode: (chatId: string) => string;
+    };
+  } = {
     activation: {
       generateActivationCode: (type: string, days: number) => {
         captured.gen = { type, days };
@@ -43,14 +60,14 @@ function makeCtx(captured: any, msgId: string = 'A'.repeat(32), compatMode: stri
     isGroup: true,
     fromMe: false,
     group: null,
-    msg: { key: { id: msgId } } as any,
+    msg: { key: { id: msgId } } as Record<string, unknown>,
     folderPath: '/data',
     sock,
     repos,
-  } as any;
+  } as Record<string, unknown>;
 }
 
-function findCopyCode(message: any): string | null {
+function findCopyCode(message: Record<string, unknown>): string | null {
   const buttons = message?.viewOnceMessage?.message?.interactiveMessage?.nativeFlowMessage?.buttons;
   if (!Array.isArray(buttons)) return null;
   for (const b of buttons) {
@@ -65,7 +82,7 @@ function findCopyCode(message: any): string | null {
 }
 
 test('/generate sends a cta_copy button carrying "/activate <code>" (feature 4)', async () => {
-  const captured = { textMessages: [] as any[], relayed: [] as any[], gen: null as any };
+  const captured = { textMessages: [] as Record<string, unknown>[], relayed: [] as Record<string, unknown>[], gen: null as { type: string; days: number } | null };
   await handleGenerate(makeCtx(captured));
 
   assert.equal(captured.relayed.length, 1, 'should relay one interactive message');
@@ -75,7 +92,7 @@ test('/generate sends a cta_copy button carrying "/activate <code>" (feature 4)'
 });
 
 test('/generate falls back to a monospace code block for safe-tier callers (web)', async () => {
-  const captured = { textMessages: [] as any[], relayed: [] as any[], gen: null as any };
+  const captured: Captured = { textMessages: [], relayed: [], gen: null };
   // A web message id ("3E" + 20 chars) maps to the safe tier — no cta_copy.
   await handleGenerate(makeCtx(captured, '3E' + 'B'.repeat(20)));
 
@@ -86,7 +103,7 @@ test('/generate falls back to a monospace code block for safe-tier callers (web)
 });
 
 test('/generate rejects invalid type', async () => {
-  const captured = { textMessages: [] as any[], relayed: [] as any[], gen: null as any };
+  const captured: Captured = { textMessages: [], relayed: [], gen: null };
   const ctx = makeCtx(captured);
   ctx.args = 'bogus 10';
   await handleGenerate(ctx);
@@ -95,7 +112,7 @@ test('/generate rejects invalid type', async () => {
 });
 
 test('explicit compat=safe forces the monospace fallback even for an interactive caller', async () => {
-  const captured = { textMessages: [] as any[], relayed: [] as any[], gen: null as any };
+  const captured: Captured = { textMessages: [], relayed: [], gen: null };
   // 'A'*32 maps to an interactive-capable tier, but compat=safe must win.
   await handleGenerate(makeCtx(captured, 'A'.repeat(32), 'safe'));
   assert.equal(captured.relayed.length, 0, 'safe compat suppresses the cta_copy button');
@@ -105,7 +122,7 @@ test('explicit compat=safe forces the monospace fallback even for an interactive
 });
 
 test('explicit compat=full sends the cta_copy button even for a web caller', async () => {
-  const captured = { textMessages: [] as any[], relayed: [] as any[], gen: null as any };
+  const captured: Captured = { textMessages: [], relayed: [], gen: null };
   // A web message id would be safe under auto, but compat=full must win.
   await handleGenerate(makeCtx(captured, '3E' + 'B'.repeat(20), 'full'));
   assert.equal(captured.relayed.length, 1, 'full compat keeps the cta_copy button');

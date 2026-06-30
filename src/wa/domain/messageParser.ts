@@ -94,8 +94,8 @@ function unwrapMessage(message: proto.IMessage | null | undefined): UnwrappedMes
 function extractContextInfo(message: proto.IMessage | null | undefined): proto.IContextInfo | null | undefined {
   if (!message) return undefined;
   const contentType = getContentType(message);
-  const candidate: any = contentType ? message[contentType] : undefined;
-  if (candidate?.contextInfo) return candidate.contextInfo;
+  const candidate = contentType ? (message[contentType] as Record<string, unknown>) : undefined;
+  if (candidate?.contextInfo) return candidate.contextInfo as proto.IContextInfo | null | undefined;
   for (const value of Object.values(message) as unknown[]) {
     if (value && typeof value === 'object' && 'contextInfo' in value) {
       return (value as { contextInfo?: proto.IContextInfo | null }).contextInfo;
@@ -195,25 +195,26 @@ function formatLocationText(loc: LocationData): string {
 
 function extractInteractiveText(message: proto.IMessage | null | undefined): string | null {
   if (!message) return null;
-  const btn: any = message.buttonsResponseMessage;
-  if (btn) return btn.selectedDisplayText || btn.selectedButtonId || btn.selectedId || null;
+  const btn = message.buttonsResponseMessage;
+  if (btn) return btn.selectedDisplayText || btn.selectedButtonId || (btn as Record<string, unknown>).selectedId as string | null || null;
 
-  const tmpl: any = message.templateButtonReplyMessage;
+  const tmpl = message.templateButtonReplyMessage;
   if (tmpl) return tmpl.selectedDisplayText || tmpl.selectedId || String(tmpl.selectedIndex ?? '');
 
-  const list: any = message.listResponseMessage;
+  const list = message.listResponseMessage;
   if (list) {
+    const ssr = list.singleSelectReply as Record<string, unknown> | null | undefined;
     return (
       list.title ||
       list.description ||
-      list.singleSelectReply?.title ||
-      list.singleSelectReply?.description ||
+      (ssr?.title as string | undefined) ||
+      (ssr?.description as string | undefined) ||
       list.singleSelectReply?.selectedRowId ||
       null
     );
   }
 
-  const interactive: any = message.interactiveResponseMessage;
+  const interactive = message.interactiveResponseMessage;
   if (interactive?.nativeFlowResponseMessage?.paramsJson) {
     try {
       const parsed = JSON.parse(interactive.nativeFlowResponseMessage.paramsJson);
@@ -227,7 +228,7 @@ function extractInteractiveText(message: proto.IMessage | null | undefined): str
     }
     return interactive.nativeFlowResponseMessage.paramsJson;
   }
-  if (interactive?.body) return interactive.body;
+  if (interactive?.body?.text) return interactive.body.text;
 
   return null;
 }
@@ -330,6 +331,7 @@ async function extractQuoted(
   };
 }
 
+export type { QuotedMessage };
 export {
   unwrapMessage,
   extractContextInfo,

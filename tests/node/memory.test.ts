@@ -48,9 +48,9 @@ function rmParent(dbDir: string): void {
 }
 
 function makeCtx(overrides: Record<string, unknown>) {
-  const sent: any[] = [];
+  const sent: Record<string, unknown>[] = [];
   const args = (overrides.args as string) ?? '';
-  const ctx: any = {
+  const ctx: Record<string, unknown> = {
     chatId: overrides.chatId ?? 'c@g.us',
     chatType: 'group',
     senderId: 's@s.whatsapp.net',
@@ -68,7 +68,7 @@ function makeCtx(overrides: Record<string, unknown>) {
     group: null,
     msg: overrides.msg ?? { key: {}, message: { conversation: args } },
     folderPath: overrides.folderPath,
-    sock: { sendMessage: async (_jid: string, m: any) => { sent.push(m); } },
+    sock: { sendMessage: async (_jid: string, m: Record<string, unknown>) => { sent.push(m); } },
     repos: overrides.repos,
     account: overrides.account,
   };
@@ -261,9 +261,9 @@ test('handleMemory add stores an entry and queues invalidate_chat_settings', asy
       ['Budi prefers tea'],
     );
     const entry = registry.get(folderPath)!;
-    const frame = entry.reliableQueue.find((f: any) => f.type === 'invalidate_chat_settings');
+    const frame = entry.reliableQueue.find((f) => f.type === 'invalidate_chat_settings');
     assert.ok(frame, 'an invalidate_chat_settings frame must be queued');
-    assert.equal((frame as any).chatId, 'c@g.us');
+    assert.equal(frame.chatId, 'c@g.us');
     assert.ok(sent.some((m) => /saved/i.test(m.text)), 'a confirmation is sent');
   } finally {
     db.close();

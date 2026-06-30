@@ -115,7 +115,7 @@ function resolveBotSenderId(ctx: AccountContext): string {
   const sock = ctx.sock;
   // Baileys' Contact type exposes `id`; some builds also carry a legacy `jid`.
   // Probe both through a loose view to preserve the original untyped fallback.
-  const rawId = sock?.user?.id || (sock?.user as any)?.jid || null;
+  const rawId = sock?.user?.id || (sock?.user as { jid?: string })?.jid || null;
   return normalizeJid(rawId) || rawId || 'bot@s.whatsapp.net';
 }
 

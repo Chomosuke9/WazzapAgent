@@ -75,6 +75,24 @@ import type {
   ErrorCode,
 } from '../protocol/types.js';
 import type { WaSocketLike } from '../protocol/ports.js';
+import type { WAMessage } from 'baileys';
+import type {
+  NativeButton,
+  QuizChoice,
+  SendMessagePayload,
+  ReactMessagePayload,
+  DeleteMessagePayload,
+  KickMemberPayload,
+  MarkReadPayload,
+  SendPresencePayload,
+  RunCommandPayload,
+  RelayLottieStickerPayload,
+  SendQuizPayload,
+  SendButtonsPayload,
+  SendCarouselPayload,
+  SendCopyCodePayload,
+} from '../protocol/types.js';
+
 
 // ---- error-code derivation (verbatim from index.ts) -----------------------
 
@@ -94,20 +112,26 @@ function actionErrorDetail(err: unknown): string {
   return 'unknown error';
 }
 
-function deriveKickFailure(result: any): { code: ErrorCode; detail: string } {
-  const rows = Array.isArray(result?.results) ? result.results : [];
-  const failures = rows.filter((row: any) => !row?.ok);
+interface KickResultRow {
+  ok?: boolean;
+  error?: string;
+  detail?: string;
+}
+
+function deriveKickFailure(result: { results?: KickResultRow[] }): { code: ErrorCode; detail: string } {
+  const rows = result?.results ?? [];
+  const failures = rows.filter((row) => !row?.ok);
   if (failures.length === 0) {
     return { code: 'send_failed', detail: 'no targets were kicked' };
   }
 
   const codes = failures
-    .map((row: any) => (typeof row?.error === 'string' ? row.error : null))
+    .map((row) => (typeof row?.error === 'string' ? row.error : null))
     .filter(Boolean);
   const priority = ['permission_denied', 'send_failed', 'invalid_target'];
-  const code = priority.find((candidate) => codes.includes(candidate)) || codes[0] || 'send_failed';
+  const code: string = priority.find((candidate) => codes.includes(candidate)) || codes[0] || 'send_failed';
 
-  const detail = failures.find((row: any) => typeof row?.detail === 'string' && row.detail.trim())?.detail
+  const detail = failures.find((row) => typeof row?.detail === 'string' && row.detail.trim())?.detail
     || 'no targets were kicked';
   return { code: code as ErrorCode, detail };
 }
@@ -225,11 +249,10 @@ const DEFAULT_DEPS: DispatchDeps = {
 // are unchanged except for being parameterized by `(entry, payload, requestId,
 // deps)` and using the now-static (formerly dynamic) `wa/*` imports.
 
-/** A single action handler. `payload` is the loose wire payload (as before). */
+/** A single action handler. `payload` is the loose wire payload. */
 type ActionHandler = (
   entry: AccountEntry,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  payload: any,
+  payload: Record<string, unknown>,
   requestId: string | undefined,
   deps: DispatchDeps,
 ) => Promise<void>;
@@ -246,37 +269,41 @@ function fallbackAckResult(
   return { contextMsgId: first?.contextMsgId ?? null, messageId: first?.messageId ?? null };
 }
 
-const handleSendMessage: ActionHandler = async (entry, payload, requestId, deps) => {
+const handleSendMessage: ActionHandler = async (entry, _payload, requestId, deps) => {
   const ctx = entry.ctx;
+  const payload = _payload as unknown as SendMessagePayload;
   const result = await deps.withJidQueue(ctx, payload.chatId, () => deps.sendOutgoing(ctx, payload));
   emitActionAck(entry, { requestId, action: 'send_message', ok: true, detail: 'sent', result });
 };
 
-const handleReactMessage: ActionHandler = async (entry, payload, requestId, deps) => {
+const handleReactMessage: ActionHandler = async (entry, _payload, requestId, deps) => {
+  const payload = _payload as unknown as ReactMessagePayload;
   const result = await deps.reactToMessage(entry.ctx, payload);
   emitActionAck(entry, { requestId, action: 'react_message', ok: true, detail: 'reacted', result });
 };
 
-const handleDeleteMessage: ActionHandler = async (entry, payload, requestId, deps) => {
+const handleDeleteMessage: ActionHandler = async (entry, _payload, requestId, deps) => {
+  const payload = _payload as unknown as DeleteMessagePayload;
   const result = await deps.deleteMessageByContextId(entry.ctx, payload);
   emitActionAck(entry, { requestId, action: 'delete_message', ok: true, detail: 'deleted', result });
 };
 
-const handleKickMember: ActionHandler = async (entry, payload, requestId, deps) => {
-  const result: any = await deps.kickMembers(entry.ctx, payload);
-  const ok = Boolean(result?.ok);
+const handleKickMember: ActionHandler = async (entry, _payload, requestId, deps) => {
+  const payload = _payload as unknown as KickMemberPayload;
+  const kickResult = await deps.kickMembers(entry.ctx, payload);
+  const ok = Boolean((kickResult as { ok?: boolean })?.ok);
   if (ok) {
-    emitActionAck(entry, { requestId, action: 'kick_member', ok: true, detail: 'kick applied', result });
+    emitActionAck(entry, { requestId, action: 'kick_member', ok: true, detail: 'kick applied', result: kickResult as Record<string, unknown> });
     return;
   }
 
-  const failure = deriveKickFailure(result);
+  const failure = deriveKickFailure(kickResult as { results?: Array<{ ok?: boolean; error?: string; detail?: string }> });
   emitActionAck(entry, {
     requestId,
     action: 'kick_member',
     ok: false,
     detail: failure.detail,
-    result,
+    result: kickResult as Record<string, unknown>,
     code: failure.code,
   });
   registry.sendToClient(entry.folderPath, {
@@ -291,20 +318,23 @@ const handleKickMember: ActionHandler = async (entry, payload, requestId, deps) 
   });
 };
 
-const handleMarkRead: ActionHandler = async (entry, payload, _requestId, deps) => {
+const handleMarkRead: ActionHandler = async (entry, _payload, _requestId, deps) => {
+  const payload = _payload as unknown as MarkReadPayload;
   await deps.markChatRead(entry.ctx, payload);
 };
 
-const handleSendPresence: ActionHandler = async (entry, payload, _requestId, deps) => {
+const handleSendPresence: ActionHandler = async (entry, _payload, _requestId, deps) => {
+  const payload = _payload as unknown as SendPresencePayload;
   await deps.sendPresence(entry.ctx, payload);
 };
 
-const handleRunCommand: ActionHandler = async (entry, payload, requestId, deps) => {
+const handleRunCommand: ActionHandler = async (entry, _payload, requestId, deps) => {
   // LLM2 self-triggered slash command (no WhatsApp echo). The actual
   // dispatch lives in wa/runCommand.ts to keep the router thin. We always
   // emit an action_ack so Python can append a synthetic "Command X
   // executed/failed" line to LLM history.
-  let result: any;
+  const payload = _payload as unknown as RunCommandPayload;
+  let result: { ok?: boolean; command?: string | null; detail?: string } | undefined;
   try {
     result = await deps.dispatchRunCommand(entry.ctx, payload);
   } catch (err) {
@@ -329,28 +359,30 @@ const handleRunCommand: ActionHandler = async (entry, payload, requestId, deps) 
   });
 };
 
-const handleRelayLottieSticker: ActionHandler = async (entry, payload, requestId, deps) => {
+const handleRelayLottieSticker: ActionHandler = async (entry, _payload, requestId, deps) => {
   // Relay a Lottie/premium sticker using its stored JSON payload.
   // Python bridge sends this when resolve_sticker() returns a lottie_payload.
+  const payload = _payload as unknown as RelayLottieStickerPayload;
   const { chatId, lottiePayload, replyTo, requestId: rid } = payload;
   try {
-    const result = await deps.sendLottieSticker(entry.ctx, chatId, lottiePayload, replyTo);
+    const result = await deps.sendLottieSticker(entry.ctx, chatId, lottiePayload, replyTo ?? undefined);
     emitActionAck(entry, {
       requestId: rid || requestId,
       action: 'relay_lottie_sticker',
       ok: true,
       detail: 'sent',
-      result,
+      result: result as Record<string, unknown>,
     });
   } catch (err) {
     emitActionError(entry, { requestId: rid || requestId, action: 'relay_lottie_sticker', err });
   }
 };
 
-const handleSendQuiz: ActionHandler = async (entry, payload, requestId) => {
+const handleSendQuiz: ActionHandler = async (entry, _payload, requestId) => {
   const ctx = entry.ctx;
   const sock = entry.sock;
   if (!sock) throw new Error('WhatsApp socket not ready');
+  const payload = _payload as unknown as SendQuizPayload;
   const { chatId, question, choices, replyTo, footer, requestId: rid } = payload;
   try {
     // Compatibility gate: in a tier that can't render quick-reply buttons
@@ -380,12 +412,12 @@ const handleSendQuiz: ActionHandler = async (entry, payload, requestId) => {
 
     // Build buttons: display_text = ch.text as-is (LLM writes full label in text)
     // id = "qz:<label>" so inbound handler can route it
-    const buttons = choices.map((ch: any) => ({
+    const buttons = choices.map((ch: QuizChoice) => ({
       id: `qz:${ch.label}`,
       displayText: ch.text,
     }));
 
-    const quoted: any = replyTo ? resolveQuotedMessage(ctx, chatId, replyTo) : null;
+    const quoted: ReturnType<typeof resolveQuotedMessage> = replyTo ? resolveQuotedMessage(ctx, chatId, replyTo) : null;
     const sentMsg = await sendQuickReply(sock, chatId, rendered.text, buttons, {
       footer: footer || '',
       quoted: quoted || undefined,
@@ -431,10 +463,12 @@ const handleSendQuiz: ActionHandler = async (entry, payload, requestId) => {
   }
 };
 
-const handleSendButtons: ActionHandler = async (entry, payload, requestId, deps) => {
+const handleSendButtons: ActionHandler = async (entry, _payload, requestId, deps) => {
   const sock = entry.sock;
   if (!sock) throw new Error('WhatsApp socket not ready');
-  const nativeButtons = (payload.buttons || []).map((btn: any) => ({
+  const payload = _payload as unknown as SendButtonsPayload;
+  const rawButtons: NativeButton[] = Array.isArray(payload.buttons) ? payload.buttons as NativeButton[] : [];
+  const nativeButtons = rawButtons.map((btn) => ({
     name: btn.name,
     buttonParamsJson: typeof btn.buttonParams === 'object'
       ? JSON.stringify(btn.buttonParams)
@@ -451,22 +485,32 @@ const handleSendButtons: ActionHandler = async (entry, payload, requestId, deps)
     return;
   }
   const result = await deps.sendNativeFlow(sock as WaSocketLike, payload.chatId, payload.text || '', nativeButtons, { footer: payload.footer });
-  emitActionAck(entry, { requestId, action: 'send_buttons', ok: true, detail: 'sent', result });
+  emitActionAck(entry, { requestId, action: 'send_buttons', ok: true, detail: 'sent', result: result as unknown as Record<string, unknown> });
 };
 
-const handleSendCarousel: ActionHandler = async (entry, payload, requestId, deps) => {
+interface CarouselCardRaw {
+  image?: unknown;
+  video?: unknown;
+  body?: unknown;
+  footer?: unknown;
+  buttons?: unknown[];
+}
+
+const handleSendCarousel: ActionHandler = async (entry, _payload, requestId, deps) => {
   const sock = entry.sock;
   if (!sock) throw new Error('WhatsApp socket not ready');
-  const cards = (payload.cards || []).map((card: any) => ({
+  const payload = _payload as unknown as SendCarouselPayload;
+  const rawCards: CarouselCardRaw[] = Array.isArray(payload.cards) ? payload.cards as CarouselCardRaw[] : [];
+  const cards: Record<string, unknown>[] = rawCards.map((card) => ({
     ...(card.image ? { image: card.image } : {}),
     ...(card.video ? { video: card.video } : {}),
-    body: typeof card.body === 'object' ? (card.body.text || '') : (card.body || ''),
-    footer: typeof card.footer === 'object' ? (card.footer.text || '') : (card.footer || ''),
-    buttons: (card.buttons || []).map((btn: any) => ({
-      name: btn.name,
-      buttonParamsJson: typeof btn.buttonParams === 'object'
-        ? JSON.stringify(btn.buttonParams)
-        : (btn.buttonParamsJson || '{}'),
+    body: typeof card.body === 'object' ? ((card.body as { text?: string }).text ?? '') : (card.body ?? ''),
+    footer: typeof card.footer === 'object' ? ((card.footer as { text?: string }).text ?? '') : (card.footer ?? ''),
+    buttons: (Array.isArray(card.buttons) ? card.buttons : []).map((btn) => ({
+      name: (btn as NativeButton).name,
+      buttonParamsJson: typeof (btn as NativeButton).buttonParams === 'object'
+        ? JSON.stringify((btn as NativeButton).buttonParams)
+        : ((btn as NativeButton).buttonParamsJson || '{}'),
     })),
   }));
   if (!tierAllows(resolveTier(entry.ctx.repos, payload.chatId), 'carousel')) {
@@ -479,21 +523,22 @@ const handleSendCarousel: ActionHandler = async (entry, payload, requestId, deps
     emitActionAck(entry, { requestId, action: 'send_carousel', ok: true, detail: 'sent (text fallback)', result: fallbackAckResult(result) });
     return;
   }
-  const result = await deps.sendCarousel(sock as WaSocketLike, payload.chatId, cards, { text: payload.text });
-  emitActionAck(entry, { requestId, action: 'send_carousel', ok: true, detail: 'sent', result });
+  const result = await deps.sendCarousel(sock as WaSocketLike, payload.chatId, cards as unknown as Parameters<typeof deps.sendCarousel>[2], { text: payload.text });
+  emitActionAck(entry, { requestId, action: 'send_carousel', ok: true, detail: 'sent', result: result as unknown as Record<string, unknown> });
 };
 
-const handleSendCopyCode: ActionHandler = async (entry, payload, requestId, deps) => {
+const handleSendCopyCode: ActionHandler = async (entry, _payload, requestId, deps) => {
   const ctx = entry.ctx;
   const sock = entry.sock;
   if (!sock) throw new Error('WhatsApp socket not ready');
+  const payload = _payload as unknown as SendCopyCodePayload;
   const { chatId, code, displayText, quotedPreviewText } = payload;
   // When quotedPreviewText is provided, create a synthetic quoted
   // message with a dummy stanzaId so the CTA Copy bubble shows a
   // reply preview containing the code snippet.  The dummy ID does
   // not correspond to any real message — WhatsApp only renders the
   // quotedMessage content as the preview text.
-  let quoted: any = null;
+  let quoted: WAMessage | null = null;
   if (quotedPreviewText && chatId) {
     const botJid = normalizeJid(sock.user?.id) || 'bot@wazzap.local';
     quoted = {
@@ -504,7 +549,7 @@ const handleSendCopyCode: ActionHandler = async (entry, payload, requestId, deps
         participant: botJid,
       },
       message: { conversation: quotedPreviewText },
-    };
+    } as unknown as WAMessage;
   }
   try {
     if (!tierAllows(resolveTier(ctx.repos, chatId), 'cta_copy')) {
@@ -523,7 +568,7 @@ const handleSendCopyCode: ActionHandler = async (entry, payload, requestId, deps
         ...(quoted ? { quoted } : {}),
       }),
     );
-    emitActionAck(entry, { requestId, action: 'send_copy_code', ok: true, detail: 'sent', result });
+    emitActionAck(entry, { requestId, action: 'send_copy_code', ok: true, detail: 'sent', result: result as unknown as Record<string, unknown> });
   } catch (err) {
     emitActionError(entry, { requestId, action: 'send_copy_code', err });
   }
@@ -538,8 +583,15 @@ const handleSendCopyCode: ActionHandler = async (entry, payload, requestId, deps
  * media is fetched with `saveMedia`. If the proto has been evicted, replies
  * `ok:false code:not_found` so the bridge degrades gracefully.
  */
-const handleDownloadMedia: ActionHandler = async (entry, payload, requestId, deps) => {
+interface DownloadMediaPayload {
+  chatId: string;
+  contextMsgId?: string;
+  messageId?: string;
+}
+
+const handleDownloadMedia: ActionHandler = async (entry, _payload, requestId, deps) => {
   const ctx = entry.ctx;
+  const payload = _payload as unknown as DownloadMediaPayload;
   const { chatId, contextMsgId, messageId } = payload;
   try {
     let mid: string | null = (typeof messageId === 'string' && messageId) || null;
@@ -559,7 +611,9 @@ const handleDownloadMedia: ActionHandler = async (entry, payload, requestId, dep
       return;
     }
     const { contentType, message: innerMessage } = unwrapMessage(cached.message);
-    const content = contentType && innerMessage ? (innerMessage as any)[contentType] : null;
+    const content: Record<string, unknown> | null = contentType && innerMessage
+      ? (innerMessage as Record<string, unknown>)[contentType] as Record<string, unknown>
+      : null;
     if (!content) {
       emitActionAck(entry, {
         requestId,
@@ -623,9 +677,10 @@ async function routeAction(
   frame: InboundActionFrame,
   deps: DispatchDeps,
 ): Promise<void> {
-  const msg: { type?: string; payload?: any } = frame;
-  const payload: any = msg?.payload || {};
-  const requestId: string | undefined = payload.requestId;
+  const raw = frame as unknown;
+  const msg = raw as { type?: string; payload?: Record<string, unknown> };
+  const payload: Record<string, unknown> = msg?.payload ?? {};
+  const requestId: string | undefined = payload.requestId as string | undefined;
   const type = msg?.type;
 
   const handler = type ? ACTION_HANDLERS[type] : undefined;
@@ -663,10 +718,10 @@ export async function dispatchAction(
   try {
     await routeAction(entry, frame, merged);
   } catch (err) {
-    const action = (frame as any)?.type;
+    const action = frame?.type;
     logger.error({ err, action, folderPath: entry.folderPath }, 'failed handling ws action');
     emitActionError(entry, {
-      requestId: (frame as any)?.payload?.requestId,
+      requestId: (frame?.payload as unknown as Record<string, unknown> | undefined)?.requestId as string | undefined,
       action,
       err,
     });

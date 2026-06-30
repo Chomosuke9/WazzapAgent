@@ -2,6 +2,7 @@ import config from '../../config.js';
 import { cacheSetBounded } from './caches.js';
 import type { ParticipantRoleFlags } from './caches.js';
 import type { AccountContext } from '../../account/accountContext.js';
+import type { WaSocketLike } from '../../protocol/ports.js';
 import {
   normalizeJid,
   rememberSenderRef,
@@ -282,7 +283,15 @@ function registerOwnerLid(lid: unknown): boolean {
  * the narrow `WaSocketLike` port; access is fully defensive so an older Baileys
  * (or a not-yet-ready socket) just yields `null`.
  */
-async function resolveLidForPhone(sock: any, phone: unknown): Promise<string | null> {
+interface LidResolutionSocket extends WaSocketLike {
+  signalRepository?: {
+    lidMapping?: {
+      getLIDForPN?: (jid: string) => Promise<string | null>;
+    };
+  };
+}
+
+async function resolveLidForPhone(sock: LidResolutionSocket | null, phone: unknown): Promise<string | null> {
   const digits = String(phone ?? "").replace(/\D/g, "");
   if (digits.length < 5) return null;
   try {

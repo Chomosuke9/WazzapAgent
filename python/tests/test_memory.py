@@ -16,7 +16,7 @@ side. The llm2 test monkeypatches the DB/IO seams so it stays hermetic.
 """
 from __future__ import annotations
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 
 import bridge.db as db
 import bridge.llm.llm2 as llm2_mod
@@ -148,6 +148,9 @@ def test_no_memory_block_means_no_block(monkeypatch):
     built = llm2_mod.build_llm2_messages(
         [], current, current_payload={"chatId": "g@g.us"}, chat_type="group"
     )
-    # No HumanMessage carries a memory block when none was provided. (The SYSTEM
-    # prompt may mention the tag name, so we inspect HumanMessages only.)
-    assert not any("<long_term_memory>" in t for t in _human_texts(built))
+    # No HumanMessage carries a memory block when none was provided. The
+    # reasoning block inside the main messages content references
+    # `<long_term_memory>` by name, so skip the last HumanMessage
+    # (the messages_content) and check only the earlier ones.
+    texts = _human_texts(built)
+    assert not any("<long_term_memory>" in t for t in texts[:-1])

@@ -7,19 +7,35 @@ import { handleDashboard } from '../../src/wa/commands/dashboard.js';
 
 type TopUser = { senderRef: string; senderName: string; invokeCount: number };
 
-function makeCtx(captured: any, topUsers: TopUser[], opts: { failRelay?: boolean } = {}) {
-  const sock: any = {
+interface Captured {
+  textMessages: Record<string, unknown>[];
+  relayed: Record<string, unknown>[];
+  gen?: { type: string; days: number } | null;
+}
+
+function makeCtx(captured: Captured, topUsers: TopUser[], opts: { failRelay?: boolean } = {}) {
+  const sock: {
+    user: { id: string; name: string };
+    sendMessage: (jid: string, content: Record<string, unknown>) => Promise<{ key: { id: string } }>;
+    relayMessage: (jid: string, message: Record<string, unknown>) => Promise<void>;
+  } = {
     user: { id: '123:1@s.whatsapp.net', name: 'TestBot' },
-    sendMessage: async (_jid: string, content: any) => {
+    sendMessage: async (_jid: string, content: Record<string, unknown>) => {
       captured.textMessages.push(content);
       return { key: { id: 'm1' } };
     },
-    relayMessage: async (_jid: string, message: any) => {
+    relayMessage: async (_jid: string, message: Record<string, unknown>) => {
       if (opts.failRelay) throw new Error('relay boom');
       captured.relayed.push(message);
     },
   };
-  const repos: any = {
+  const repos: {
+    stats: {
+      getStats: (chatId: string, period: string) => Record<string, number>;
+      getTopUsers: () => TopUser[];
+      getTotalUserInvokes: () => number;
+    };
+  } = {
     stats: {
       getStats: (_chatId: string, period: string) => {
         if (period === 'monthly') {
@@ -55,17 +71,17 @@ function makeCtx(captured: any, topUsers: TopUser[], opts: { failRelay?: boolean
     isGroup: true,
     fromMe: false,
     group: { name: 'My Group', description: null, botIsAdmin: true, botIsSuperAdmin: false, participantRoles: {}, participants: [] },
-    msg: {} as any,
+    msg: {} as Record<string, unknown>,
     folderPath: '/data',
     // Per-account state holder — withJidQueue serializes sends via this map.
-    account: { jidQueues: new Map() } as any,
+    account: { jidQueues: new Map() } as Record<string, unknown>,
     sock,
     repos,
-  } as any;
+  } as Record<string, unknown>;
 }
 
 test('/dashboard sends the STATISTIC/period poll then the Top Monthly Users poll (Overall first)', async () => {
-  const captured = { textMessages: [] as any[], relayed: [] as any[] };
+  const captured: Captured = { textMessages: [], relayed: [], gen: null };
   const topUsers: TopUser[] = [
     { senderRef: 'u1', senderName: 'Alice', invokeCount: 42 },
     { senderRef: 'u2', senderName: 'Bob', invokeCount: 17 },
@@ -98,7 +114,7 @@ test('/dashboard sends the STATISTIC/period poll then the Top Monthly Users poll
 });
 
 test('/dashboard renders a valid poll (Overall + the single active user) when only one user is active', async () => {
-  const captured = { textMessages: [] as any[], relayed: [] as any[] };
+  const captured: Captured = { textMessages: [], relayed: [], gen: null };
   await handleDashboard(makeCtx(captured, [{ senderRef: 'u1', senderName: 'Agus Kebab', invokeCount: 6 }]));
 
   assert.equal(captured.relayed.length, 2, 'period poll + leaderboard poll');
@@ -112,7 +128,7 @@ test('/dashboard renders a valid poll (Overall + the single active user) when on
 });
 
 test('/dashboard caps the leaderboard poll at 11 options (Overall + 10 users)', async () => {
-  const captured = { textMessages: [] as any[], relayed: [] as any[] };
+  const captured: Captured = { textMessages: [], relayed: [], gen: null };
   const many: TopUser[] = Array.from({ length: 10 }, (_v, i) => ({
     senderRef: `u${i}`,
     senderName: `User${i}`,
@@ -126,10 +142,10 @@ test('/dashboard caps the leaderboard poll at 11 options (Overall + 10 users)', 
 });
 
 test('/dashboard sanitizes/guards leaderboard data (newlines, dup names, bad counts)', async () => {
-  const captured = { textMessages: [] as any[], relayed: [] as any[] };
+  const captured: Captured = { textMessages: [], relayed: [], gen: null };
   const topUsers: TopUser[] = [
     { senderRef: 'u1', senderName: 'Bob\n\nspam', invokeCount: 9 },
-    { senderRef: 'u2', senderName: '', invokeCount: undefined as any },
+    { senderRef: 'u2', senderName: '', invokeCount: undefined as unknown as number },
   ];
   await handleDashboard(makeCtx(captured, topUsers));
 
@@ -145,7 +161,7 @@ test('/dashboard sanitizes/guards leaderboard data (newlines, dup names, bad cou
 });
 
 test('/dashboard sends the period poll plus a text note when there are no active users', async () => {
-  const captured = { textMessages: [] as any[], relayed: [] as any[] };
+  const captured: Captured = { textMessages: [], relayed: [], gen: null };
   await handleDashboard(makeCtx(captured, []));
 
   assert.equal(captured.relayed.length, 1, 'only the period poll');
@@ -156,7 +172,7 @@ test('/dashboard sends the period poll plus a text note when there are no active
 });
 
 test('/dashboard falls back to the text dashboard when the poll relay fails', async () => {
-  const captured = { textMessages: [] as any[], relayed: [] as any[] };
+  const captured: Captured = { textMessages: [], relayed: [], gen: null };
   const topUsers: TopUser[] = [{ senderRef: 'u1', senderName: 'Alice', invokeCount: 5 }];
   await handleDashboard(makeCtx(captured, topUsers, { failRelay: true }));
 

@@ -3,8 +3,6 @@ via the download_media action; nothing is fetched when there's no visual need.""
 import asyncio
 import json
 
-import pytest
-
 from wasocket import protocol
 from bridge.media import materialize_visual_media, materialize_media_for_subagent
 from bridge.media import materialize_quoted_media

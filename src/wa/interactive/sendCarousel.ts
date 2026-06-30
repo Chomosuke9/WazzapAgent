@@ -52,18 +52,16 @@ async function sendCarousel(
   const mappedCards = cards.map((card) => {
     const headerFields: {
       hasMediaAttachment: boolean;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      imageMessage?: { url: any };
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      videoMessage?: { url: any };
+      imageMessage?: { url: string };
+      videoMessage?: { url: string };
       title?: string;
     } = { hasMediaAttachment: false };
     if (card.image) {
       headerFields.hasMediaAttachment = true;
-      headerFields.imageMessage = { url: (card.image as { url?: string }).url ?? card.image };
+      headerFields.imageMessage = { url: (card.image as { url?: string }).url ?? String(card.image) };
     } else if (card.video) {
       headerFields.hasMediaAttachment = true;
-      headerFields.videoMessage = { url: (card.video as { url?: string }).url ?? card.video };
+      headerFields.videoMessage = { url: (card.video as { url?: string }).url ?? String(card.video) };
     }
     if (card.title) headerFields.title = card.title;
 

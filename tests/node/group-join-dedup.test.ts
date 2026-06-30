@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { dedupeGroupJoinEvent } from '../../src/wa/domain/groupContext.ts';
 
 // Minimal ctx: dedupeGroupJoinEvent only touches `groupJoinDedupCache`.
-function makeCtx(): any {
+function makeCtx(): { groupJoinDedupCache: Map<string, number> } {
   return { groupJoinDedupCache: new Map<string, number>() };
 }
 

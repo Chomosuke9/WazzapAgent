@@ -2,7 +2,7 @@ import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import fs from 'fs-extra';
 
-export async function streamToFile(stream: any, filepath: string): Promise<number> {
+export async function streamToFile(stream: NodeJS.ReadableStream | Readable, filepath: string): Promise<number> {
   if (!filepath || typeof filepath !== 'string') {
     throw new Error('Invalid filepath');
   }

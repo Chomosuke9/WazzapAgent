@@ -9,7 +9,7 @@ import { handlePrompt } from '../../src/wa/commands/prompt.js';
 
 function makeSettingsSpy() {
   const calls: string[] = [];
-  const rec = (name: string) => (..._a: any[]) => { calls.push(name); };
+  const rec = (name: string) => (..._a: unknown[]) => { calls.push(name); };
   return {
     calls,
     settings: {
@@ -35,9 +35,9 @@ function makeSettingsSpy() {
   };
 }
 
-function ctx(over: any) {
-  const sent: any[] = [];
-  const base = {
+function ctx(over: Record<string, unknown>): Record<string, unknown> {
+  const sent: Record<string, unknown>[] = [];
+  const base: Record<string, unknown> = {
     chatId: '123@g.us',
     chatType: 'group',
     senderId: 's@s.whatsapp.net',
@@ -53,13 +53,13 @@ function ctx(over: any) {
     isGroup: true,
     fromMe: false,
     group: null,
-    msg: {} as any,
+    msg: {} as Record<string, unknown>,
     folderPath: '/data',
-    sock: { user: { id: 'b@s.whatsapp.net', name: 'Bot' }, sendMessage: async (_j: string, c: any) => { sent.push(c); } },
+    sock: { user: { id: 'b@s.whatsapp.net', name: 'Bot' }, sendMessage: async (_j: string, c: Record<string, unknown>) => { sent.push(c); } },
     sentRef: sent,
     ...over,
   };
-  return base as any;
+  return base;
 }
 
 test('/permission default calls setDefaultPermission', async () => {

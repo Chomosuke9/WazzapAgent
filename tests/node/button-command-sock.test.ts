@@ -48,10 +48,10 @@ before(async () => {
 
 /** Minimal fake Baileys socket that records every sendMessage call. */
 function makeSock() {
-  const calls: { chatId: string; content: any }[] = [];
+  const calls: { chatId: string; content: Record<string, unknown> }[] = [];
   return {
     user: { id: 'bot@s.whatsapp.net' },
-    sendMessage: async (chatId: string, content: any) => {
+    sendMessage: async (chatId: string, content: Record<string, unknown>) => {
       calls.push({ chatId, content });
       return { key: { id: 'sent' } };
     },
@@ -60,7 +60,7 @@ function makeSock() {
 }
 
 /** Synthesize a button-response message whose selected id is a slash command. */
-function makeSlashButtonMsg(chatId: string, slash: string): any {
+function makeSlashButtonMsg(chatId: string, slash: string): Record<string, unknown> {
   return {
     key: { remoteJid: chatId, fromMe: false, id: `btn_${Date.now()}` },
     message: { buttonsResponseMessage: { selectedButtonId: slash } },
@@ -75,9 +75,9 @@ test('button tap of a /-command threads sock into the dispatched command context
   const sock = makeSock();
 
   const handled = await handleButtonResponse(
-    sock as any,
+    sock as unknown as Parameters<typeof handleButtonResponse>[0],
     ctx,
-    makeSlashButtonMsg(chatId, '/help') as any,
+    makeSlashButtonMsg(chatId, '/help') as unknown as Parameters<typeof handleButtonResponse>[2],
     chatId,
     OWNER_JID,
   );

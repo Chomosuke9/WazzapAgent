@@ -33,7 +33,7 @@ import json
 import logging
 import math
 import random
-from typing import Any, Awaitable, Callable, Optional, Union
+from typing import Awaitable, Callable, Optional, Union
 
 import websockets
 from websockets.asyncio.client import ClientConnection, connect as ws_connect
@@ -45,7 +45,7 @@ logger = logging.getLogger("wasocket.transport")
 
 # A frame the transport transmits: a protocol dataclass, a ready-made dict, or a
 # pre-serialised JSON string. ``_encode`` normalises all three to a wire string.
-Frame = Union[Any, dict, str]
+Frame = Union[object, dict, str]
 
 # Callback types. Both may be sync or async; the transport awaits coroutines.
 OnFrame = Callable[[str, object], Union[None, Awaitable[None]]]

@@ -13,8 +13,15 @@ const { handleBotConf } = await import('../../src/wa/commands/bot-conf.ts');
 const { Database } = await import('../../src/db/Database.ts');
 const { createRepositories } = await import('../../src/db/repositories/index.ts');
 
+interface BotConfSettings {
+  getBotConfig: (k: string) => string | null;
+  setBotConfig: (k: string, v: string | null) => void;
+  getPrompt: (_c: string) => string | null;
+  setDefaultPrompt: (v: string | null) => void;
+}
+
 function settingsSpy() {
-  const calls: Array<[string, ...any[]]> = [];
+  const calls: Array<[string, ...unknown[]]> = [];
   const store: Record<string, string | null> = {};
   return {
     calls,
@@ -26,16 +33,16 @@ function settingsSpy() {
   };
 }
 
-function ctx(args: string, settings: any) {
-  const sent: any[] = [];
+function ctx(args: string, settings: BotConfSettings) {
+  const sent: Record<string, unknown>[] = [];
   return {
     o: sent,
     c: {
       chatId: '123@g.us', chatType: 'group', senderId: 's', senderIsAdmin: true, senderIsOwner: true,
       botIsAdmin: true, args, text: args, contextMsgId: null, quotedMessageId: null, senderDisplay: 'S',
-      senderRole: null, isGroup: true, fromMe: false, group: null, msg: {} as any, folderPath: '/data',
-      sock: { sendMessage: async (_j: string, m: any) => { sent.push(m); } }, repos: { settings },
-    } as any,
+      senderRole: null, isGroup: true, fromMe: false, group: null, msg: {} as Record<string, unknown>, folderPath: '/data',
+      sock: { sendMessage: async (_j: string, m: Record<string, unknown>) => { sent.push(m); } }, repos: { settings },
+    } as Record<string, unknown>,
   };
 }
 

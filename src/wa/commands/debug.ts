@@ -258,18 +258,18 @@ async function handleDebugCommand({ chatId, args, sock }: CommandContext): Promi
     return;
   }
 
-  const send = async (
-    fn: (sock: WaSocketLike, chatId: string, ...fnArgs: any[]) => Promise<unknown>,
+  const send = async <T extends unknown[]>(
+    fn: (sock: WaSocketLike, chatId: string, ...args: T) => Promise<unknown>,
     label: string,
-    ...fnArgs: any[]
+    ...fnArgs: T
   ): Promise<void> => {
     try {
       await fn(sock, chatId, ...fnArgs);
       logger.info({ chatId, label }, 'debug interactive message sent');
-    } catch (err: any) {
+    } catch (err: unknown) {
       logger.warn({ err, label }, 'debug send failed');
       try {
-        await sock.sendMessage(chatId, { text: `❌ Failed to send ${label}: ${err?.message || err}` });
+        await sock.sendMessage(chatId, { text: `❌ Failed to send ${label}: ${err instanceof Error ? err.message : String(err)}` });
       } catch (e) { /* ignore */ }
     }
   };

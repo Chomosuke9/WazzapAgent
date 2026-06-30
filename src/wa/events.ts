@@ -132,7 +132,7 @@ async function emitGroupJoinContextEvent(ctx: AccountContext, {
   const byText = actorName ? ` Added by ${actorName}.` : '';
   const text = `Group update: ${joinedText}${byText}`;
 
-  const payload: Record<string, any> = {
+  const payload: Record<string, unknown> = {
     messageId: resolvedMessageId,
     instanceId: config.instanceId,
     chatId,
@@ -193,7 +193,7 @@ function emitBotActionContextEvent(ctx: AccountContext, {
     : null;
   const senderId = normalizeJid(sock.user?.id) || 'bot@wazzap.local';
   const senderRef = rememberSenderRef(ctx, chatId, senderId, senderId) || 'unknown';
-  const payload: Record<string, any> = {
+  const payload: Record<string, unknown> = {
     messageId: makeEventMessageId('action_log'),
     instanceId: config.instanceId,
     chatId,
@@ -229,7 +229,17 @@ function emitBotActionContextEvent(ctx: AccountContext, {
 }
 
 // ponytail: no interface — just destructure `any`
-async function emitBotAddedEvent(ctx: AccountContext, args: Record<string, any>): Promise<void> {
+interface BotAddedEventArgs {
+  chatId?: string;
+  actorId?: string | null;
+  actorName?: string;
+  timestampMs?: number;
+  participants?: unknown;
+  action?: string;
+  source?: string;
+}
+
+async function emitBotAddedEvent(ctx: AccountContext, args: BotAddedEventArgs): Promise<void> {
   const chatId = args.chatId;
   const sock = ctx.sock;
   if (!sock || !chatId || !chatId.endsWith('@g.us')) return;
@@ -272,7 +282,7 @@ function emitBotRoleChangeEvent(ctx: AccountContext, {
   const senderRef = rememberSenderRef(ctx, chatId, senderId, senderId) || 'unknown';
   const normalizedActorId = normalizeJid(actorId) || null;
 
-  const payload: Record<string, any> = {
+  const payload: Record<string, unknown> = {
     messageId: makeEventMessageId('bot_role_change'),
     instanceId: config.instanceId,
     chatId,

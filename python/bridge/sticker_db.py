@@ -45,10 +45,7 @@ from typing import Optional
 from . import config
 from .log import setup_logging
 
-try:
-  from .db import current_tenant_db_root as _current_tenant_db_root
-except ImportError:
-  from bridge.db import current_tenant_db_root as _current_tenant_db_root  # type: ignore
+from .db import current_tenant_db_root as _current_tenant_db_root
 
 logger = setup_logging()
 

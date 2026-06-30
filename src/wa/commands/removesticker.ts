@@ -83,9 +83,9 @@ async function handleRemoveSticker({
 
   try {
     deleted = deleteSticker(folderPath, targetChatId, rawName);
-  } catch (err: any) {
+  } catch (err: unknown) {
     logger.error({ err, chatId, targetChatId, name: rawName }, 'remove-sticker: db delete failed');
-    await reply(`Failed to remove sticker: ${err.message} ❌`);
+    await reply(`Failed to remove sticker: ${err instanceof Error ? err.message : String(err)} ❌`);
     return;
   }
 

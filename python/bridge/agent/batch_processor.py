@@ -34,7 +34,6 @@ from ..history import (
   assistant_name,
   assistant_sender_ref,
   assistant_name_pattern,
-  format_history,
   hydrate_quoted_from_history,
 )
 from ..log import setup_logging, set_chat_log_context, reset_chat_log_context
@@ -114,24 +113,14 @@ from ..media import (
 )
 
 
-try:
-  from ..config import (
-    SLOW_BATCH_LOG_MS,
-    MAX_TRIGGER_BATCH_AGE_MS,
-    REPLY_DEDUP_WINDOW_MS,
-    INCOMING_DEBOUNCE_SECONDS,
-    INCOMING_BURST_MAX_SECONDS,
-    REQUIRE_ACTIVATION,
-  )
-except ImportError:
-  from bridge.config import (  # type: ignore
-    SLOW_BATCH_LOG_MS,
-    MAX_TRIGGER_BATCH_AGE_MS,
-    REPLY_DEDUP_WINDOW_MS,
-    INCOMING_DEBOUNCE_SECONDS,
-    INCOMING_BURST_MAX_SECONDS,
-    REQUIRE_ACTIVATION,
-  )
+from ..config import (
+  SLOW_BATCH_LOG_MS,
+  MAX_TRIGGER_BATCH_AGE_MS,
+  REPLY_DEDUP_WINDOW_MS,
+  INCOMING_DEBOUNCE_SECONDS,
+  INCOMING_BURST_MAX_SECONDS,
+  REQUIRE_ACTIVATION,
+)
 
 logger = setup_logging()
 from ..messaging.gateway import _dispatch_sticker
@@ -475,10 +464,7 @@ class BatchProcessor:
         # the execute_subtask file-ID helper — and the real history exactly as
         # the model sees it (system prompt, group description, context/helper
         # injection, sub-agent blocks, then older messages + current burst).
-        try:
-          from ..llm.llm2 import build_llm2_messages, serialize_llm2_messages
-        except ImportError:
-          from bridge.llm.llm2 import build_llm2_messages, serialize_llm2_messages  # type: ignore
+        from ..llm.llm2 import build_llm2_messages, serialize_llm2_messages
         # The /dump message is the "current" burst; older history is everything
         # before it (snapshotted pre-append), mirroring process_message_batch.
         p_history = dump_history_before if dump_history_before is not None else list(history)
@@ -545,10 +531,7 @@ class BatchProcessor:
       if cmd_name == "sticker":
         # Lazy import (Step 32): keep PIL out of this module's import graph so
         # ``session`` (and test_agent_session) import without Pillow installed.
-        try:
-          from .tools.sticker import create_sticker_file
-        except ImportError:
-          from bridge.tools.sticker import create_sticker_file  # type: ignore
+        from ..tools.sticker import create_sticker_file
         p_chat_type, p_bot_is_admin, _ = _chat_state_from_payload(payload)
         upper_text, lower_text = _parse_sticker_args(cmd_args)
         media_path = _resolve_sticker_media(media_paths_by_chat, payload, p_chat_id)
@@ -1016,7 +999,6 @@ class BatchProcessor:
     chat_id = ctx.chat_id
     history = ctx.history
     last_payload = ctx.last_payload
-    trigger_window_payloads = ctx.trigger_window_payloads
     llm_context_metadata = ctx.llm_context_metadata
     decision = ctx.decision
     group_description = ctx.group_description

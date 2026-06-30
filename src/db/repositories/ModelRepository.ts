@@ -151,10 +151,10 @@ export class ModelRepository extends BaseRepository {
       );
       logger.info({ modelId, displayName, visionSupport }, "DB add_model");
       return true;
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (
-        err.message?.includes("UNIQUE constraint failed") ||
-        err.code === "SQLITE_CONSTRAINT_PRIMARYKEY"
+        (err as { message?: string; code?: string } | null)?.message?.includes("UNIQUE constraint failed") ||
+        (err as { code?: string } | null)?.code === "SQLITE_CONSTRAINT_PRIMARYKEY"
       )
         return false;
       throw err;
