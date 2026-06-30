@@ -224,6 +224,23 @@ async function handleIncomingMessage(
 
   const stubEvent = parseGroupJoinStub(msg);
   if (stubEvent) {
+    // Check if the bot itself is being added — handles the case where the
+    // group-participants.update Baileys event might not detect the bot due
+    // to a LID vs phone-JID mismatch in the alias lookup.
+    const botAliases = new Set(currentBotAliases(ctx));
+    const normalizedParticipants = compactParticipantJids(stubEvent.participants);
+    const botBeingAdded = normalizedParticipants.some((p) => botAliases.has(normalizeJid(p) || p));
+    if (botBeingAdded) {
+      await emitBotAddedEvent(ctx, {
+        chatId: stubEvent.chatId,
+        action: stubEvent.action,
+        participants: stubEvent.participants,
+        actorId: stubEvent.actorId,
+        timestampMs: stubEvent.timestampMs,
+        source: 'messages.upsert.stub',
+      });
+      return;
+    }
     await emitGroupJoinContextEvent(ctx, stubEvent);
     return;
   }

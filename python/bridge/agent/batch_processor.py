@@ -1547,15 +1547,11 @@ class BatchProcessor:
     if await session._mute.enforce(ws, chat_id, payload):
       return  # skip all further processing
 
-    # --- Activation gate (safety net, primary gate is in Node.js) ---
-    if REQUIRE_ACTIVATION:
-      _act_sender_is_owner = bool(payload.get("senderIsOwner"))
-      if not _act_sender_is_owner and not db_is_chat_activated(chat_id):
-        logger.debug(
-          "activation gate: dropping message from unactivated chat",
-          extra={"chat_id": chat_id},
-        )
-        return
+    # --- System events that bypass the activation gate ---
+    # Bot role change (promote/demote) and bot-added-to-group must always be
+    # processed, even if REQUIRE_ACTIVATION is set and the chat is not yet
+    # activated. These are system-initiated messages that deliver important
+    # notifications/welcome and should not be silenced.
 
     # --- Bot role change (promote/demote) handling ---
     if _mute_msg_type == "botrolechange":
@@ -1582,7 +1578,7 @@ class BatchProcessor:
         logger.info("bot demoted in chat_id=%s; permission reset to 0", chat_id)
       return
 
-    # ponytail: inline the one DB read
+    # --- Bot added to group ---
     if _mute_msg_type == "botaddedtogroup":
       logger.info("bot added to group chat_id=%s; re-invoking", chat_id)
       await self._session._reinvoker.reinvoke(
@@ -1592,6 +1588,16 @@ class BatchProcessor:
         log_kind="bot_added",
       )
       return
+
+    # --- Activation gate (safety net, primary gate is in Node.js) ---
+    if REQUIRE_ACTIVATION:
+      _act_sender_is_owner = bool(payload.get("senderIsOwner"))
+      if not _act_sender_is_owner and not db_is_chat_activated(chat_id):
+        logger.debug(
+          "activation gate: dropping message from unactivated chat",
+          extra={"chat_id": chat_id},
+        )
+        return
 
     pending = pending_by_chat[chat_id]
     now = time.monotonic()

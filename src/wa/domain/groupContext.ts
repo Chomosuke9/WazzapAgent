@@ -79,7 +79,22 @@ function currentBotAliases(ctx: AccountContext): string[] {
     user.lid,
     user.phoneNumber,
   ]);
-  if (aliases.length > 0) return aliases;
+  // If the user's primary ID is a LID (e.g. "1234567890:19@lid") and
+  // phoneNumber is not available, derive the phone JID from any LID we have.
+  // Without this the bot-added detection in handleGroupParticipantsUpdate
+  // fails because group-participants.update participants use the phone JID
+  // format, not the LID.
+  const lidSources = [user.id, user.lid].filter((jid): jid is string =>
+    typeof jid === 'string' && jid.includes('@lid')
+  );
+  for (const lid of lidSources) {
+    // "1234567890:19@lid" -> "1234567890"
+    const userPart = lid.split('@')[0]?.split(':')[0];
+    if (userPart && /^\d+$/.test(userPart)) {
+      aliases.push(`${userPart}@s.whatsapp.net`);
+    }
+  }
+  if (aliases.length > 0) return Array.from(new Set(aliases));
   const normalized = normalizeJid(sock.user.id);
   return normalized ? [normalized] : [];
 }

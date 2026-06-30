@@ -75,7 +75,9 @@ import {
   handleIncomingMessage,
   handleGroupParticipantsUpdate,
 } from "../wa/inbound.js";
-import { emitGroupJoinContextEvent } from "../wa/events.js";
+import { emitGroupJoinContextEvent, emitBotAddedEvent } from "../wa/events.js";
+import { currentBotAliases } from "../wa/domain/groupContext.js";
+import { compactParticipantJids } from "../wa/domain/participants.js";
 
 // ---------------------------------------------------------------------------
 // Test seam: socket creator
@@ -741,6 +743,22 @@ function attachChatbotListener(
           try {
             const stubEvent = parseGroupJoinStub(msg);
             if (stubEvent) {
+              // Check if the bot itself was added — catches cases where the
+              // group-participants.update path fails (e.g. LID vs phone-JID).
+              const botAliases = new Set(currentBotAliases(account));
+              const normalizedParticipants = compactParticipantJids(stubEvent.participants);
+              const botBeingAdded = normalizedParticipants.some((p) => botAliases.has(normalizeJid(p) || p));
+              if (botBeingAdded) {
+                await emitBotAddedEvent(account, {
+                  chatId: stubEvent.chatId,
+                  action: stubEvent.action,
+                  participants: stubEvent.participants,
+                  actorId: stubEvent.actorId,
+                  timestampMs: stubEvent.timestampMs,
+                  source: 'messages.upsert.stub',
+                });
+                return;
+              }
               await emitGroupJoinContextEvent(account, stubEvent);
             }
           } catch (err) {
