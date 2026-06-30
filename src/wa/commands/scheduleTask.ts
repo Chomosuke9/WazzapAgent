@@ -1,7 +1,10 @@
 import { randomUUID } from "crypto";
 import config from "../../config.js";
 import * as registry from "../../server/accountRegistry.js";
-import type { CommandContext, CommandHandler } from "../command/CommandContext.js";
+import type {
+  CommandContext,
+  CommandHandler,
+} from "../command/CommandContext.js";
 
 // Feature 5 — `/schedule-task <nnHnnM> <prompt>`.
 //
