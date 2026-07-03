@@ -72,6 +72,7 @@ import { dispatchCommand } from "../wa/command/CommandRegistry.js";
 import { handleButtonResponse, printQrInTerminal } from "../wa/connection.js";
 import { handlePendingModelForm } from "../wa/commands/modelcfg.js";
 import {
+  checkBotAddedDirect,
   handleIncomingMessage,
   handleGroupParticipantsUpdate,
 } from "../wa/inbound.js";
@@ -745,9 +746,13 @@ function attachChatbotListener(
             if (stubEvent) {
               // Check if the bot itself was added — catches cases where the
               // group-participants.update path fails (e.g. LID vs phone-JID).
-              const botAliases = new Set(currentBotAliases(account));
               const normalizedParticipants = compactParticipantJids(stubEvent.participants);
-              const botBeingAdded = normalizedParticipants.some((p) => botAliases.has(normalizeJid(p) || p));
+              const botAliases = new Set(currentBotAliases(account));
+              let botBeingAdded = normalizedParticipants.some((p) => botAliases.has(normalizeJid(p) || p));
+              // Fallback: direct JID comparison
+              if (!botBeingAdded) {
+                botBeingAdded = checkBotAddedDirect(account, normalizedParticipants);
+              }
               if (botBeingAdded) {
                 await emitBotAddedEvent(account, {
                   chatId: stubEvent.chatId,

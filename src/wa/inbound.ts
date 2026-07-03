@@ -126,6 +126,41 @@ async function buildMentionedParticipants(
   return rows.length > 0 ? rows : null;
 }
 
+/**
+ * Fallback bot-added check using direct JID comparison (the user's approach).
+ *
+ * Tries to match the bot's raw `sock.user.id` against each participant JID
+ * by comparing the base portion (before `:`) — this mirrors the simple
+ * `update.participants.includes(botJid)` pattern but works with normalized
+ * JID strings from compactParticipantJids. Used as a secondary check when
+ * currentBotAliases returns no match or empty aliases.
+ */
+function checkBotAddedDirect(ctx: AccountContext, participantJids: string[]): boolean {
+  const sock = ctx.sock;
+  if (!sock?.user?.id) return false;
+
+  const rawParts = sock.user.id.split(':');
+  const botBase = rawParts[0]; // phone number or LID user part (before ':')
+
+  if (!botBase) return false;
+
+  for (const participantJid of participantJids) {
+    // Try matching the base portion (before ':')
+    const pBase = participantJid.split(':')[0]?.split('@')[0];
+    if (pBase && pBase === botBase) {
+      return true;
+    }
+  }
+
+  // Also try full normalized JID match
+  const normalizedBot = normalizeJid(sock.user.id);
+  if (normalizedBot) {
+    return participantJids.some((p) => normalizedBot === p);
+  }
+
+  return false;
+}
+
 async function handleGroupParticipantsUpdate(ctx: AccountContext, update: {
   id?: string;
   action?: string;
@@ -169,8 +204,27 @@ async function handleGroupParticipantsUpdate(ctx: AccountContext, update: {
   if (!joinActions.has(action)) return;
 
   // Check if bot itself is being added to the group
+  // Primary check: use currentBotAliases (handles LID, phone JID, multiple formats)
   const botAliases = new Set(currentBotAliases(ctx));
-  const botBeingAdded = participants.some((p) => botAliases.has(normalizeJid(p) || p));
+  let botBeingAdded = participants.some((p) => botAliases.has(normalizeJid(p) || p));
+
+  // Fallback check: direct JID comparison (the user's approach)
+  if (!botBeingAdded) {
+    botBeingAdded = checkBotAddedDirect(ctx, participants);
+  }
+
+  // Debug logging: if the check failed, report what we compared
+  if (!botBeingAdded) {
+    logger.debug({
+      chatId,
+      action,
+      participants,
+      botAliases: [...botAliases],
+      userId: sock.user?.id,
+      botBase: sock.user?.id?.split(':')[0],
+    }, 'bot-join check: did not detect bot in participants');
+  }
+
   if (botBeingAdded) {
     await emitBotAddedEvent(ctx, {
       chatId,
@@ -227,9 +281,15 @@ async function handleIncomingMessage(
     // Check if the bot itself is being added — handles the case where the
     // group-participants.update Baileys event might not detect the bot due
     // to a LID vs phone-JID mismatch in the alias lookup.
-    const botAliases = new Set(currentBotAliases(ctx));
     const normalizedParticipants = compactParticipantJids(stubEvent.participants);
-    const botBeingAdded = normalizedParticipants.some((p) => botAliases.has(normalizeJid(p) || p));
+    const botAliases = new Set(currentBotAliases(ctx));
+    let botBeingAdded = normalizedParticipants.some((p) => botAliases.has(normalizeJid(p) || p));
+
+    // Fallback direct JID comparison (see handleGroupParticipantsUpdate)
+    if (!botBeingAdded) {
+      botBeingAdded = checkBotAddedDirect(ctx, normalizedParticipants);
+    }
+
     if (botBeingAdded) {
       await emitBotAddedEvent(ctx, {
         chatId: stubEvent.chatId,
@@ -440,7 +500,7 @@ async function handleIncomingMessage(
         // chat so repeated tags don't flood the chat.
         // In private chats the user can't @-mention the bot, so we trigger
         // on any message instead.
-        if ((!isGroup || (botMentioned && !taggedAll)) && shouldNotifyNotActivated(entry.folderPath, chatId)) {
+        if (config.activationNoticeEnabled && (!isGroup || (botMentioned && !taggedAll)) && shouldNotifyNotActivated(entry.folderPath, chatId)) {
           try {
             await sock.sendMessage(chatId, { text: getActivationMessage(ctx.repos!) });
           } catch (e) { /* ignore */ }
@@ -533,6 +593,7 @@ async function handleIncomingMessage(
 
 export {
   buildMentionedParticipants,
+  checkBotAddedDirect,
   handleGroupParticipantsUpdate,
   handleIncomingMessage,
   shouldNotifyNotActivated,

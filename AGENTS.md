@@ -497,6 +497,7 @@ single-account fallback.
 
 **Node Gateway:**
 `INSTANCE_ID`, `BOT_OWNER_JIDS`, `ASSISTANT_NAME`, `REQUIRE_ACTIVATION`,
+`ACTIVATION_NOTICE_ENABLED` (default `true`; `false` silences the "not activated" notice),
 `CONTEXT_TIME_UTC_OFFSET_HOURS`, `LLM_WS_TOKEN`,
 `WS_BIND_HOST` (host the WS server binds to, default `127.0.0.1` (loopback); set `0.0.0.0` for cross-host + set `LLM_WS_TOKEN`),
 `WS_MAX_PAYLOAD_BYTES` (max inbound WS frame size, default 8 MiB),

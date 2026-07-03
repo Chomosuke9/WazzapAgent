@@ -99,6 +99,7 @@ export interface Config {
   stickerPackName: string;
   stickerEmoji: string;
   requireActivation: boolean;
+  activationNoticeEnabled: boolean;
   subagentEnabledDefault: boolean;
   // Feature-availability flags derived from the shared .env so Node can return
   // a clear "not configured yet" error from the settings UI / commands instead
@@ -165,6 +166,8 @@ function buildConfig(): Config {
   stickerPackName: process.env.STICKER_PACK_NAME || 'WazzapAgents',
   stickerEmoji: process.env.STICKER_EMOJI || '🤖',
   requireActivation: process.env.REQUIRE_ACTIVATION === 'true',
+  // Whether to send the "not activated" notice to unactivated chats.
+  activationNoticeEnabled: process.env.ACTIVATION_NOTICE_ENABLED !== 'false',
   // Default sub-agent enablement for chats that haven't set their own value.
   // Seeded into the per-tenant __global__ settings row on first boot (see
   // openAccountPersistence); runtime /subagent default on|off overrides it.
