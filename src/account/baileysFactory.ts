@@ -38,12 +38,13 @@ import logger, { baileysLogger } from "../logger.js";
 import config from "../config.js";
 import { createAccountContext } from "./accountContext.js";
 import type { AccountContext } from "./accountContext.js";
-import { forwardStatus, bindForwarder, normalizeWaStatus } from "./eventForwarder.js";
+import {
+  forwardStatus,
+  bindForwarder,
+  normalizeWaStatus,
+} from "./eventForwarder.js";
 import * as registry from "../server/accountRegistry.js";
-import type {
-  AccountEntry,
-  BaileysFactoryOptions,
-} from "../protocol/types.js";
+import type { AccountEntry, BaileysFactoryOptions } from "../protocol/types.js";
 import { Database } from "../db/Database.js";
 import { createRepositories } from "../db/repositories/index.js";
 import {
@@ -79,6 +80,7 @@ import {
 import { emitGroupJoinContextEvent, emitBotAddedEvent } from "../wa/events.js";
 import { currentBotAliases } from "../wa/domain/groupContext.js";
 import { compactParticipantJids } from "../wa/domain/participants.js";
+import { isActivationRequired } from "../wa/botConfig.js";
 
 // ---------------------------------------------------------------------------
 // Test seam: socket creator
@@ -508,7 +510,11 @@ function attachConnectionListener(
     entry.waStatus = status;
 
     if (status === "close") {
-      const statusCode = (lastDisconnect?.error as { output?: { statusCode?: number } } | undefined)?.output?.statusCode;
+      const statusCode = (
+        lastDisconnect?.error as
+          | { output?: { statusCode?: number } }
+          | undefined
+      )?.output?.statusCode;
       const reason = lastDisconnect?.error;
       logger.warn({ statusCode, reason, folderPath }, "connection closed");
       // Step 18: forward the normalized `whatsapp_status` exactly once via the
@@ -675,6 +681,16 @@ function attachCommandListener(
         const isGroup = chatId.endsWith("@g.us");
         const chatType = isGroup ? "group" : "private";
 
+        if (
+          chatType === "private" &&
+          slashCommand.command !== "activate" &&
+          !isOwnerJid(senderId) &&
+          account.repos &&
+          isActivationRequired(account.repos) &&
+          !account.repos.activation.isChatActivated(chatId)
+        )
+          continue;
+
         let senderIsAdmin = false;
         let botIsAdmin = false;
         let botIsSuperAdmin = false;
@@ -746,12 +762,19 @@ function attachChatbotListener(
             if (stubEvent) {
               // Check if the bot itself was added — catches cases where the
               // group-participants.update path fails (e.g. LID vs phone-JID).
-              const normalizedParticipants = compactParticipantJids(stubEvent.participants);
+              const normalizedParticipants = compactParticipantJids(
+                stubEvent.participants,
+              );
               const botAliases = new Set(currentBotAliases(account));
-              let botBeingAdded = normalizedParticipants.some((p) => botAliases.has(normalizeJid(p) || p));
+              let botBeingAdded = normalizedParticipants.some((p) =>
+                botAliases.has(normalizeJid(p) || p),
+              );
               // Fallback: direct JID comparison
               if (!botBeingAdded) {
-                botBeingAdded = checkBotAddedDirect(account, normalizedParticipants);
+                botBeingAdded = checkBotAddedDirect(
+                  account,
+                  normalizedParticipants,
+                );
               }
               if (botBeingAdded) {
                 await emitBotAddedEvent(account, {
@@ -760,7 +783,7 @@ function attachChatbotListener(
                   participants: stubEvent.participants,
                   actorId: stubEvent.actorId,
                   timestampMs: stubEvent.timestampMs,
-                  source: 'messages.upsert.stub',
+                  source: "messages.upsert.stub",
                 });
                 return;
               }
@@ -844,5 +867,3 @@ function attachChatbotListener(
     }
   });
 }
-
-

@@ -204,7 +204,10 @@ export interface CommandListenerContext {
 }
 
 // Commands allowed before a chat is activated (when REQUIRE_ACTIVATION=true).
+// In private chats only /activate is allowed — everything else is blocked to
+// avoid ban risk from sending any message in an unactivated DM.
 const ACTIVATION_EXEMPT_COMMANDS = new Set(["info", "activate"]);
+const ACTIVATION_EXEMPT_COMMANDS_DM = new Set(["activate"]);
 
 /**
  * Dispatch a parsed slash command. Performs the activation gate and the
@@ -248,23 +251,27 @@ async function dispatchCommand(
   const repos = context.repos ?? context.account?.repos;
 
   if (isActivationRequired(repos)) {
-    if (!ACTIVATION_EXEMPT_COMMANDS.has(command) && !senderIsOwner) {
+    const exempt = chatType === 'private' ? ACTIVATION_EXEMPT_COMMANDS_DM : ACTIVATION_EXEMPT_COMMANDS;
+    if (!exempt.has(command) && !senderIsOwner) {
       const activated = repos!.activation.isChatActivated(chatId);
       if (!activated) {
-        const notified = repos!.activation.isExpiryNotified(chatId);
-        if (!notified) {
-          const sock = context.sock;
-          const activation = repos!.activation.getChatActivation(chatId);
-          if (activation && activation.expiresAt) {
-            const now = new Date();
-            const expiry = new Date(activation.expiresAt);
-            if (expiry <= now) {
-              try {
-                await sock!.sendMessage(chatId, {
-                  text: `Activation expired on ${expiry.toLocaleDateString('id-ID')}. Use /activate <code> to renew.`,
-                });
-              } catch (err) { /* ignore */ }
-              repos!.activation.markExpiryNotified(chatId);
+        // In private chats, never send any message when not activated (ban risk).
+        if (chatType !== 'private') {
+          const notified = repos!.activation.isExpiryNotified(chatId);
+          if (!notified) {
+            const sock = context.sock;
+            const activation = repos!.activation.getChatActivation(chatId);
+            if (activation && activation.expiresAt) {
+              const now = new Date();
+              const expiry = new Date(activation.expiresAt);
+              if (expiry <= now) {
+                try {
+                  await sock!.sendMessage(chatId, {
+                    text: `Activation expired on ${expiry.toLocaleDateString('id-ID')}. Use /activate <code> to renew.`,
+                  });
+                } catch (err) { /* ignore */ }
+                repos!.activation.markExpiryNotified(chatId);
+              }
             }
           }
         }

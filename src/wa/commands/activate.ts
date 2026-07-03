@@ -5,18 +5,25 @@ async function handleActivate({ chatId, chatType, args, sock, repos }: CommandCo
   const code = (args || '').trim().toUpperCase();
 
   if (!code) {
-    try {
-      await sock.sendMessage(chatId, { text: 'Usage: /activate <code>' });
-    } catch (err) { /* ignore */ }
+    // In private chats, never send any message when not activated (ban risk).
+    if (chatType !== 'private') {
+      try {
+        await sock.sendMessage(chatId, { text: 'Usage: /activate <code>' });
+      } catch (err) { /* ignore */ }
+    }
     return;
   }
 
   const result = repos!.activation.activateChat(chatId, code, chatType as string);
 
-  try {
-    await sock.sendMessage(chatId, { text: result.message });
-  } catch (err) {
-    logger.warn({ err, chatId }, 'failed sending /activate response');
+  // In private chats, suppress error messages (used/invalid code) to avoid
+  // ban risk. Only send success or non-private messages.
+  if (chatType !== 'private' || result.success) {
+    try {
+      await sock.sendMessage(chatId, { text: result.message });
+    } catch (err) {
+      logger.warn({ err, chatId }, 'failed sending /activate response');
+    }
   }
 }
 
