@@ -80,7 +80,6 @@ import {
 import { emitGroupJoinContextEvent, emitBotAddedEvent } from "../wa/events.js";
 import { currentBotAliases } from "../wa/domain/groupContext.js";
 import { compactParticipantJids } from "../wa/domain/participants.js";
-import { isActivationRequired } from "../wa/botConfig.js";
 
 // ---------------------------------------------------------------------------
 // Test seam: socket creator
@@ -681,15 +680,11 @@ function attachCommandListener(
         const isGroup = chatId.endsWith("@g.us");
         const chatType = isGroup ? "group" : "private";
 
-        if (
-          chatType === "private" &&
-          slashCommand.command !== "activate" &&
-          !isOwnerJid(senderId) &&
-          account.repos &&
-          isActivationRequired(account.repos) &&
-          !account.repos.activation.isChatActivated(chatId)
-        )
-          continue;
+        if (chatType === "private" && slashCommand.command !== "activate") {
+          if (!isOwnerJid(senderId) && config.requireActivation && account.repos) {
+            if (!account.repos.activation.isChatActivated(chatId)) continue;
+          }
+        }
 
         let senderIsAdmin = false;
         let botIsAdmin = false;
