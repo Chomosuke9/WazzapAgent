@@ -331,6 +331,111 @@ def _extract_actions(
   return actions
 
 
+_MEMORY_DELETE_RE = re.compile(
+  r"^/(?:memory|memo|mem)\b"
+  r"(\s+(?:global|default))?"           # optional scope prefix
+  r"\s+(?:delete|del|remove|rm)\b"
+  r"\s+(.+)$",                           # indices
+  re.IGNORECASE,
+)
+_MEMORY_ADD_RE = re.compile(
+  r"^/(?:memory|memo|mem)\b"
+  r"(\s+(?:global|default))?"           # optional scope prefix
+  r"\s+add\b"
+  r"\s+(.+)$",                           # text
+  re.IGNORECASE,
+)
+
+
+def _coalesce_memory_commands(actions: list[dict]) -> list[dict]:
+  """Merge multiple ``/memory delete`` run_commands into one and ensure
+  deletes execute before adds (same scope).
+
+  Node's ``deleteMemoriesByIndices`` resolves all indices against a single
+  snapshot, so ``/memory delete 2,4`` works correctly.  Without this
+  coalescing the Python dispatch loop would issue separate sequential
+  ``run_command`` frames, each causing a fresh snapshot → index-shift bug.
+  """
+  run_cmds = [a for a in actions if a.get("type") == "run_command"]
+  non_run = [a for a in actions if a.get("type") != "run_command"]
+
+  if not run_cmds:
+    return actions
+
+  # Phase 1: parse every memory-related run_command.
+  # keyed by scope → {"", " global"} respectively.
+  delete_by_scope: dict[str, list[tuple[int, str]]] = {}  # scope → [(index, anchor)]
+  add_by_scope: dict[str, list[dict]] = {}                # scope → [action dicts]
+  non_memory: list[dict] = []
+
+  for action in run_cmds:
+    cmd = action.get("command", "")
+    m_del = _MEMORY_DELETE_RE.match(cmd)
+    if m_del:
+      scope = (m_del.group(1) or "").strip().lower()
+      raw_indices = m_del.group(2) or ""
+      for token in raw_indices.split(","):
+        token = token.strip()
+        if token.isdigit() and int(token) > 0:
+          delete_by_scope.setdefault(scope, []).append(
+            (int(token), action.get("contextMsgId")),
+          )
+      continue
+
+    m_add = _MEMORY_ADD_RE.match(cmd)
+    if m_add:
+      scope = (m_add.group(1) or "").strip().lower()
+      add_by_scope.setdefault(scope, []).append(action)
+      continue
+
+    non_memory.append(action)
+
+  # If nothing was coalesced, return unchanged.
+  has_deletes = any(v for v in delete_by_scope.values())
+  has_adds = any(v for v in add_by_scope.values())
+  if not has_deletes and not has_adds:
+    return actions
+
+  # Phase 2: rebuild the run_command list.
+  result: list[dict] = []
+  for scope in sorted(set(list(delete_by_scope) + list(add_by_scope))):
+    # Deletes first (indices sorted ascending, deduplicated).
+    entries = delete_by_scope.get(scope, [])
+    if entries:
+      seen_idx: set[int] = set()
+      unique: list[int] = []
+      anchor_first: str | None = None
+      for idx, anc in entries:
+        if idx in seen_idx:
+          continue
+        seen_idx.add(idx)
+        unique.append(idx)
+        if anchor_first is None:
+          anchor_first = anc
+      merged = "/memory"
+      if scope:
+        merged += " " + scope.lstrip()
+      merged += " delete " + ",".join(str(i) for i in sorted(unique))
+      result.append({
+        "type": "run_command",
+        "command": merged,
+        "contextMsgId": anchor_first,
+      })
+    # Then adds.
+    result.extend(add_by_scope.get(scope, []))
+
+  if has_deletes:
+    logger.info(
+      "coalesced memory commands: %d delete indices across %d scope(s)",
+      sum(len(v) for v in delete_by_scope.values()),
+      len(delete_by_scope),
+    )
+
+  # Reassemble: non-run_command actions first (preserves send_message order),
+  # then the reordered/coalesced run_commands.
+  return non_run + result + non_memory
+
+
 # ---------------------------------------------------------------------------
 # Tool-call-based action extraction (replaces _extract_actions for LLM2)
 # ---------------------------------------------------------------------------
@@ -605,4 +710,4 @@ def _extract_actions_from_tool_calls(
     else:
       logger.warning("unknown LLM2 tool call: %s", name)
 
-  return actions
+  return _coalesce_memory_commands(actions)
