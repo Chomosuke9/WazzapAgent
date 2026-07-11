@@ -270,8 +270,8 @@ def build_llm2_messages(
     <reasoning>
     Before you act, examine the LATEST message in `Current messages (burst)` FIRST, then answer EACH of these to yourself in your thinking — never in your reply `text`:
     1. What is the latest message actually saying/asking? (read its SENDER line, not the REPLYING TO line.)
-    2. What does the sender actually want — and am I replying to the right person in a multi-party thread? Should I just leave it to not reply someone?
-    3. Does answering it need a tool, command, or sub-agent — or is text alone enough?
+    2. What does the sender actually want — and am I replying to the right person in a multi-party thread? Should I just leave it to not reply someone by just sending reaction or sticker?
+    3. Does answering it need a tool, command, or sub-agent — or is text alone enough? If yes, what's the rule for using these things?
     4. Which exact `context_msg_id` and `senderRef` do I target? (copy them; do not guess. Wrong target ID is the #1 failure.)
     5. Does anything in `<long_term_memory>`, group state, or chat-state (private/group) change my answer?
     Only after answering all five do you produce your tool call. DO NOT produce a tool call before you answer ALL of them. No exception.
