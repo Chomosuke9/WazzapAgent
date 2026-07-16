@@ -36,6 +36,7 @@ import { parseConfigScope, scopeSuffix } from "./configScope.js";
 import type { ConfigScope } from "./configScope.js";
 import { rewritePromptMentions, renderStoredMentions } from "./prompt.js";
 import { resolveMentionTargetBySenderRef } from "../domain/identifiers.js";
+import { renderOutboundMentions } from "../outbound.js";
 import { GLOBAL_CHAT_ID } from "../../db/schema/index.js";
 import type { AccountContext } from "../../account/accountContext.js";
 import type {
@@ -68,9 +69,20 @@ async function safeSend(
   sock: Sock,
   chatId: string,
   text: string,
+  account?: AccountContext | null,
 ): Promise<void> {
   try {
-    await sock.sendMessage(chatId, { text });
+    if (account && text.includes("(")) {
+      const rendered = await renderOutboundMentions(account, chatId, text);
+      const payload: Record<string, unknown> = { text: rendered.text };
+      if (rendered.mentions.length > 0) payload.mentions = rendered.mentions;
+      if (rendered.nonJidMentions > 0) {
+        payload.contextInfo = { nonJidMentions: rendered.nonJidMentions };
+      }
+      await sock.sendMessage(chatId, payload as import('baileys').AnyMessageContent);
+    } else {
+      await sock.sendMessage(chatId, { text });
+    }
   } catch {
     /* ignore send failures — never throw out of a command */
   }
@@ -193,7 +205,7 @@ export async function handleMemory(ctx: CommandContext): Promise<void> {
 
   // --- list (default when no subcommand) -----------------------------------
   if (!sub || sub === "list") {
-    await safeSend(sock, chatId, renderMemoryList(repos, chatId));
+    await safeSend(sock, chatId, renderMemoryList(repos, chatId), account);
     return;
   }
 
@@ -253,6 +265,7 @@ export async function handleMemory(ctx: CommandContext): Promise<void> {
       sock,
       chatId,
       `🧠 Saved${scopeSuffix(scope)} (#${count + 1}):\n${previewText(renderStoredMentions(repos.settings, chatId, text))}`,
+      account,
     );
     return;
   }
@@ -291,6 +304,7 @@ export async function handleMemory(ctx: CommandContext): Promise<void> {
       sock,
       chatId,
       `🗑️ Deleted ${deleted.length} memor${deleted.length === 1 ? "y" : "ies"}${scopeSuffix(scope)}:\n${body}`,
+      account,
     );
     return;
   }
