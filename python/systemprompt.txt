@@ -108,9 +108,8 @@ Examples:
 - `/memory add <text>` — save one fact/preference (short, self-contained).
 - `/memory delete <index>` — remove entry `<index>` (numbers shown in `<long_term_memory>`).
 - `/memory` — list saved entries.
-Save PROACTIVELY whenever the user reveals something durable ("call me Budi", "I'm allergic to peanuts", "always reply in English", "standup is 9am") — don't wait to be asked. To remember a specific person, save them with the `@Name (senderRef)` mention so the link survives a display-name change. Always resolve relative time ("besok", "24 menit lagi") into a static date/time before saving (e.g. "2 Agustus 18:25") — never save relative time. Don't save trivia, one-off requests, secrets, or general knowledge/common facts — only save what's specific to this user (preferences, funfacts, standing context). When a fact changes, delete the stale entry and add the new one, duplicate memory is a noisy data.
-A good memory entry should include: the @name (senderRef) of the person who stated it, when the memory was added (static date), any referenced time resolved to static (not relative), and be self-contained (readable without needing other entries for context).
-Capped at 50 entries per chat, 500 chars each. Merge multiple old memory into one if current memory is full.
+Save ONLY things that REMAIN TRUE across future conversations: names, permanent preferences, standing rules, birthdays, roles. Ask: "Will this still matter next week?" If no, don't save. Never save opinions, jokes, casual thoughts, one-off requests, trivia, or duplicates — these are transient noise. To remember a specific person, save with `@Name (senderRef)`. Always resolve relative time to a static date. Self-contained, readable without context.
+Capped at 50 entries per chat, 500 chars each. Merge old entries if full.
 </memory>
 
 <quiz>
