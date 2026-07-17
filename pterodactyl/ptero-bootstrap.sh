@@ -219,39 +219,11 @@ if ! node -e "new (require('better-sqlite3'))(':memory:').close()" >/dev/null 2>
   fi
 fi
 
-# --- 5) Run gateway + bridge, tie lifecycles --------------------------------
-NODE_PID=""
-PY_PID=""
-shutdown() {
-  trap - SIGINT SIGTERM
-  log "shutting down..."
-  [ -n "$PY_PID" ]   && kill -TERM "$PY_PID"   2>/dev/null
-  [ -n "$NODE_PID" ] && kill -TERM "$NODE_PID" 2>/dev/null
-  wait 2>/dev/null
-}
-trap shutdown SIGINT SIGTERM
+# --- 5) Hand off to the shared process supervisor ----------------------------
+# start.sh starts both Node + Python, ties their lifecycles, and auto-restarts
+# on /update. All provisioned env vars (PY_BIN, PYTHONPATH, FFMPEG_PATH, etc.)
+# are inherited. exec replaces this shell so signals propagate cleanly.
+export PY_BIN="$PY_BIN"
+log "handing off to start.sh…"
+exec bash start.sh
 
-log "starting Node gateway on ${WS_BIND_HOST}:${WS_LISTEN_PORT} ..."
-node --import tsx src/index.ts &
-NODE_PID=$!
-
-sleep 3
-
-if [ -x "$PY_BIN" ]; then
-  log "starting Python bridge ..."
-  "$PY_BIN" -m bridge.main &
-  PY_PID=$!
-else
-  log "WARN: portable Python unavailable — running the gateway only (no LLM replies)."
-fi
-
-# Block until any child exits, then tear down the rest.
-if [ -n "$PY_PID" ]; then
-  wait -n "$NODE_PID" "$PY_PID"
-else
-  wait "$NODE_PID"
-fi
-EXIT_CODE=$?
-log "a child process exited (code ${EXIT_CODE}); stopping the rest."
-shutdown
-exit "$EXIT_CODE"
