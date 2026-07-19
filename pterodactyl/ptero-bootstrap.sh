@@ -8,13 +8,18 @@
 #   1. Provision a relocatable standalone CPython (python-build-standalone).
 #   2. pip install the bridge's Python requirements into that Python.
 #   3. Provision a static ffmpeg (best-effort; only needed for /sticker video).
-#   4. Ensure Node deps are present (incl. tsx).
+#   4. Ensure Node deps are present (incl. tsx) via pnpm.
 #   5. Run the Node gateway + the Python bridge together (loopback), and tie
 #      their lifecycles so Pterodactyl restarts the whole server cleanly.
 #
 # Config is read from env vars (set them via the egg's CUSTOM_ENVIRONMENT_VARIABLES
 # as KEY=value;KEY2=value2). Versions can be overridden with PBS_RELEASE /
 # PYTHON_VERSION / FFMPEG_STATIC_URL if the defaults ever rot.
+#
+# NOTE: this variant assumes the project is managed with pnpm (pnpm-lock.yaml
+# present). All package-manager calls use pnpm so the installed tree matches
+# what was developed/tested locally — mixing in npm here would ignore the
+# lockfile and can corrupt pnpm's symlinked node_modules structure.
 # ---------------------------------------------------------------------------
 set -uo pipefail
 cd /home/container || exit 1
@@ -31,6 +36,26 @@ FFMPEG_BIN="$FFMPEG_DIR/ffmpeg"
 FFPROBE_BIN="$FFMPEG_DIR/ffprobe"
 QR_DIR="/home/container/.qrencode"
 QR_BIN="$QR_DIR/usr/bin/qrencode"
+
+# --- Ensure pnpm itself is available (yolk images ship npm, not pnpm) -------
+PNPM_HOME="${PNPM_HOME:-/home/container/.local/share/pnpm}"
+export PNPM_HOME
+export PATH="$PNPM_HOME:$PATH"
+if ! command -v pnpm >/dev/null 2>&1; then
+  log "pnpm not found; enabling via corepack..."
+  if command -v corepack >/dev/null 2>&1; then
+    corepack enable pnpm >/dev/null 2>&1 || true
+    corepack prepare pnpm@latest --activate >/dev/null 2>&1 || true
+  fi
+  if ! command -v pnpm >/dev/null 2>&1; then
+    log "corepack unavailable/failed; installing pnpm standalone script..."
+    npm install -g pnpm --prefix "/home/container/.npm-global" >/dev/null 2>&1 || true
+    export PATH="/home/container/.npm-global/bin:$PATH"
+  fi
+fi
+if ! command -v pnpm >/dev/null 2>&1; then
+  log "WARN: could not provision pnpm; falling back to npm for installs"
+fi
 
 # --- State + transport env (everything persists under /home/container) ------
 export DATA_DIR="${DATA_DIR:-/home/container/data}"
@@ -190,27 +215,39 @@ if [ -x "$QR_BIN" ]; then
   export LD_LIBRARY_PATH="$QR_DIR/usr/lib/${DEB_TRIPLET}:$QR_DIR/usr/lib:${LD_LIBRARY_PATH:-}"
 fi
 
-# --- 4) Node deps (the generic egg runs `npm install`, but ensure tsx too) --
+# --- 4) Node deps via pnpm (respects pnpm-lock.yaml; ensures tsx too) -------
 if [ ! -x "/home/container/node_modules/.bin/tsx" ]; then
-  log "installing Node dependencies (including dev for tsx)..."
-  npm install --include=dev || log "WARN: npm install failed"
+  log "installing Node dependencies with pnpm..."
+  if command -v pnpm >/dev/null 2>&1; then
+    pnpm install --frozen-lockfile || pnpm install || log "WARN: pnpm install failed"
+  else
+    log "WARN: pnpm unavailable; falling back to npm install (may diverge from pnpm-lock.yaml)"
+    npm install --include=dev || log "WARN: npm install failed"
+  fi
 fi
 
 # --- 4b) Ensure the better-sqlite3 native binding matches THIS Node ABI ------
 # better-sqlite3 is a native addon: its compiled `better_sqlite3.node` must
 # match the running Node ABI. If the prebuilt wasn't fetched (offline/blocked,
-# or `npm install --ignore-scripts`) or the Node version changed across an
+# or install ran with --ignore-scripts) or the Node version changed across an
 # image bump, the gateway crashes with "Could not locate the bindings file".
 # The binding only loads when a Database is constructed, so health-check that.
 # The yolk image ships build-essential + python3 + libsqlite3-dev, so rebuild
-# from source when needed (works regardless of whether a matching prebuilt
-# exists for this Node version).
+# from source when needed. Use npm_config_build_from_source=true (env var) —
+# not a --build-from-source CLI flag, which newer npm/pnpm reject with
+# EUNKNOWNCONFIG since it was never a real CLI option, only a config key.
 if ! node -e "new (require('better-sqlite3'))(':memory:').close()" >/dev/null 2>&1; then
   log "better-sqlite3 binding missing/mismatched for this Node; rebuilding from source..."
-  npm rebuild better-sqlite3 --build-from-source 2>&1 | tail -n 5 || true
-  # If a rebuild-in-place didn't fix it, try a clean reinstall from source.
-  if ! node -e "new (require('better-sqlite3'))(':memory:').close()" >/dev/null 2>&1; then
-    npm install better-sqlite3 --build-from-source 2>&1 | tail -n 5 || true
+  if command -v pnpm >/dev/null 2>&1; then
+    npm_config_build_from_source=true pnpm rebuild better-sqlite3 2>&1 | tail -n 5 || true
+    if ! node -e "new (require('better-sqlite3'))(':memory:').close()" >/dev/null 2>&1; then
+      npm_config_build_from_source=true pnpm add better-sqlite3 2>&1 | tail -n 5 || true
+    fi
+  else
+    npm_config_build_from_source=true npm rebuild better-sqlite3 2>&1 | tail -n 5 || true
+    if ! node -e "new (require('better-sqlite3'))(':memory:').close()" >/dev/null 2>&1; then
+      npm_config_build_from_source=true npm install better-sqlite3 2>&1 | tail -n 5 || true
+    fi
   fi
   if node -e "new (require('better-sqlite3'))(':memory:').close()" >/dev/null 2>&1; then
     log "better-sqlite3 binding ready"
@@ -226,4 +263,3 @@ fi
 export PY_BIN="$PY_BIN"
 log "handing off to start.sh…"
 exec bash start.sh
-
