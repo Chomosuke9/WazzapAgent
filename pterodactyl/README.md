@@ -52,10 +52,13 @@ heavy provisioning is cached (it re-runs only when `requirements.txt` changes).
 
 ## Setup
 
-1. **Docker Image:** pick **`nodejs_22`** (or `nodejs_20`). Avoid `nodejs_23`
-   for now — `better-sqlite3` needs a prebuilt binary for your Node version, and
-   23 is new enough that one may be missing (there are no build tools on a
-   node-only image to compile it). `sharp` is N-API based and works on any.
+1. **Docker Image:** pick **`nodejs_24`**
+   (`ghcr.io/ptero-eggs/yolks:nodejs_24`). The pinned `better-sqlite3` release
+   provides an official prebuilt binary for Node 24 / ABI 137, so the server
+   does not need to compile it. Node 20 is EOL and its prebuild is no longer
+   published by current releases; other Node majors use a different ABI and
+   are intentionally rejected by this bootstrap. `sharp` is N-API based and
+   works on Node 24.
 2. **Git repo variables:** set `GIT_ADDRESS` to the WazzapAgents repo, plus
    `GIT_BRANCH` and (for a private repo) `GIT_USERNAME` / `GIT_ACCESS_TOKEN`,
    exactly like any generic-Node deploy.
@@ -113,11 +116,11 @@ only pair once.
   the bot keeps running (static-image stickers and everything else still work).
   You can point `FFMPEG_STATIC_URL` at a `.tar.gz` static build instead.
 - **qrencode is best-effort.** Only needed to render the **QR login** in the
-  console; it's pulled from Debian `.deb` packages (pinned to *bookworm*, the
-  yolk base) and unpacked into the volume with `dpkg-deb`/`ar` — no root needed.
+  console; it's pulled from a pinned, self-contained set of Debian `.deb`
+  packages and unpacked into the volume with `dpkg-deb`/`ar` — no root needed.
   Code-based login via `WA_PAIRING_NUMBER` needs **no** QR, so this is optional.
   Override `QRENCODE_DEB_URL` / `LIBQRENCODE_DEB_URL` / `LIBPNG_DEB_URL` if your
-  base image isn't bookworm or an asset 404s.
+  provider uses an incompatible base or an asset 404s.
 - **Network on first boot** fetches Python from
   [`astral-sh/python-build-standalone`](https://github.com/astral-sh/python-build-standalone/releases)
   and ffmpeg from johnvansickle. Override with `PBS_RELEASE` / `PYTHON_VERSION`
@@ -143,8 +146,8 @@ in the other `data/` files are kept.
 | Symptom | Fix |
 |---------|-----|
 | **No pairing code / QR in the console** | The code only appears while the device is *unregistered*. If already paired, nothing shows (that's normal). To force a new code, re-pair (above). Check `WA_PAIRING_NUMBER` is digits-only with country code. |
-| **QR shows as a long raw string (not a scannable QR)** | `qrencode` couldn't be provisioned (download/unpack failed, or your base image isn't Debian *bookworm*). Easiest fix: set `WA_PAIRING_NUMBER` and use code-based login (no QR needed). To repair QR rendering, override `QRENCODE_DEB_URL` / `LIBQRENCODE_DEB_URL` / `LIBPNG_DEB_URL` with `.deb`s matching your base image. |
-| **`better-sqlite3` "Could not locate the bindings file" / `compiled against a different Node.js version`** | The native addon wasn't built for the running Node ABI (prebuilt not fetched, or the image's Node version changed). The bootstrap now auto-detects this and **rebuilds it from source** (the `nodejs_22` yolk ships `build-essential` + `python3`). If the warning `better-sqlite3 rebuild failed` appears, confirm you're on **`nodejs_22`**/`nodejs_20` (not a stripped image) and restart. |
+| **QR shows as a long raw string (not a scannable QR)** | `qrencode` couldn't be provisioned (download/unpack failed, or the provider's base image is incompatible). Easiest fix: set `WA_PAIRING_NUMBER` and use code-based login (no QR needed). To repair QR rendering, override `QRENCODE_DEB_URL` / `LIBQRENCODE_DEB_URL` / `LIBPNG_DEB_URL` with `.deb`s matching your base image. |
+| **`better-sqlite3` "Could not locate the bindings file" / `compiled against a different Node.js version`** | Confirm the image is **`nodejs_24`**. The bootstrap repair step downloads the matching official ABI 137 prebuild instead of invoking source compilation. If you just changed Node versions, remove only `node_modules/better-sqlite3` (or all `node_modules`) and restart; keep `data/`, `.python`, and `.env`. If the prebuild still fails, allow GitHub release downloads from the server. |
 | **Bot connects but never replies** | The Python bridge isn't running or has no LLM key. Check the console for `[bootstrap] WARN: ... Python ...`, and confirm `LLM2_API_KEY` (plus `LLM2_ENDPOINT`/`LLM2_MODEL`) are set in `.env`. |
 | **Python deps failed on first boot** | Usually a transient network error fetching wheels. Restart to retry; the cache marker is only written on success. If a Python asset 404s, set `PBS_RELEASE` / `PYTHON_VERSION` to a valid [python-build-standalone](https://github.com/astral-sh/python-build-standalone/releases) release. |
 | **`/sticker` from a video fails** | ffmpeg isn't available. Static-image stickers still work. Set `FFMPEG_STATIC_URL` to a `.tar.gz` static build the image can unpack. |

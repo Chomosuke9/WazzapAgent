@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
 # ptero-bootstrap.sh — run WazzapAgents on a FIXED node-only Pterodactyl image
-# (e.g. ghcr.io/parkervcp/yolks:nodejs_22) with NO custom image, NO custom egg,
+# (e.g. ghcr.io/ptero-eggs/yolks:nodejs_24) with NO custom image, NO custom egg,
 # and NO root.
 #
 # What it does (all into the persistent /home/container volume, cached):
@@ -51,6 +51,17 @@ case "$arch" in
   aarch64|arm64) PBS_ARCH="aarch64-unknown-linux-gnu"; FF_ARCH="arm64"; DEB_ARCH="arm64"; DEB_TRIPLET="aarch64-linux-gnu" ;;
   *) log "WARN: unknown arch '$arch'; assuming x86_64"; PBS_ARCH="x86_64-unknown-linux-gnu"; FF_ARCH="amd64"; DEB_ARCH="amd64"; DEB_TRIPLET="x86_64-linux-gnu" ;;
 esac
+
+# This deployment is pinned to Node 24 so native prebuild selection is
+# deterministic. Fail early instead of silently compiling for another ABI.
+node_version="$(node -p "process.version")"
+node_major="$(node -p "process.versions.node.split('.')[0]")"
+node_abi="$(node -p "process.versions.modules")"
+if [ "$node_major" != "24" ]; then
+  log "ERROR: this deployment requires nodejs_24; found $node_version (ABI $node_abi)"
+  exit 1
+fi
+log "using $node_version (ABI $node_abi)"
 
 # --- download <url> <dest> : curl -> wget -> node fetch fallback ------------
 download() {
@@ -134,8 +145,9 @@ fi
 # (src/wa/connection.ts → printQrInTerminal). The node-only yolk image ships no
 # qrencode, so provision it WITHOUT root by extracting the Debian .deb packages
 # (qrencode + libqrencode4 + libpng16-16) into the volume and pointing
-# PATH + LD_LIBRARY_PATH at them. Defaults are pinned to the Debian *bookworm*
-# versions (the yolk base); override the *_DEB_URL env vars for another base.
+# PATH + LD_LIBRARY_PATH at them. Defaults use a pinned Debian package set that
+# remains self-contained on the Node 24 yolk; override the *_DEB_URL env vars
+# if a provider uses an incompatible base.
 # Best-effort: if it fails, the QR prints as a raw string — code-based login via
 # WA_PAIRING_NUMBER needs no QR and is the recommended headless path.
 if [ ! -x "$QR_BIN" ]; then
@@ -196,26 +208,40 @@ if [ ! -x "/home/container/node_modules/.bin/tsx" ]; then
   npm install --include=dev || log "WARN: npm install failed"
 fi
 
-# --- 4b) Ensure the better-sqlite3 native binding matches THIS Node ABI ------
-# better-sqlite3 is a native addon: its compiled `better_sqlite3.node` must
-# match the running Node ABI. If the prebuilt wasn't fetched (offline/blocked,
-# or `npm install --ignore-scripts`) or the Node version changed across an
-# image bump, the gateway crashes with "Could not locate the bindings file".
-# The binding only loads when a Database is constructed, so health-check that.
-# The yolk image ships build-essential + python3 + libsqlite3-dev, so rebuild
-# from source when needed (works regardless of whether a matching prebuilt
-# exists for this Node version).
-if ! node -e "new (require('better-sqlite3'))(':memory:').close()" >/dev/null 2>&1; then
-  log "better-sqlite3 binding missing/mismatched for this Node; rebuilding from source..."
-  npm rebuild better-sqlite3 --build-from-source 2>&1 | tail -n 5 || true
-  # If a rebuild-in-place didn't fix it, try a clean reinstall from source.
-  if ! node -e "new (require('better-sqlite3'))(':memory:').close()" >/dev/null 2>&1; then
-    npm install better-sqlite3 --build-from-source 2>&1 | tail -n 5 || true
-  fi
-  if node -e "new (require('better-sqlite3'))(':memory:').close()" >/dev/null 2>&1; then
-    log "better-sqlite3 binding ready"
+# --- 4b) Ensure the better-sqlite3 native binding matches Node 24's ABI ------
+# better-sqlite3 is a native addon: its `better_sqlite3.node` must match the
+# running Node ABI. The Pterodactyl target is Node 24 (ABI 137), for which the
+# pinned better-sqlite3 version publishes official Linux x64/arm64 prebuilds.
+# If a stale binding remains after an image change, run prebuild-install
+# directly. Do not fall back to node-gyp here: compiling inside a constrained
+# game-server container is slow and can appear to hang indefinitely.
+better_sqlite3_healthy() {
+  node -e "new (require('better-sqlite3'))(':memory:').close()" >/dev/null 2>&1
+}
+
+install_better_sqlite3_prebuild() {
+  local module_dir="/home/container/node_modules/better-sqlite3"
+  local prebuild_cli
+
+  [ -d "$module_dir" ] || return 1
+  prebuild_cli="$(node -e "const fs = require('fs'); process.stdout.write(require.resolve('prebuild-install/bin.js', { paths: [fs.realpathSync('$module_dir')] }))" 2>/dev/null || true)"
+  [ -n "$prebuild_cli" ] || return 1
+
+  (
+    cd "$module_dir" || exit 1
+    unset npm_config_build_from_source npm_config_build_from_source_better_sqlite3
+    node "$prebuild_cli" --verbose --force
+  )
+}
+
+if ! better_sqlite3_healthy; then
+  log "better-sqlite3 binding missing/mismatched; downloading the official prebuilt for Node ABI $node_abi..."
+  install_better_sqlite3_prebuild || true
+  if better_sqlite3_healthy; then
+    log "better-sqlite3 prebuilt binding ready"
   else
-    log "WARN: better-sqlite3 rebuild failed — the gateway cannot start. Ensure the image has build-essential + python3 (the nodejs_22 yolk does)."
+    log "ERROR: better-sqlite3 prebuilt install failed. Select nodejs_24 and ensure GitHub release downloads are allowed; this bootstrap repair path does not compile from source."
+    exit 1
   fi
 fi
 

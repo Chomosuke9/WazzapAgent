@@ -21,7 +21,7 @@
   "license": "ISC",
   "dependencies": {
     "baileys": "7.0.0-rc12",
-    "better-sqlite3": "^12.9.0",
+    "better-sqlite3": "12.11.1",
     "dotenv": "^16.4.5",
     "fluent-ffmpeg": "^2.1.3",
     "fs-extra": "^11.2.0",
