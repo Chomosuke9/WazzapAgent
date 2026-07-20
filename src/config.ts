@@ -64,6 +64,7 @@ function parseJidList(raw: string | undefined): string[] {
 export interface Config {
   instanceId: string;
   pairingNumber: string | null;
+  pairingRetryCooldownMs: number;
   wsListenPort: number;
   wsBindHost: string;
   wsMaxPayloadBytes: number;
@@ -118,6 +119,13 @@ function buildConfig(): Config {
   // digits only with country code (e.g. 6281234567890); we strip everything
   // else so values like "+62 812-3456-7890" still work.
   pairingNumber: (process.env.WA_PAIRING_NUMBER || '').replace(/\D/g, '') || null,
+  // A rejected initial pairing must not enter the normal reconnect loop. Rapid
+  // companion_hello retries can trigger WhatsApp's server-side pairing limits.
+  // Restarting the process remains the explicit/manual retry escape hatch.
+  pairingRetryCooldownMs: positiveInt(
+    process.env.WA_PAIRING_RETRY_COOLDOWN_MS,
+    15 * 60 * 1000,
+  ),
   wsListenPort: positiveInt(process.env.WS_LISTEN_PORT, 3000),
   // Secure default: bind the gateway WS server to loopback only. Cross-host
   // deployments (Python bridge on a different machine) must explicitly opt in

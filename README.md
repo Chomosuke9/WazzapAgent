@@ -94,6 +94,10 @@ PYTHONPATH=python python -m bridge.main
   ```
   On the bot's phone: **WhatsApp → Linked Devices → Link a Device → Link with
   phone number**, then enter the code.
+  If WhatsApp rejects or closes the attempt, the gateway deliberately does not
+  retry automatically. Restart to make one fresh attempt; repeated rapid
+  attempts can trigger a temporary WhatsApp pairing restriction. The default
+  in-process cooldown is 15 minutes (`WA_PAIRING_RETRY_COOLDOWN_MS=900000`).
 - **QR code:** leave `WA_PAIRING_NUMBER` empty and scan the QR printed in
   terminal 1 instead.
 

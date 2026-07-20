@@ -27,8 +27,8 @@
  */
 import path from "path";
 import fs from "fs-extra";
-import { randomInt } from "node:crypto";
 import makeWASocket, {
+  Browsers,
   fetchLatestBaileysVersion,
   DisconnectReason,
 } from "baileys";
@@ -95,7 +95,9 @@ const defaultSocketCreator: SocketCreator = async (authState) => {
     version,
     auth: authState,
     syncFullHistory: false,
-    browser: ["WazzapAgents", "Chrome", "1.0"],
+    // Pairing is sensitive to contradictory/unknown platform identities.
+    // Use Baileys' canonical tuple instead of a branded browser identity.
+    browser: Browsers.ubuntu("Chrome"),
     markOnlineOnConnect: true,
     defaultQueryTimeoutMs: config.sendTimeoutMs,
     // Hand Baileys our tamed child logger so its (very chatty) internal logging
@@ -293,6 +295,21 @@ async function ensureSocketBuilt(
     return;
   }
 
+  if (
+    entry.pairingRetryAfterMs &&
+    entry.pairingRetryAfterMs > Date.now()
+  ) {
+    logger.warn(
+      {
+        folderPath: entry.folderPath,
+        retryAfter: new Date(entry.pairingRetryAfterMs).toISOString(),
+      },
+      "WhatsApp initial pairing is cooling down; restart manually to retry now",
+    );
+    return;
+  }
+  entry.pairingRetryAfterMs = undefined;
+
   const build = buildSocket(entry, authDir, opts);
   socketBuilds.set(entry.folderPath, build);
   try {
@@ -400,33 +417,14 @@ export function installRelayMessageCache(account: AccountContext): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Crockford base32 alphabet WhatsApp uses for pairing codes (matches Baileys'
- * own `bytesToCrockford` charset: no `0`, `I`, `O`, `U`). A custom pairing code
- * MUST be exactly 8 chars from this set or WhatsApp rejects it.
- */
-const PAIRING_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTVWXYZ";
-
-/** Generate a valid 8-char WhatsApp pairing code from the Crockford alphabet. */
-function generatePairingCode(): string {
-  let code = "";
-  for (let i = 0; i < 8; i++) {
-    code += PAIRING_ALPHABET[randomInt(PAIRING_ALPHABET.length)];
-  }
-  return code;
-}
-
-/**
  * Request an 8-char WhatsApp pairing code for `phoneNumber` (digits only, with
  * country code) and surface it prominently on stdout + the structured log, so a
  * headless deploy (e.g. Pterodactyl console) can pair WITHOUT a QR. WhatsApp
  * formats the code as `XXXX-XXXX` in the Linked Devices UI.
  *
- * The caller passes a STABLE `customCode` (stored on the AccountEntry) so that a
- * transient reconnect — which rebuilds the socket and re-requests the code —
- * re-displays the SAME code instead of minting a fresh one. Without this, a
- * `restartRequired` (515) / `connectionClosed` (428) close during the pairing
- * window would invalidate the code the user is currently typing, which is the
- * classic "pairing code keeps failing" symptom.
+ * Let Baileys generate the code. Its native flow binds the code to the current
+ * auth state and pairing key; carrying a custom code across socket generations
+ * is unsupported by the upstream example and obscures which attempt is live.
  *
  * Best-effort: on failure it logs the error and falls back to printing the QR
  * (when `fallbackQr` is provided), so a transient pairing-code failure never
@@ -435,12 +433,11 @@ function generatePairingCode(): string {
 function requestPairingCode(
   sock: WASocket,
   phoneNumber: string,
-  customCode: string,
   folderPath: string,
   fallbackQr: string | null,
 ): void {
   sock
-    .requestPairingCode(phoneNumber, customCode)
+    .requestPairingCode(phoneNumber)
     .then((code) => {
       const pretty =
         typeof code === "string" && code.length === 8
@@ -535,13 +532,9 @@ function attachConnectionListener(
       if (pairingNumber && !registered) {
         if (!pairingRequested) {
           pairingRequested = true;
-          // Reuse a STABLE custom code across socket rebuilds so a transient
-          // reconnect mid-pairing doesn't invalidate the code the user is typing.
-          if (!entry.pairingCode) entry.pairingCode = generatePairingCode();
           requestPairingCode(
             sock,
             pairingNumber,
-            entry.pairingCode,
             folderPath,
             printQr ? qr : null,
           );
@@ -579,7 +572,24 @@ function attachConnectionListener(
       // socket, while preserving the no-auto-reconnect loggedOut branch below.
       entry.sock = undefined;
       if (entry.ctx.sock === sock) entry.ctx.sock = undefined;
-      if (statusCode !== DisconnectReason.loggedOut) {
+      const initialPairing = Boolean(
+        config.pairingNumber && !sock.authState?.creds?.registered,
+      );
+      if (initialPairing) {
+        entry.pairingRetryAfterMs = Date.now() + config.pairingRetryCooldownMs;
+        const knownPairingFailure = [408, 428, 429, 515].includes(
+          statusCode ?? -1,
+        );
+        logger.error(
+          {
+            folderPath,
+            statusCode: statusCode ?? "websocket_or_unknown",
+            retryAfter: new Date(entry.pairingRetryAfterMs).toISOString(),
+            knownPairingFailure,
+          },
+          "WhatsApp initial pairing failed; automatic retry disabled to avoid rate limiting. Restart manually to retry, or unset WA_PAIRING_NUMBER and restart for QR",
+        );
+      } else if (statusCode !== DisconnectReason.loggedOut) {
         // Rebuild only the socket; folder/DB/context setup is preserved.
         ensureSocketBuilt(entry, authDir, opts).catch((err) =>
           logger.error({ err, folderPath }, "reconnect failed"),
@@ -594,9 +604,7 @@ function attachConnectionListener(
 
     if (status === "open") {
       logger.info({ folderPath }, "WhatsApp socket connected");
-      // Pairing succeeded (or wasn't needed): drop the stored code so a future
-      // re-pair mints a fresh one.
-      entry.pairingCode = undefined;
+      entry.pairingRetryAfterMs = undefined;
       // Step 18: forward the normalized `whatsapp_status` exactly once.
       forwardStatus(entry, status);
       // Resolve configured owner phone numbers to their WhatsApp LIDs so

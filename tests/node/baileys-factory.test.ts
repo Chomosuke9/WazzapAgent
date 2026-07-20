@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import config from '../../src/config.ts';
 
 import {
   createOrResumeAccount,
@@ -33,6 +34,8 @@ class FakeSock {
   };
 
   user = { id: '0@s.whatsapp.net' };
+  authState = { creds: { registered: true } };
+  pairingRequests: Array<{ phoneNumber: string; customCode: string | undefined }> = [];
 
   emit(event: string, payload: unknown): void {
     for (const handler of this.handlers.get(event) ?? []) handler(payload);
@@ -40,6 +43,14 @@ class FakeSock {
 
   async sendMessage(): Promise<Record<string, unknown>> {
     return {};
+  }
+
+  async requestPairingCode(
+    phoneNumber: string,
+    customCode?: string,
+  ): Promise<string> {
+    this.pairingRequests.push({ phoneNumber, customCode });
+    return 'ABCD1234';
   }
 }
 
@@ -272,6 +283,57 @@ test('reconnect build coalesces with create and stale close events cannot replac
     assert.equal(entry.waStatus, 'open');
   } finally {
     reconnectGate.resolve();
+    cleanupAccount(folder);
+    __setSocketCreatorForTests(null);
+  }
+});
+
+test('pairing uses Baileys-generated code once and a failed initial pairing does not reconnect-loop', async () => {
+  const folder = tmpFolder('wazzap-pairing-');
+  const previousNumber = config.pairingNumber;
+  const previousCooldown = config.pairingRetryCooldownMs;
+  const sockets: FakeSock[] = [];
+  let creatorCalls = 0;
+
+  config.pairingNumber = '6281234567890';
+  config.pairingRetryCooldownMs = 60_000;
+  __setSocketCreatorForTests(async () => {
+    creatorCalls += 1;
+    const sock = new FakeSock();
+    sock.authState.creds.registered = false;
+    sockets.push(sock);
+    return sock as unknown as never;
+  });
+
+  try {
+    const entry = await createOrResumeAccount({ folderPath: folder, printQr: false });
+    const sock = sockets[0]!;
+
+    sock.emit('connection.update', { qr: 'first-qr' });
+    sock.emit('connection.update', { qr: 'second-qr' });
+    await waitFor(
+      () => sock.pairingRequests.length === 1,
+      'pairing code should be requested once',
+    );
+    assert.deepEqual(sock.pairingRequests, [
+      { phoneNumber: '6281234567890', customCode: undefined },
+    ]);
+
+    sock.emit('connection.update', closeUpdate(428));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(creatorCalls, 1, 'initial pairing close must not auto-rebuild');
+    assert.equal(entry.sock, undefined);
+    assert.ok((entry.pairingRetryAfterMs ?? 0) > Date.now());
+
+    const duringCooldown = await createOrResumeAccount({
+      folderPath: folder,
+      printQr: false,
+    });
+    assert.strictEqual(duringCooldown, entry);
+    assert.equal(creatorCalls, 1, 'hello during cooldown must not bypass it');
+  } finally {
+    config.pairingNumber = previousNumber;
+    config.pairingRetryCooldownMs = previousCooldown;
     cleanupAccount(folder);
     __setSocketCreatorForTests(null);
   }

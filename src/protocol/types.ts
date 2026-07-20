@@ -206,7 +206,7 @@ export interface AccountEntry {
   sock?: import("baileys").WASocket;  // live Baileys socket, undefined until created
   client?: import("ws").WebSocket;    // bound Python client, undefined when disconnected
   waStatus: WaStatus;
-  pairingCode?: string;               // stable 8-char custom pairing code, reused across socket rebuilds so transient reconnects don't invalidate the code the user is typing
+  pairingRetryAfterMs?: number;       // initial pairing is paused until this time after a rejection/transport close; prevents rate-limit loops
   reliableQueue: OutboundFrame[];     // per-account reliable queue (bound MAX_RELIABLE_QUEUE)
   database?: Database;                // per-tenant DB connection-owner (Step 05), opened by the factory
   repos?: AccountRepositories;        // per-tenant repositories built from `database` (Step 05)
