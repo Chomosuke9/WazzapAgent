@@ -80,10 +80,13 @@ process-global socket/DB/cache is shared across accounts.
 ### 3) Sub-agent system (`python/bridge/subagent/`)
 Lets LLM2 delegate complex work to an external HTTP agent via `execute_subtask`.
 `SubTaskTracker` tracks per-chat sessions (steering, dedup, cleanup); a
-persistent webhook server (per `AgentSession`, bound to `SUBAGENT_WEBHOOK_HOST`,
-default loopback, on `SUBAGENT_WEBHOOK_PORT + accountIndex`) receives
-progress/completion callbacks and re-invokes LLM2 with the result. Supports one
-correction re-dispatch.
+persistent webhook server (per `AgentSession`, on
+`SUBAGENT_WEBHOOK_PORT + accountIndex`) receives authenticated
+progress/queue/completion callbacks, persists task state for restart recovery,
+and re-invokes LLM2 with the result. Non-loopback binds require
+`SUBAGENT_WEBHOOK_TOKEN`; main-to-sub-agent API calls use the separate
+`SUBAGENT_API_TOKEN`. Output files are persisted or authenticated-streamed and
+checksum-verified before delivery. Supports one correction re-dispatch.
 
 ### 4) Idle trigger
 Probabilistic re-engagement (`bridge/agent/idle_trigger.py`): on

@@ -110,13 +110,52 @@ async def handle_action_ack(
     # This block must be outside the pending_send_request_chat check
     # because sub-agent attachments are tracked in
     # pending_subagent_attachments, not pending_send_request_chat.
-    pending_attach_entry = pending_subagent_attachments.pop(request_id, None)
+    pending_attach_entry = pending_subagent_attachments.get(request_id)
     if pending_attach_entry is not None:
       attach_chat_id, attach_files = pending_attach_entry
-      all_entries = _extract_all_send_ack_entries(payload)
+      if not bool(payload.get("ok")):
+        detail = str(payload.get("detail") or payload.get("code") or "unknown send error")
+        failure_signature = f"{payload.get('code') or ''}:{detail}"
+        already_reported = bool(attach_files) and all(
+          item.get("ack_failure_signature") == failure_signature
+          for item in attach_files
+          if isinstance(item, dict)
+        )
+        # Retain the pending mapping for diagnosis/a possible later successful
+        # ACK instead of silently consuming the only association to the staged
+        # file. Annotating it also makes the failure observable to callers.
+        for item in attach_files:
+          if isinstance(item, dict):
+            item["ack_error"] = detail
+            item["ack_code"] = payload.get("code")
+            item["ack_failed_at"] = time.time()
+            item["ack_failure_signature"] = failure_signature
+        pending_subagent_attachments[request_id] = (attach_chat_id, attach_files)
+        if not already_reported:
+          history = per_chat[attach_chat_id]
+          lock = per_chat_lock[attach_chat_id]
+          async with lock:
+            _append_sticker_log_to_history(
+              history,
+              f"Failed to send sub-agent attachment: {detail}",
+            )
+        logger.error(
+          "subagent attachment action_ack failed",
+          extra={
+            "chat_id": attach_chat_id,
+            "request_id": request_id,
+            "code": payload.get("code"),
+            "detail": detail,
+            "files": len(attach_files),
+          },
+        )
+        all_entries = []
+      else:
+        all_entries = _extract_all_send_ack_entries(payload)
       # Match entries 1:1 with the staged file infos we registered.
       # The ack ``result.sent`` array preserves send order, which
       # matches the order of our pending list.
+      acknowledged_indexes: set[int] = set()
       for idx, entry in enumerate(all_entries):
         entry_ctx_id = _normalize_context_msg_id(entry.get("contextMsgId"))
         if not entry_ctx_id:
@@ -127,13 +166,18 @@ async def handle_action_ack(
           # More ack entries than pending files — shouldn't
           # happen, but handle gracefully.
           break
+        clean_file_info = {
+          key: value for key, value in file_info.items()
+          if not key.startswith("ack_")
+        }
         media_paths_by_chat.setdefault(attach_chat_id, {})[entry_ctx_id] = [{
-          **file_info,
+          **clean_file_info,
           "received_at": time.time(),
         }]
+        acknowledged_indexes.add(idx)
       # Hydrate the provisional history entry for the attachment
       # so its context_msg_id changes from "pending" to the real ID.
-      if request_id:
+      if request_id and bool(payload.get("ok")):
         context_msg_id = _extract_send_ack_context_msg_id(payload)
         if context_msg_id:
           history = per_chat[attach_chat_id]
@@ -144,15 +188,33 @@ async def handle_action_ack(
               request_id=request_id,
               context_msg_id=context_msg_id,
             )
-      logger.debug(
-        "stored subagent attachment paths in media_paths_by_chat",
-        extra={
-          "chat_id": attach_chat_id,
-          "request_id": request_id,
-          "entries": len(all_entries),
-          "files": len(attach_files),
-        },
-      )
+      if bool(payload.get("ok")):
+        remaining_files = [
+          item for idx, item in enumerate(attach_files)
+          if idx not in acknowledged_indexes
+        ]
+        if remaining_files:
+          pending_subagent_attachments[request_id] = (attach_chat_id, remaining_files)
+          logger.error(
+            "subagent attachment ack missing context ids; retaining pending files",
+            extra={
+              "chat_id": attach_chat_id,
+              "request_id": request_id,
+              "entries": len(all_entries),
+              "remaining_files": len(remaining_files),
+            },
+          )
+        else:
+          pending_subagent_attachments.pop(request_id, None)
+        logger.debug(
+          "stored subagent attachment paths in media_paths_by_chat",
+          extra={
+            "chat_id": attach_chat_id,
+            "request_id": request_id,
+            "entries": len(all_entries),
+            "files": len(attach_files),
+          },
+        )
   # Handle run_command acks: append a synthetic
   # "Command X executed successfully/failed" entry to per-chat
   # history so the LLM sees the outcome on its next turn (this is

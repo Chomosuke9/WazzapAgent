@@ -42,6 +42,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections import OrderedDict, defaultdict, deque
+from pathlib import Path
 from typing import Deque, Dict, Set
 
 from .history import (
@@ -173,7 +174,15 @@ class AgentSession:
     self._dashboard = DashboardStats()
     # --- per-session sub-agent objects (was: module-level singletons) ---
     # Fully isolated per account (Step 33 owns the single-port webhook constraint).
-    self.subagent_tracker = SubTaskTracker()
+    tracker_state_path = None
+    if self.folder_path:
+      tenant_root = Path(self.folder_path).expanduser().resolve()
+      # Node normally creates the tenant layout before the bridge starts.  The
+      # existence guard keeps dependency-light unit fakes such as
+      # ``/tenant-a`` from creating directories outside their test workspace.
+      if tenant_root.exists():
+        tracker_state_path = tenant_root / "db" / "subagent_tracker.json"
+    self.subagent_tracker = SubTaskTracker(state_path=tracker_state_path)
     self.subagent_client = SubAgentClient(webhook_url=webhook_url)
     self.subagent_webhook = SubAgentWebhookServer(self.subagent_tracker, port=webhook_port)
     # Stashed in register() so run() can (re)wire / tear down the webhook
@@ -338,10 +347,28 @@ class AgentSession:
     self.tasks.add(dashboard_task)
 
     self.subagent_webhook.set_queue_handler(self._queue_handler)
+    # Capture one bound-method object: identity-checked teardown must receive
+    # the same object, not a fresh ``self._subagent.recover_completion`` wrapper.
+    recovery_handler = self._subagent.recover_completion
 
     try:
       await ws.connect(node_url)
       logger.info("Connected to Node gateway at %s", node_url)
+      if self.folder_path:
+        # The tenant root may be mounted/created by Node only during connect.
+        # Attach durable sub-agent state now even if it was unavailable when
+        # AgentSession was constructed.
+        self.subagent_tracker.enable_persistence(
+          Path(self.folder_path).expanduser().resolve()
+          / "db"
+          / "subagent_tracker.json"
+        )
+      self.subagent_webhook.set_completion_recovery_handler(recovery_handler)
+      # Persistence can contain results accepted just before an earlier bridge
+      # process died.  Replay them only after the gateway handshake and recovery
+      # handler are live, so confirmed WhatsApp sends can tombstone each exact
+      # session without waiting for the receiver to emit another callback.
+      await self._subagent.recover_pending_completions()
 
       # Only activate cold outbound work after the hello/hello_ack handshake.
       # Otherwise an overdue task (or an early direct-invoke request) can reach
@@ -372,6 +399,7 @@ class AgentSession:
       # Detach the queue handler so the webhook server doesn't write to a
       # closed socket between gateway connections.
       self.subagent_webhook.clear_queue_handler_if(self._queue_handler)
+      self.subagent_webhook.clear_completion_recovery_handler_if(recovery_handler)
       try:
         await ws.disconnect()
       except Exception as exc:  # pragma: no cover - defensive

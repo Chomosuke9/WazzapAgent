@@ -139,7 +139,8 @@ the SAME WS via the SDK), `ack_handler.py`, `moderation.py`, `format.py`.
 
 ### Media + sub-agent
 - `media/` — `resolver.py`, `visual.py`.
-- `subagent/` — `tracker.py`, `client.py`, `webhook_server.py` (binds
-  `SUBAGENT_WEBHOOK_HOST`, default loopback), `output.py` (input/output staging,
-  basename-sanitized), `config.py`.
+- `subagent/` — `tracker.py` (durable active/completion recovery), `client.py`,
+  `webhook_server.py` (authenticated non-loopback binds and verified streaming
+  output downloads), `output.py`
+  (tenant-aware input/output staging, basename-sanitized), `config.py`.
 - `tools/` — `sticker.py` (PIL), `thumbnail.py`.

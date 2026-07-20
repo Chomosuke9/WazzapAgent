@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from urllib.parse import urlsplit
 
 from ..config import _parse_positive_float, _parse_non_negative_int
 
@@ -22,6 +23,12 @@ SUBAGENT_SUBMIT_RETRY_MAX_BACKOFF = _parse_positive_float(
   os.getenv("SUBAGENT_SUBMIT_RETRY_MAX_BACKOFF"), 30.0
 )
 SUBAGENT_HTTP_TIMEOUT = _parse_positive_float(os.getenv("SUBAGENT_HTTP_TIMEOUT"), 30.0)
+SUBAGENT_OUTPUT_DOWNLOAD_TIMEOUT_S = _parse_positive_float(
+  os.getenv("SUBAGENT_OUTPUT_DOWNLOAD_TIMEOUT_S"), 300.0
+)
+SUBAGENT_STEER_CONSUME_TIMEOUT_S = _parse_positive_float(
+  os.getenv("SUBAGENT_STEER_CONSUME_TIMEOUT_S"), 30.0
+)
 
 # NOTE: SUBAGENT_ENABLED_DEFAULT is consumed by the Node gateway
 # (src/config.ts -> openAccountPersistence), which seeds the per-tenant
@@ -50,12 +57,14 @@ SUBAGENT_PROGRESS_DETAIL_MAX_CHARS = _parse_non_negative_int(
   os.getenv("SUBAGENT_PROGRESS_DETAIL_MAX_CHARS"), 500
 )
 
-# Maximum file size (in bytes) to inline as base64 in the /execute payload
-# for cross-machine deployments. Files larger than this are sent as path
-# references only (backward-compatible single-machine behavior).
+# Maximum file size (in bytes) to inline as base64 in the /execute payload.
+# Larger files use the authenticated resumable-upload protocol.
 # Default 50 MB. Set to 0 to disable inlining entirely.
 SUBAGENT_MAX_INLINE_FILE_BYTES = _parse_non_negative_int(
   os.getenv("SUBAGENT_MAX_INLINE_FILE_BYTES"), 50 * 1024 * 1024
+)
+SUBAGENT_MAX_INLINE_TOTAL_BYTES = _parse_non_negative_int(
+  os.getenv("SUBAGENT_MAX_INLINE_TOTAL_BYTES"), 50 * 1024 * 1024
 )
 
 
@@ -75,12 +84,36 @@ def subagent_webhook_url_env() -> str | None:
 def subagent_webhook_host_env() -> str:
   """Bind host for the local sub-agent callback webhook server.
 
-  Defaults to loopback (127.0.0.1) so the unauthenticated callback endpoint
-  is not exposed on all interfaces. Set SUBAGENT_WEBHOOK_HOST=0.0.0.0 only
-  when the sub-agent service runs on a different host (and prefer a firewall
-  / reverse proxy in front of it).
+  Local-only callback URLs bind loopback.  A configured non-loopback callback
+  URL (for example ``host.docker.internal``) implies that the callback must be
+  reachable from another network namespace, so the safe functional default is
+  ``0.0.0.0``.  Operators can always override this explicitly.
   """
-  return os.getenv("SUBAGENT_WEBHOOK_HOST", "127.0.0.1")
+  configured = os.getenv("SUBAGENT_WEBHOOK_HOST")
+  if configured and configured.strip():
+    return configured.strip()
+  callback_url = os.getenv("SUBAGENT_WEBHOOK_URL", "")
+  hostname = (urlsplit(callback_url).hostname or "").lower()
+  if hostname and hostname not in {"localhost", "127.0.0.1", "::1"}:
+    return "0.0.0.0"
+  return "127.0.0.1"
+
+
+def subagent_webhook_token_env() -> str | None:
+  """Optional shared secret required on sub-agent callback requests."""
+  value = os.getenv("SUBAGENT_WEBHOOK_TOKEN")
+  return value if value else None
+
+
+def subagent_api_token_env() -> str | None:
+  """Optional Bearer credential for main-agent requests to WazzapSubAgents."""
+  value = os.getenv("SUBAGENT_API_TOKEN")
+  return value if value else None
+
+
+def data_dir_env() -> str | None:
+  """Node's default-tenant root, used to mirror its media-dir selection."""
+  return os.getenv("DATA_DIR")
 
 
 def media_dir_env() -> str | None:

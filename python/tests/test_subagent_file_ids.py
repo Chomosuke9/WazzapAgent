@@ -52,3 +52,22 @@ def test_dedupes_and_includes_assistant_files():
   assert block is not None
   assert block.count("[#000010]") == 1   # deduped
   assert "[#000011]" in block            # assistant-sent file included (for revisions)
+
+
+def test_lists_files_from_current_merged_burst_payload():
+  block = _files_for_subagent_block([], current_payload={
+    "chatId": "c@g.us",
+    "senderName": "Agus",
+    "contextMsgId": "000202",
+    "attachments": [
+      {
+        "kind": "document",
+        "fileName": "current.pdf",
+        "contextMsgId": "000201",
+      },
+    ],
+  })
+  assert block is not None
+  assert "[#000201]" in block
+  assert "current.pdf" in block
+  assert "[#000202]" not in block

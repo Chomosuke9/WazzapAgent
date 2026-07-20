@@ -8,10 +8,11 @@ The Node gateway only allows attachments whose real path is inside
 `src/mediaHandler.js::resolveAllowedAttachmentPath`). To satisfy that sandbox
 without weakening it, we copy each output file into
 
-    <MEDIA_DIR>/subagent_out/<session_id>/<basename>
+    <tenant-media-dir>/subagent_out/<session_id>/<basename>
 
-before dispatching it to WhatsApp. Defense in depth — Node still validates
-the final path.
+before dispatching it to WhatsApp. The default tenant honours ``MEDIA_DIR``;
+additional tenants use ``<folder_path>/media`` exactly like Node. Defense in
+depth — Node still validates the final path.
 
 This module also stages **input** files: WhatsApp media that LLM2 wants the
 sub-agent to operate on first gets copied into
@@ -44,7 +45,7 @@ from pathlib import Path
 from typing import Iterable
 
 from ..log import setup_logging
-from .config import media_dir_env, subagent_input_staging_dir_env
+from .config import data_dir_env, media_dir_env, subagent_input_staging_dir_env
 
 try:
   from ..tools.thumbnail import generate_document_thumbnail
@@ -73,6 +74,25 @@ def _media_dir() -> Path:
 def staging_root() -> Path:
   """Root directory for staged sub-agent outputs (`<MEDIA_DIR>/subagent_out`)."""
   return _media_dir() / "subagent_out"
+
+
+def tenant_staging_root(
+  folder_path: str | os.PathLike[str] | None,
+) -> Path:
+  """Return the Node-allowlisted output root for one tenant.
+
+  This deliberately mirrors ``resolveTenantMediaDirs`` in the Node gateway:
+  the default ``DATA_DIR`` tenant honours ``MEDIA_DIR``, while every additional
+  tenant owns ``<folder_path>/media``.  Staging all accounts under the global
+  ``MEDIA_DIR`` makes Node reject attachments for non-default tenants.
+  """
+  if folder_path is None or not str(folder_path).strip():
+    return staging_root()
+  tenant_root = Path(folder_path).expanduser().resolve()
+  default_data = Path(data_dir_env() or (_project_root() / "data")).expanduser().resolve()
+  if tenant_root == default_data:
+    return staging_root()
+  return tenant_root / "media" / "subagent_out"
 
 def input_staging_root() -> Path:
   """Root directory for staged sub-agent **inputs**.
@@ -388,8 +408,17 @@ def stage_output_files(
     logger.warning("stage_output_files called with empty session_id; nothing staged")
     return StagedOutputs(staged=[], skipped=[])
 
-  paths = [str(p) for p in raw_paths if isinstance(p, (str, os.PathLike))]
-  if not files_content and not paths:
+  if isinstance(raw_paths, (str, os.PathLike)):
+    raw_path_values: Iterable[object] = [raw_paths]
+  else:
+    raw_path_values = raw_paths or []
+  paths = [str(p) for p in raw_path_values if isinstance(p, (str, os.PathLike))]
+  content_items = files_content if isinstance(files_content, list) else []
+  if files_content is not None and not isinstance(files_content, list):
+    skipped.append(SkippedFile(
+      source_path="", name="inline outputs", reason="files_content must be a list",
+    ))
+  if not content_items and not paths:
     return StagedOutputs(staged=[], skipped=[])
 
   target_root = (base_dir or staging_root()) / session_id
@@ -408,11 +437,17 @@ def stage_output_files(
       ))
     return StagedOutputs(staged=[], skipped=skipped)
 
-  if files_content:
+  if content_items:
     # Cross-machine: write files from base64 content
     used_names: set[str] = set()
-    for item in files_content:
-      name = (item.get("name") or "unnamed").strip()
+    successful_content_names: set[str] = set()
+    for item in content_items:
+      if not isinstance(item, dict):
+        skipped.append(SkippedFile(
+          source_path="", name="unnamed", reason="inline file entry must be an object",
+        ))
+        continue
+      name = str(item.get("name") or "unnamed").strip()
       # Security (path traversal): ``name`` arrives from an external sub-agent
       # callback. Strip any directory components so a crafted value such as
       # "../../etc/cron.d/x" cannot escape the per-session staging dir and
@@ -421,7 +456,51 @@ def stage_output_files(
       safe_name = os.path.basename(name) or "unnamed"
       if safe_name in (".", ".."):
         safe_name = "unnamed"
+      local_path = item.get("local_path")
+      if isinstance(local_path, (str, os.PathLike)) and str(local_path):
+        source = str(local_path)
+        if not os.path.isfile(source):
+          skipped.append(SkippedFile(
+            source_path=source, name=name, reason="downloaded local file not found",
+          ))
+          continue
+        try:
+          local_size = os.path.getsize(source)
+        except OSError as err:
+          skipped.append(SkippedFile(
+            source_path=source, name=name, reason=f"stat failed: {err}",
+          ))
+          continue
+        if local_size > MAX_FILE_SIZE_BYTES:
+          skipped.append(SkippedFile(
+            source_path=source,
+            name=name,
+            reason=f"file too large ({_format_size(local_size)} > 200 MB)",
+          ))
+          continue
+        provided_mime = str(item.get("mime") or "")
+        result = _stage_single_file(
+          used_names,
+          target_root,
+          safe_name,
+          source_path=source,
+          size_bytes=local_size,
+          mime_override=provided_mime or None,
+        )
+        if result is None:
+          skipped.append(SkippedFile(
+            source_path=source, name=name, reason="local spool copy failed",
+          ))
+          continue
+        staged.append(result)
+        successful_content_names.add(safe_name)
+        continue
       b64 = item.get("content_base64") or ""
+      if not isinstance(b64, (str, bytes)):
+        skipped.append(SkippedFile(
+          source_path="", name=name, reason="base64 content must be text",
+        ))
+        continue
       if not b64:
         skipped.append(SkippedFile(source_path="", name=name, reason="empty base64 content"))
         continue
@@ -435,7 +514,7 @@ def stage_output_files(
         ))
         continue
       try:
-        data = base64.b64decode(b64)
+        data = base64.b64decode(b64, validate=True)
       except Exception as err:
         skipped.append(SkippedFile(source_path="", name=name, reason=f"base64 decode failed: {err}"))
         continue
@@ -445,19 +524,24 @@ def stage_output_files(
         skipped.append(SkippedFile(source_path="", name=name, reason=f"file too large ({_format_size(size)} > 200 MB)"))
         continue
 
-      provided_mime = item.get("mime") or ""
+      provided_mime = str(item.get("mime") or "")
       result = _stage_single_file(used_names, target_root, safe_name,
         data=data, size_bytes=size, mime_override=provided_mime or None)
       if result is None:
         skipped.append(SkippedFile(source_path="", name=name, reason="base64 write failed or unsafe name"))
         continue
       staged.append(result)
+      successful_content_names.add(safe_name)
 
     # Second pass: copy any raw_paths whose basename is NOT already represented
     # in files_content. These are oversized files that SubAgents couldn't inline;
     # they still live on disk (single-machine or shared-FS) and must not be
     # silently dropped when files_content is non-empty.
-    content_original_names = {(item.get("name") or "unnamed").strip() for item in files_content}
+    # Only successful inline writes suppress the matching raw-path fallback.
+    # Previously a malformed/empty base64 entry still reserved its name, so a
+    # perfectly usable shared-filesystem raw path with that basename was then
+    # skipped and the output vanished.
+    content_original_names = successful_content_names
     for src in paths:
       name = os.path.basename(src) or "unnamed"
       if name in content_original_names:

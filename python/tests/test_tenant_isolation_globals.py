@@ -104,10 +104,10 @@ def test_assistant_identity_multi_alias_per_tenant(tmp_path):
         assert assistant_name_pattern().search("ping Robot")
 
 
-def test_webhook_url_honors_configured_remote_host_with_port_offset():
+def test_webhook_url_preserves_configured_remote_port():
     base = SUBAGENT_WEBHOOK_PORT
-    # Configured remote host (cross-machine deploy): host/scheme preserved,
-    # port replaced with the per-account offset.
+    # An explicit public/proxy port must never be rewritten to a local bind
+    # port. Multi-account expansion is opt-in via placeholders.
     with patch.dict(
         "os.environ",
         {"SUBAGENT_WEBHOOK_URL": "https://callbacks.example.com:9999/subagent/callback"},
@@ -115,8 +115,32 @@ def test_webhook_url_honors_configured_remote_host_with_port_offset():
     ):
         url0 = _resolve_webhook_url(base + 0)
         url1 = _resolve_webhook_url(base + 1)
-    assert url0 == f"https://callbacks.example.com:{base}/subagent/callback"
-    assert url1 == f"https://callbacks.example.com:{base + 1}/subagent/callback"
+    assert url0 == "https://callbacks.example.com:9999/subagent/callback"
+    assert url1 == "https://callbacks.example.com:9999/subagent/callback"
+
+
+def test_webhook_url_expands_explicit_multi_account_placeholders():
+    base = SUBAGENT_WEBHOOK_PORT
+    with patch.dict(
+        "os.environ",
+        {"SUBAGENT_WEBHOOK_URL": "https://callbacks.example.com:{port}/cb/{index}"},
+        clear=False,
+    ):
+        url = _resolve_webhook_url(base + 2, index=2)
+    assert url == f"https://callbacks.example.com:{base + 2}/cb/2"
+
+
+def test_loopback_callback_keeps_legacy_multi_account_port_offset():
+    base = SUBAGENT_WEBHOOK_PORT
+    with patch.dict(
+        "os.environ",
+        {"SUBAGENT_WEBHOOK_URL": "http://localhost:8081/subagent/callback"},
+        clear=False,
+    ):
+        url0 = _resolve_webhook_url(base, index=0)
+        url1 = _resolve_webhook_url(base + 1, index=1)
+    assert url0 == "http://localhost:8081/subagent/callback"
+    assert url1 == f"http://localhost:{base + 1}/subagent/callback"
 
 
 def test_webhook_url_falls_back_to_localhost_when_unset():

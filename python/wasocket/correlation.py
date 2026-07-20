@@ -73,7 +73,9 @@ class PendingAcks:
         # request_id -> scheduled timeout handle (TimerHandle).
         self._timers: Dict[str, asyncio.TimerHandle] = {}
 
-    def register(self, request_id: str, *, timeout: float = 30.0) -> asyncio.Future:
+    def register(
+        self, request_id: str, *, timeout: Optional[float] = 30.0
+    ) -> asyncio.Future:
         """Create and track a future for ``request_id``; schedule its expiry.
 
         Returns the awaitable future. After ``timeout`` seconds with no
@@ -83,11 +85,37 @@ class PendingAcks:
         loop = asyncio.get_running_loop()
         future = loop.create_future()
         self._futures[request_id] = future
-        # Schedule the expiry on the running loop.
+        # Reliable action delivery may wait for a reconnect.  In that case the
+        # caller registers first (so an immediate ack cannot race us), but arms
+        # the ack timeout only after the frame has actually been written.
+        if timeout is not None:
+            self._timers[request_id] = loop.call_later(
+                timeout, self._on_timeout, request_id
+            )
+        return future
+
+    def arm_timeout(self, request_id: str, *, timeout: float) -> None:
+        """Start the expiry timer for an already-registered request.
+
+        This is a no-op when an immediate acknowledgement already settled the
+        request while the transport's ``send`` coroutine was returning.
+        """
+        future = self._futures.get(request_id)
+        if future is None or future.done():
+            return
+        previous = self._timers.pop(request_id, None)
+        if previous is not None:
+            previous.cancel()
+        loop = asyncio.get_running_loop()
         self._timers[request_id] = loop.call_later(
             timeout, self._on_timeout, request_id
         )
-        return future
+
+    def discard(self, request_id: str) -> None:
+        """Forget and cancel a request whose frame was never delivered."""
+        future = self._pop(request_id)
+        if future is not None and not future.done():
+            future.cancel()
 
     def resolve(self, request_id: str, result: dict) -> None:
         """Settle ``request_id``'s future with ``result``; no-op if unknown."""

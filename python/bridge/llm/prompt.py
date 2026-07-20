@@ -106,7 +106,11 @@ def _format_current_window(msg: WhatsAppMessage) -> str:
 _SUBAGENT_FILE_KINDS = {"image", "video", "audio", "document", "media"}
 
 
-def _files_for_subagent_block(history: Iterable[WhatsAppMessage]) -> str | None:
+def _files_for_subagent_block(
+    history: Iterable[WhatsAppMessage],
+    *,
+    current_payload: dict | None = None,
+) -> str | None:
     """Build an explicit ID->file lookup table for ``execute_subtask``.
 
     The model reliably knows *when* to delegate, but it tends to pass the
@@ -142,6 +146,37 @@ def _files_for_subagent_block(history: Iterable[WhatsAppMessage]) -> str | None:
         if caption and not (caption.startswith("<media:") and caption.endswith(">")):
             label = f'{media} "{caption}"'
         entries.append(f"- [#{cid}] {label} (from {sender})")
+
+    # ``history`` passed to LLM2 intentionally excludes the current burst.
+    # The merged payload carries every burst attachment stamped with its owning
+    # contextMsgId, so include those directly instead of making the model infer
+    # an ID from the rendered burst text.
+    if current_payload:
+        payload_cid = current_payload.get("contextMsgId")
+        sender = _compact(
+            current_payload.get("senderName")
+            or current_payload.get("senderId")
+            or current_payload.get("chatId")
+        ) or "unknown"
+        for attachment in current_payload.get("attachments") or []:
+            if not isinstance(attachment, dict):
+                continue
+            media = str(attachment.get("kind") or "").strip().lower()
+            if media not in _SUBAGENT_FILE_KINDS:
+                continue
+            cid = _normalize_context_msg_id(
+                attachment.get("contextMsgId") or payload_cid
+            )
+            if not (cid.isdigit() and len(cid) == 6) or cid in seen:
+                continue
+            seen.add(cid)
+            caption = _compact(
+                attachment.get("originalFileName")
+                or attachment.get("fileName")
+                or ""
+            )
+            label = f'{media} "{caption}"' if caption else media
+            entries.append(f"- [#{cid}] {label} (from {sender})")
 
     if not entries:
         return None

@@ -179,6 +179,35 @@ class TestPermissionLevels:
 # ---------------------------------------------------------------------------
 
 class TestExtractActionsFromToolCalls:
+  def test_execute_subtask_dedupes_known_file_context_ids(self):
+    tc = [{"name": "execute_subtask", "args": {
+      "instruction": "inspect both",
+      "confirmation_text": "Inspecting now",
+      "context_msg_ids": ["000123", "000123", "000124"],
+      "high_quality": False,
+    }}]
+    actions = _extract_actions_from_tool_calls(
+      tc,
+      fallback_reply_to=None,
+      allowed_context_ids={"000123", "000124"},
+    )
+    delegated = [a for a in actions if a["type"] == "execute_subtask"]
+    assert delegated[0]["contextMsgIds"] == ["000123", "000124"]
+
+  def test_execute_subtask_rejects_unavailable_id_and_confirmation_together(self):
+    tc = [{"name": "execute_subtask", "args": {
+      "instruction": "inspect",
+      "confirmation_text": "Inspecting now",
+      "context_msg_ids": ["999999"],
+      "high_quality": False,
+    }}]
+    actions = _extract_actions_from_tool_calls(
+      tc,
+      fallback_reply_to="000123",
+      allowed_context_ids={"000123"},
+    )
+    assert actions == []
+
   def test_reply_message(self):
     tc = [{"name": "reply_message", "args": {"context_msg_id": "000123", "text": "Hello!"}}]
     actions = _extract_actions_from_tool_calls(

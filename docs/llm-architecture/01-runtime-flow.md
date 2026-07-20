@@ -115,13 +115,18 @@ Node `AccountContext` and is not decremented.
 1. LLM2 calls `execute_subtask` (`instruction`, `context_msg_ids`,
    `high_quality`, `confirmation_text`).
 2. `SubAgentCoordinator` stages inputs (off the event loop via
-   `asyncio.to_thread`) and POSTs to `SUBAGENT_URL` with a per-account
-   `callbackUrl` (`SUBAGENT_WEBHOOK_HOST`:`SUBAGENT_WEBHOOK_PORT + index`).
+   `asyncio.to_thread`) and POSTs to `SUBAGENT_URL` using
+   `Authorization: Bearer SUBAGENT_API_TOKEN`, with a per-account
+   `callbackUrl` (`SUBAGENT_WEBHOOK_URL`; explicit public ports are preserved,
+   with `{port}`/`{index}` placeholders for multi-account routing).
 3. The sub-agent runs asynchronously and calls back the webhook on
-   progress/completion.
-4. The webhook server feeds the result back; LLM2 is re-invoked to deliver it
-   (with one optional correction re-dispatch). Output is sent via the normal
-   `send_message` action path.
+   progress/queue/completion, authenticating with `SUBAGENT_WEBHOOK_TOKEN` when
+   configured (required for non-loopback binds).
+4. The webhook server durably records the result. Non-inlined files are copied
+   from a verified shared path or streamed from the same `SUBAGENT_URL` origin
+   with the API token, size cap, and SHA-256 verification. LLM2 is re-invoked to
+   deliver it (with one optional correction re-dispatch); undelivered results
+   are replayed after a bridge restart.
 
 ## G. Idle trigger flow
 Per-chat `/idle <min-max>` in `settings.db`; `bridge/agent/idle_trigger.py`

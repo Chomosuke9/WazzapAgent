@@ -27,31 +27,40 @@ load_dotenv()
 logger = setup_logging()
 
 
-def _resolve_webhook_url(webhook_port: int) -> str:
+def _resolve_webhook_url(webhook_port: int, index: int = 0) -> str:
     """Compose this account's sub-agent callback URL.
 
-    Multi-account fix (audit Medium #4): a configured ``SUBAGENT_WEBHOOK_URL``
-    is HONORED — its scheme / host / path / query are preserved so cross-machine
-    deploys keep working — while the PORT is overridden with this account's
-    ``base + index`` value (the existing, already-correct per-account port
-    offset). Only when ``SUBAGENT_WEBHOOK_URL`` is unset do we fall back to
-    ``http://localhost:<port>/subagent/callback`` (single-account behaviour
-    unchanged: index 0 keeps the configured base port).
+    A configured remote ``SUBAGENT_WEBHOOK_URL`` is preserved byte-for-byte,
+    including an explicit public/reverse-proxy port. ``{port}`` and ``{index}``
+    placeholders opt into per-account expansion. For backward compatibility,
+    additional accounts on a loopback URL use their local offset port.
     """
     configured = subagent_webhook_url_env()
     if configured and configured.strip():
-        parts = urlsplit(configured.strip())
-        scheme = parts.scheme or "http"
-        host = parts.hostname or "localhost"
-        netloc = f"{host}:{webhook_port}"
-        # Preserve userinfo if present (rare, but don't silently drop it).
-        if parts.username:
-            userinfo = parts.username
-            if parts.password:
-                userinfo += f":{parts.password}"
-            netloc = f"{userinfo}@{netloc}"
-        path = parts.path or "/subagent/callback"
-        return urlunsplit((scheme, netloc, path, parts.query, parts.fragment))
+        value = configured.strip()
+        if "{port}" in value or "{index}" in value:
+            return value.replace("{port}", str(webhook_port)).replace("{index}", str(index))
+        parts = urlsplit(value)
+        if index > 0 and (parts.hostname or "").lower() in {"localhost", "127.0.0.1", "::1"}:
+            host = parts.hostname or "localhost"
+            if ":" in host and not host.startswith("["):
+                host = f"[{host}]"
+            userinfo = ""
+            if parts.username:
+                userinfo = parts.username
+                if parts.password:
+                    userinfo += f":{parts.password}"
+                userinfo += "@"
+            return urlunsplit((
+                parts.scheme or "http",
+                f"{userinfo}{host}:{webhook_port}",
+                parts.path or "/subagent/callback",
+                parts.query,
+                parts.fragment,
+            ))
+        # Remote/public URLs are authoritative; never replace their proxy port
+        # with the bridge's unrelated local bind port.
+        return value
     return f"http://localhost:{webhook_port}/subagent/callback"
 
 
@@ -67,13 +76,13 @@ def build_session(
     single-account boot is byte-for-byte unchanged) and a matching per-account
     callback URL so the sub-agent calls back into the right session's server.
 
-    The callback URL HONORS a configured ``SUBAGENT_WEBHOOK_URL`` (host/scheme
-    from config, port from the per-account offset), falling back to localhost
-    only when unset — so cross-machine sub-agent deploys work in multi-account.
+    A remote multi-account deployment should include a ``{port}`` or
+    ``{index}`` placeholder in ``SUBAGENT_WEBHOOK_URL`` so its proxy can route
+    each account to the matching local webhook server.
     """
     sock = make_wa_socket(account.folder_path, **ws_transport_options())
     webhook_port = base_webhook_port + index
-    webhook_url = _resolve_webhook_url(webhook_port)
+    webhook_url = _resolve_webhook_url(webhook_port, index=index)
     # Direct-invoke endpoint port mirrors the webhook per-account offset
     # (base + index) so N accounts don't collide; index 0 keeps the configured
     # base. Disabled entirely unless DIRECT_INVOKE_API_KEY is set (start() no-op).
@@ -118,16 +127,37 @@ async def main():
     # Build one AgentSession per account and start each one's persistent
     # sub-agent webhook (per-account port resolves the collision).
     sessions: list[tuple[object, AgentSession]] = []
-    for index, account in enumerate(accounts):
-        session = build_session(account, index)
-        logger.info(
-            "Account %d: folder_path=%s node_url=%s webhook_port=%s",
-            index,
-            account.folder_path,
-            account.node_url,
-            session.subagent_webhook._port,
+    resolved_callback_urls = [
+        _resolve_webhook_url(SUBAGENT_WEBHOOK_PORT + index, index=index)
+        for index in range(len(accounts))
+    ]
+    if len(set(resolved_callback_urls)) != len(resolved_callback_urls):
+        duplicate = next(
+            url for url in resolved_callback_urls
+            if resolved_callback_urls.count(url) > 1
         )
-        await session.subagent_webhook.start_persistent()
+        raise RuntimeError(
+            "Duplicate sub-agent callback URL for multiple accounts: "
+            f"{duplicate!r}. Include {{port}} or {{index}} in "
+            "SUBAGENT_WEBHOOK_URL so each callback is routable."
+        )
+    for index, account in enumerate(accounts):
+        try:
+            session = build_session(account, index)
+            logger.info(
+                "Account %d: folder_path=%s node_url=%s webhook_port=%s",
+                index,
+                account.folder_path,
+                account.node_url,
+                session.subagent_webhook._port,
+            )
+            await session.subagent_webhook.start_persistent()
+        except Exception:
+            # A later account failing to bind must not leave earlier callback
+            # servers alive while bridge startup aborts.
+            for _started_account, started_session in sessions:
+                await started_session.subagent_webhook.stop_persistent()
+            raise
         sessions.append((account, session))
 
     try:

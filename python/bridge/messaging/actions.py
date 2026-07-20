@@ -450,6 +450,7 @@ def _extract_actions_from_tool_calls(
   if not tool_calls:
     return []
 
+  allowed_context_ids = set(allowed_context_ids or ())
   actions: list[dict] = []
 
   for tc in tool_calls:
@@ -684,10 +685,32 @@ def _extract_actions_from_tool_calls(
 
       # Normalize and validate context msg ids
       valid_ids: list[str] = []
+      seen_ids: set[str] = set()
+      invalid_ids: list[str] = []
       for raw in ctx_ids:
         cid = _normalize_context_msg_id(raw)
-        if cid and cid.isdigit() and len(cid) == 6:
-          valid_ids.append(cid)
+        if not cid or not cid.isdigit() or len(cid) != 6:
+          invalid_ids.append(str(raw))
+          continue
+        # Unlike reply targets, an empty allowed set means there are no known
+        # context messages to attach. Never let a plausible-looking six-digit
+        # hallucination through to lazy media download.
+        if cid not in allowed_context_ids:
+          invalid_ids.append(cid)
+          continue
+        if cid in seen_ids:
+          continue
+        seen_ids.add(cid)
+        valid_ids.append(cid)
+
+      if invalid_ids:
+        logger.warning(
+          "execute_subtask ignored: invalid or unavailable context ids=%s",
+          invalid_ids,
+        )
+        # Keep the confirmation coupled to the executable action: otherwise
+        # the user sees "starting now" even though no task can be submitted.
+        continue
 
       # If confirmation_text is provided, send it immediately.
       # If there are input files, reply to the last file; otherwise use fallback_reply_to.

@@ -14,6 +14,7 @@ import mimetypes
 import os
 import time
 from collections import deque
+from dataclasses import dataclass
 
 from ..history import (
   WhatsAppMessage,
@@ -23,6 +24,30 @@ from ..history import (
 from ..log import setup_logging
 
 logger = setup_logging()
+
+
+@dataclass(frozen=True)
+class SubagentMediaResolution:
+  """Structured result for one requested sub-agent media context."""
+
+  context_msg_id: str
+  state: str
+  expected_media: bool | None
+  paths: tuple[str, ...] = ()
+  error: str | None = None
+
+  @property
+  def ok(self) -> bool:
+    return self.state == "resolved" and bool(self.paths)
+
+  def as_dict(self) -> dict:
+    return {
+      "context_msg_id": self.context_msg_id,
+      "state": self.state,
+      "expected_media": self.expected_media,
+      "paths": list(self.paths),
+      "error": self.error,
+    }
 
 
 def _parse_sticker_args(args: str) -> tuple[str | None, str | None]:
@@ -58,8 +83,6 @@ def _store_media_path(media_paths_by_chat: dict, payload: dict) -> None:
     if not isinstance(att, dict):
       continue
     p = att.get("path")
-    if not p:
-      continue
     att_ctx_id = att.get("contextMsgId") or payload_ctx_id
     if not att_ctx_id:
       continue
@@ -70,11 +93,31 @@ def _store_media_path(media_paths_by_chat: dict, payload: dict) -> None:
       "originalFileName": att.get("originalFileName") or None,
       "jpegThumbnail": att.get("jpegThumbnail") or None,
       "path": p,
+      "size": att.get("size") or 0,
+      "pending": bool(att.get("pending")) or not bool(p),
+      "blocked_reason": att.get("subagentBlockedReason") or None,
       "received_at": time.time(),
     })
   for att_ctx_id, paths in paths_by_ctx.items():
     if paths:
-      media_paths_by_chat.setdefault(chat_id, {})[att_ctx_id] = paths
+      chat_store = media_paths_by_chat.setdefault(chat_id, {})
+      previous = chat_store.get(att_ctx_id)
+      previous_has_file = (
+        isinstance(previous, list)
+        and any(
+          isinstance(entry, dict)
+          and entry.get("path")
+          and os.path.isfile(entry["path"])
+          for entry in previous
+        )
+      ) or (isinstance(previous, str) and os.path.isfile(previous))
+      new_has_file = any(entry.get("path") for entry in paths)
+      # The same inbound payload is recorded again after debounce. Its original
+      # attachment metadata still says path=None; never let that second pass
+      # overwrite the eagerly persisted file from dispatch_incoming().
+      if previous_has_file and not new_has_file:
+        continue
+      chat_store[att_ctx_id] = paths
 
 
 def _cleanup_stale_media_paths(media_paths_by_chat: dict, max_age_seconds: float = 86400.0) -> int:
@@ -345,7 +388,7 @@ async def materialize_media_for_subagent(
   ctx_ids,
   media_paths_by_chat: dict,
   history=None,
-) -> None:
+) -> list[SubagentMediaResolution]:
   """Ensure the media for ``ctx_ids`` is on disk so it can be sent to the
   sub-agent.
 
@@ -379,16 +422,24 @@ async def materialize_media_for_subagent(
   ctx_ids absent from history (evicted from the bounded deque) stay eligible
   so genuinely old media can still be fetched on demand.
   """
-  if sock is None or not chat_id or not ctx_ids:
-    return
+  requested: list[str] = []
+  seen_requested: set[str] = set()
+  for raw in ctx_ids or []:
+    cid = str(raw or "").strip()
+    if not cid or cid in seen_requested:
+      continue
+    seen_requested.add(cid)
+    requested.append(cid)
+  if not requested:
+    return []
 
   # ctx_ids that history positively knows are text-only (present in history
   # but with no ``media`` kind). Only these are skipped — a ctx_id that is
   # NOT in history is left eligible for a download attempt.
   text_only_ctx_ids: set = set()
+  media_ctx_ids: set = set()
   if history is not None:
     seen_ctx_ids: set = set()
-    media_ctx_ids: set = set()
     for msg in history:
       cid = getattr(msg, "context_msg_id", None)
       if not cid:
@@ -398,38 +449,91 @@ async def materialize_media_for_subagent(
         media_ctx_ids.add(cid)
     text_only_ctx_ids = seen_ctx_ids - media_ctx_ids
 
-  for cid in ctx_ids:
-    if not cid:
-      continue
+  results: list[SubagentMediaResolution] = []
+  for cid in requested:
     # History says this message carries no attachment — nothing to download.
     if cid in text_only_ctx_ids:
+      results.append(SubagentMediaResolution(
+        context_msg_id=cid,
+        state="text_only",
+        expected_media=False,
+        error="context message does not contain an attachment",
+      ))
       continue
     # Skip ctx_ids whose media is already materialized on disk.
     existing = media_paths_by_chat.get(chat_id, {}).get(cid)
     if isinstance(existing, list):
-      if any(
-        isinstance(e, dict) and e.get("path") and os.path.isfile(e["path"])
+      blocked = [
+        str(e.get("blocked_reason"))
         for e in existing
-      ):
+        if isinstance(e, dict) and e.get("blocked_reason")
+      ]
+      if blocked:
+        results.append(SubagentMediaResolution(
+          context_msg_id=cid,
+          state="unavailable",
+          expected_media=True,
+          error="; ".join(blocked),
+        ))
+        continue
+      existing_paths = tuple(
+        str(e["path"])
+        for e in existing
+        if isinstance(e, dict) and e.get("path") and os.path.isfile(e["path"])
+      )
+      if existing and len(existing_paths) == len(existing):
+        results.append(SubagentMediaResolution(
+          context_msg_id=cid,
+          state="resolved",
+          expected_media=True,
+          paths=existing_paths,
+        ))
         continue
     elif isinstance(existing, str) and os.path.isfile(existing):
+      results.append(SubagentMediaResolution(
+        context_msg_id=cid,
+        state="resolved",
+        expected_media=True,
+        paths=(existing,),
+      ))
+      continue
+
+    if sock is None or not chat_id:
+      results.append(SubagentMediaResolution(
+        context_msg_id=cid,
+        state="unavailable",
+        expected_media=True if cid in media_ctx_ids or existing else None,
+        error="WhatsApp media downloader is unavailable",
+      ))
       continue
 
     try:
       result = await sock.download_media(chat_id, context_msg_id=cid)
     except Exception as err:  # NotFoundError / TimeoutError / proto evicted
-      logger.info(
+      logger.warning(
         "materialize_media_for_subagent: download failed ctx=%s: %s",
         cid, err, extra={"chat_id": chat_id},
       )
+      results.append(SubagentMediaResolution(
+        context_msg_id=cid,
+        state="download_failed",
+        expected_media=True if cid in media_ctx_ids or existing else None,
+        error=str(err),
+      ))
       continue
 
     path = result.get("path") if isinstance(result, dict) else None
     if not path or not os.path.isfile(path):
-      logger.info(
+      logger.warning(
         "materialize_media_for_subagent: no file returned for ctx=%s",
         cid, extra={"chat_id": chat_id},
       )
+      results.append(SubagentMediaResolution(
+        context_msg_id=cid,
+        state="missing_file",
+        expected_media=True if cid in media_ctx_ids or existing else None,
+        error="gateway returned no readable file",
+      ))
       continue
 
     media_paths_by_chat.setdefault(chat_id, {})[cid] = [{
@@ -445,3 +549,10 @@ async def materialize_media_for_subagent(
       "materialize_media_for_subagent: downloaded ctx=%s kind=%s -> %s",
       cid, result.get("kind"), path, extra={"chat_id": chat_id},
     )
+    results.append(SubagentMediaResolution(
+      context_msg_id=cid,
+      state="resolved",
+      expected_media=True,
+      paths=(str(path),),
+    ))
+  return results

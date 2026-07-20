@@ -15,6 +15,8 @@ These pin the contract that:
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import sys
 from pathlib import Path
 from typing import List, Tuple
@@ -35,8 +37,9 @@ class _FakeRequest:
   ``await request.json()`` so this is all we need.
   """
 
-  def __init__(self, payload: dict) -> None:
+  def __init__(self, payload: dict, headers: dict | None = None) -> None:
     self._payload = payload
+    self.headers = headers or {}
 
   async def json(self) -> dict:
     return self._payload
@@ -88,6 +91,25 @@ async def test_queue_advanced_webhook_dispatches_to_handler():
   handler.assert_awaited_once_with(
     "chat-carol@s.whatsapp.net", "queue_advanced", 1, 1
   )
+
+
+@pytest.mark.asyncio
+async def test_queue_webhook_signals_progress_keepalive():
+  tracker = _make_tracker_with_session("sess-keepalive", "chat@g.us")
+  server = SubAgentWebhookServer(tracker, port=0)
+  server.set_queue_handler(AsyncMock())
+  keepalive = asyncio.Event()
+  server.register_progress_event("sess-keepalive", keepalive)
+
+  response = await server._handle_callback(_FakeRequest({
+    "type": "queued",
+    "session_id": "sess-keepalive",
+    "position": 2,
+    "queue_size": 3,
+  }))
+
+  assert response.status == 200
+  assert keepalive.is_set()
 
 
 @pytest.mark.asyncio
@@ -318,6 +340,263 @@ async def test_get_chat_for_session_returns_none_after_finalize():
   assert tracker.get_chat_for_session("sess-G") == "chat-gary"
   tracker.finalize("sess-G", {"success": True, "report": "done"})
   assert tracker.get_chat_for_session("sess-G") is None
+
+
+@pytest.mark.asyncio
+async def test_unknown_completion_is_deferred_and_not_acknowledged_as_delivered():
+  tracker = SubTaskTracker()
+  server = SubAgentWebhookServer(tracker, port=0)
+  result = {"success": True, "report": "recovered"}
+
+  response = await server._handle_callback(_FakeRequest({
+    "type": "complete", "session_id": "early", "result": result,
+  }))
+  assert response.status == 409
+
+  # Registration replays the retained completion; completion-event
+  # registration observes it and wakes immediately.
+  assert tracker.register(SubTask(
+    session_id="early", chat_id="chat@g.us", instruction="work",
+  )) is True
+  event = asyncio.Event()
+  server.register_completion_event("early", event)
+  assert event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_restart_completion_retries_until_recovery_handler_delivers():
+  tracker = _make_tracker_with_session("recovered", "chat-recovered@g.us")
+  server = SubAgentWebhookServer(tracker, port=0)
+  payload = {
+    "type": "complete",
+    "session_id": "recovered",
+    "result": {"success": True, "report": "done"},
+  }
+
+  not_ready = await server._handle_callback(_FakeRequest(payload))
+  assert not_ready.status == 503
+
+  recovery = AsyncMock()
+  server.set_completion_recovery_handler(recovery)
+  delivered = await server._handle_callback(_FakeRequest(payload))
+  duplicate = await server._handle_callback(_FakeRequest(payload))
+
+  assert delivered.status == 200
+  assert duplicate.status == 200
+  recovery.assert_awaited_once_with("chat-recovered@g.us", "recovered")
+  assert tracker.is_delivered("recovered")
+
+
+@pytest.mark.asyncio
+async def test_callback_retry_owned_by_live_waiter_does_not_recover_duplicate():
+  tracker = _make_tracker_with_session("live", "chat-live@g.us")
+  server = SubAgentWebhookServer(tracker, port=0)
+  event = asyncio.Event()
+  server.register_completion_event("live", event)
+  recovery = AsyncMock()
+  server.set_completion_recovery_handler(recovery)
+  payload = {
+    "type": "complete", "session_id": "live",
+    "result": {"success": True, "report": "done"},
+  }
+
+  first = await server._handle_callback(_FakeRequest(payload))
+  retry = await server._handle_callback(_FakeRequest(payload))
+
+  assert first.status == retry.status == 200
+  assert event.is_set()
+  recovery.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_callback_shared_secret_is_enforced(monkeypatch):
+  monkeypatch.setenv("SUBAGENT_WEBHOOK_TOKEN", "correct-secret")
+  tracker = _make_tracker_with_session("secure", "chat@g.us")
+  server = SubAgentWebhookServer(tracker, port=0)
+
+  denied = await server._handle_callback(_FakeRequest({
+    "type": "progress", "session_id": "secure", "entry": {"step": "x"},
+  }))
+  allowed = await server._handle_callback(_FakeRequest(
+    {"type": "progress", "session_id": "secure", "entry": {"step": "x"}},
+    {"X-Subagent-Webhook-Token": "correct-secret"},
+  ))
+
+  assert denied.status == 401
+  assert allowed.status == 200
+
+
+@pytest.mark.asyncio
+async def test_omitted_output_is_streamed_with_separate_api_token(
+  tmp_path, monkeypatch,
+):
+  from aiohttp import web
+  import bridge.subagent.webhook_server as webhook_module
+
+  content = b"durable cross-host output"
+  digest = hashlib.sha256(content).hexdigest()
+  observed: dict[str, str] = {}
+
+  async def download(request):
+    observed["authorization"] = request.headers.get("Authorization", "")
+    if observed["authorization"] != "Bearer api-secret":
+      return web.Response(status=401)
+    return web.Response(body=content, headers={"X-Content-SHA256": digest})
+
+  app = web.Application()
+  app.router.add_get("/sessions/large/outputs/file-1", download)
+  runner = web.AppRunner(app)
+  await runner.setup()
+  site = web.TCPSite(runner, "127.0.0.1", 0)
+  await site.start()
+  sockets = site._server.sockets
+  port = sockets[0].getsockname()[1]
+  monkeypatch.setattr(webhook_module, "SUBAGENT_URL", f"http://127.0.0.1:{port}")
+  monkeypatch.setenv("SUBAGENT_API_TOKEN", "api-secret")
+  monkeypatch.setenv("SUBAGENT_WEBHOOK_TOKEN", "callback-secret")
+
+  tracker = SubTaskTracker(state_path=tmp_path / "tracker.json")
+  tracker.register(SubTask(
+    session_id="large", chat_id="chat@g.us", instruction="make output",
+  ))
+  server = SubAgentWebhookServer(tracker, port=0)
+  completion = asyncio.Event()
+  server.register_completion_event("large", completion)
+  payload = {
+    "type": "complete",
+    "session_id": "large",
+    "result": {
+      "success": True,
+      "report": "done",
+      "output_files_content": [{
+        "file_id": "file-1",
+        "name": "report.pdf",
+        "size_bytes": len(content),
+        "sha256": digest,
+        "download_url": "/sessions/large/outputs/file-1",
+      }],
+    },
+  }
+  try:
+    response = await server._handle_callback(_FakeRequest(
+      payload, {"X-Subagent-Webhook-Token": "callback-secret"},
+    ))
+  finally:
+    await runner.cleanup()
+
+  assert response.status == 200
+  assert completion.is_set()
+  assert observed["authorization"] == "Bearer api-secret"
+  finished = tracker.get_finished("large")
+  assert finished is not None
+  local_path = Path(finished.result["output_files_content"][0]["local_path"])
+  assert local_path.read_bytes() == content
+  # Callback and API credentials are deliberately independent.
+  assert observed["authorization"] != "Bearer callback-secret"
+
+
+@pytest.mark.asyncio
+async def test_output_download_checksum_failure_is_retryable(
+  tmp_path, monkeypatch,
+):
+  from aiohttp import web
+  import bridge.subagent.webhook_server as webhook_module
+
+  content = b"corrupt in transit"
+
+  async def download(_request):
+    return web.Response(body=content)
+
+  app = web.Application()
+  app.router.add_get("/sessions/bad/outputs/file-2", download)
+  runner = web.AppRunner(app)
+  await runner.setup()
+  site = web.TCPSite(runner, "127.0.0.1", 0)
+  await site.start()
+  port = site._server.sockets[0].getsockname()[1]
+  monkeypatch.setattr(webhook_module, "SUBAGENT_URL", f"http://127.0.0.1:{port}")
+
+  tracker = SubTaskTracker(state_path=tmp_path / "tracker.json")
+  tracker.register(SubTask(
+    session_id="bad", chat_id="chat@g.us", instruction="make output",
+  ))
+  server = SubAgentWebhookServer(tracker, port=0)
+  payload = {
+    "type": "complete",
+    "session_id": "bad",
+    "result": {
+      "success": True,
+      "output_files_content": [{
+        "file_id": "file-2",
+        "name": "bad.bin",
+        "size_bytes": len(content),
+        "sha256": hashlib.sha256(b"expected bytes").hexdigest(),
+        "download_url": "/sessions/bad/outputs/file-2",
+      }],
+    },
+  }
+  try:
+    response = await server._handle_callback(_FakeRequest(payload))
+  finally:
+    await runner.cleanup()
+
+  assert response.status == 502
+  assert tracker.get_chat_for_session("bad") == "chat@g.us"
+  assert tracker.get_finished("bad") is None
+  assert not list(tmp_path.rglob("*.download"))
+
+
+@pytest.mark.asyncio
+async def test_verified_shared_output_path_avoids_network_download(
+  tmp_path, monkeypatch,
+):
+  import bridge.subagent.webhook_server as webhook_module
+
+  content = b"shared filesystem output"
+  source = tmp_path / "receiver" / "opaque-file"
+  source.parent.mkdir()
+  source.write_bytes(content)
+  monkeypatch.setattr(webhook_module, "SUBAGENT_URL", "http://127.0.0.1:1")
+  monkeypatch.delenv("SUBAGENT_API_TOKEN", raising=False)
+  tracker = SubTaskTracker(state_path=tmp_path / "tracker.json")
+  server = SubAgentWebhookServer(tracker, port=0)
+
+  hydrated = await server._materialize_downloadable_outputs("shared", {
+    "output_files_content": [{
+      "file_id": "shared-1",
+      "name": "original-name.txt",
+      "path": str(source),
+      "size_bytes": len(content),
+      "sha256": hashlib.sha256(content).hexdigest(),
+      "download_url": "/sessions/shared/outputs/shared-1",
+    }],
+  })
+
+  assert hydrated["output_files_content"][0]["local_path"] == str(source.resolve())
+
+
+@pytest.mark.asyncio
+async def test_persistent_start_propagates_initial_bind_failure(monkeypatch):
+  tracker = SubTaskTracker()
+  server = SubAgentWebhookServer(tracker, port=0)
+  start = AsyncMock(side_effect=OSError("port already in use"))
+  monkeypatch.setattr(server, "start", start)
+
+  with pytest.raises(OSError, match="port already in use"):
+    await server.start_persistent()
+  assert server._keeper_task is None
+
+
+@pytest.mark.asyncio
+async def test_non_loopback_webhook_bind_requires_shared_secret(monkeypatch):
+  monkeypatch.setenv("SUBAGENT_WEBHOOK_HOST", "0.0.0.0")
+  monkeypatch.delenv("SUBAGENT_WEBHOOK_TOKEN", raising=False)
+  server = SubAgentWebhookServer(SubTaskTracker(), port=0)
+
+  with pytest.raises(RuntimeError, match="SUBAGENT_WEBHOOK_TOKEN is required"):
+    await server.start()
+  assert server._runner is None
+  assert server._site is None
 
 
 @pytest.mark.asyncio

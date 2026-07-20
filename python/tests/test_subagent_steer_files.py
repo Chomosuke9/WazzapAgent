@@ -101,7 +101,7 @@ def test_steering_forwards_resolved_context_files(tmp_path, monkeypatch):
     bot_is_admin=False,
     bot_is_super_admin=False,
     fallback_reply_to=None,
-    allowed_context_ids=set(),
+    allowed_context_ids={"000123"},
   ))
 
   # steer() was called once, for the active session, WITH files.
@@ -109,10 +109,12 @@ def test_steering_forwards_resolved_context_files(tmp_path, monkeypatch):
   session_id, instruction, files = recording.calls[0]
   assert session_id == "sess-1"
   assert instruction == "use this PDF, keep everything else the same"
-  # Media (.pdf) + the message text (.txt) are both staged and exist on disk.
+  # The real media is staged. Its caption/filename is deliberately NOT turned
+  # into a placeholder text file that could mask a missing PDF.
   assert files, "steering must forward resolved input files"
   assert all(os.path.isfile(p) for p in files)
   assert any(p.endswith(".pdf") for p in files)
+  assert not any(p.endswith(".txt") for p in files)
 
 
 def test_steering_without_ctx_ids_forwards_no_files(tmp_path, monkeypatch):
@@ -162,23 +164,53 @@ def test_client_steer_puts_files_and_base64_on_the_wire(tmp_path, monkeypatch):
   captured: dict = {}
 
   class _Resp:
-    status_code = 200
+    def __init__(self, status_code, body):
+      self.status_code = status_code
+      self._body = body
     headers: dict = {}
+    text = ""
+
+    def json(self):
+      return self._body
 
   def _fake_post(url, json=None, timeout=None):
     captured["url"] = url
     captured["payload"] = json
-    return _Resp()
+    import hashlib
+    return _Resp(202, {
+      "accepted": True,
+      "state": "queued",
+      "session_id": "sess-x",
+      "steering_id": json["steering_id"],
+      "requested_file_count": 1,
+      "staged_file_count": 1,
+      "staged_files": [{
+        "name": "note.txt",
+        "size": len(b"steered bytes"),
+        "sha256": hashlib.sha256(b"steered bytes").hexdigest(),
+      }],
+      "file_errors": [],
+    })
 
-  monkeypatch.setattr(client_mod, "requests", type("R", (), {"post": staticmethod(_fake_post)}))
+  def _fake_get(url, timeout=None):
+    return _Resp(200, {
+      "success": True,
+      "session_id": "sess-x",
+      "steering_id": captured["payload"]["steering_id"],
+      "state": "consumed",
+    })
+
+  monkeypatch.setattr(client_mod, "requests", type("R", (), {
+    "post": staticmethod(_fake_post), "get": staticmethod(_fake_get),
+  }))
 
   client = SubAgentClient(base_url="http://sub", webhook_url="http://wh")
 
   async def _run():
     return await client.steer("sess-x", "use this", input_files=[str(f)])
 
-  ok = asyncio.run(_run())
-  assert ok is True
+  ack = asyncio.run(_run())
+  assert ack["consume_status"]["state"] == "consumed"
   payload = captured["payload"]
   assert captured["url"].endswith("/steer")
   assert payload["session_id"] == "sess-x"
@@ -201,15 +233,44 @@ def test_client_steer_without_files_omits_file_keys(monkeypatch):
   captured: dict = {}
 
   class _Resp:
-    status_code = 200
+    def __init__(self, status_code, body):
+      self.status_code = status_code
+      self._body = body
     headers: dict = {}
+    text = ""
+
+    def json(self):
+      return self._body
 
   def _fake_post(url, json=None, timeout=None):
     captured["payload"] = json
-    return _Resp()
+    return _Resp(202, {
+      "accepted": True,
+      "state": "queued",
+      "session_id": "sess-x",
+      "steering_id": json["steering_id"],
+      "requested_file_count": 0,
+      "staged_file_count": 0,
+      "staged_files": [],
+      "file_errors": [],
+    })
 
-  monkeypatch.setattr(client_mod, "requests", type("R", (), {"post": staticmethod(_fake_post)}))
+  def _fake_get(url, timeout=None):
+    return _Resp(200, {
+      "success": True,
+      "session_id": "sess-x",
+      "steering_id": captured["payload"]["steering_id"],
+      "state": "consumed",
+    })
+
+  monkeypatch.setattr(client_mod, "requests", type("R", (), {
+    "post": staticmethod(_fake_post), "get": staticmethod(_fake_get),
+  }))
   client = SubAgentClient(base_url="http://sub", webhook_url="http://wh")
   asyncio.run(client.steer("sess-x", "focus on cats"))
   payload = captured["payload"]
-  assert payload == {"session_id": "sess-x", "instruction": "focus on cats"}
+  assert payload["session_id"] == "sess-x"
+  assert payload["instruction"] == "focus on cats"
+  assert payload["steering_id"]
+  assert "input_files" not in payload
+  assert "input_files_content" not in payload

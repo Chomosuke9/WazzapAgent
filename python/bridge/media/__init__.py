@@ -34,6 +34,7 @@ from .resolver import (
   materialize_visual_media,
   materialize_media_for_subagent,
   materialize_quoted_media,
+  SubagentMediaResolution,
 )
 __all__ = [
   # visual
@@ -54,4 +55,5 @@ __all__ = [
   "materialize_visual_media",
   "materialize_media_for_subagent",
   "materialize_quoted_media",
+  "SubagentMediaResolution",
 ]

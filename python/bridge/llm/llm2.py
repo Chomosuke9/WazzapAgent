@@ -320,7 +320,11 @@ def build_llm2_messages(
     subagent_block: str | None = subagent_context if subagent_context else None
     if subagent_block:
         msgs.append(HumanMessage(content=subagent_block))
-    files_block = _files_for_subagent_block(history_list) if allow_subagent else None
+    files_block = (
+        _files_for_subagent_block(history_list, current_payload=current_payload)
+        if allow_subagent
+        else None
+    )
     if files_block:
         msgs.append(HumanMessage(content=files_block))
     if subagent_result_block:

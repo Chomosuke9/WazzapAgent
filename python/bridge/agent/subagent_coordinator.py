@@ -24,8 +24,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import shutil
-import tempfile
 import time
 import uuid
 from collections import OrderedDict, deque
@@ -50,8 +48,8 @@ from ..messaging.actions import (
   _extract_actions,
   _extract_actions_from_tool_calls,
 )
+from ..messaging.format import sanitize_whatsapp_text
 from ..messaging.gateway import (
-  send_attachment,
   send_copy_code,
   send_delete_message,
   send_kick_member,
@@ -73,12 +71,69 @@ from ..subagent.output import (
   format_file_list,
   stage_input_files,
   stage_output_files,
+  tenant_staging_root,
 )
 from ..subagent.models import SubTask
 from ..subagent.config import SUBAGENT_WAIT_TIMEOUT_S, SUBAGENT_MAX_WAIT_S
 
 logger = setup_logging()
 from ..messaging.gateway import _dispatch_sticker
+
+
+class SubAgentInputError(RuntimeError):
+  """A requested context/file could not be staged completely."""
+
+  def __init__(self, message: str, *, statuses: list[dict] | None = None) -> None:
+    super().__init__(message)
+    self.statuses = statuses or []
+
+
+def _require_confirmed_send(ack: object, *, label: str) -> dict:
+  """Return the first gateway-confirmed send entry or fail closed."""
+  if not isinstance(ack, dict):
+    raise RuntimeError(f"gateway did not acknowledge {label}")
+  sent = ack.get("sent")
+  if not isinstance(sent, list) or not sent or not isinstance(sent[0], dict):
+    raise RuntimeError(f"gateway returned no sent manifest for {label}")
+  entry = sent[0]
+  if not _normalize_context_msg_id(entry.get("contextMsgId")):
+    raise RuntimeError(f"gateway returned no contextMsgId for {label}")
+  return entry
+
+
+async def _send_subagent_ingress_failure(
+  ws,
+  chat_id: str,
+  reply_to: str | None,
+  *,
+  steering: bool = False,
+) -> None:
+  """Correct an earlier confirmation when file transfer cannot complete."""
+  if steering:
+    text = (
+      "I couldn't deliver that update and its file to the running task. "
+      "Please resend the file or try the instruction again."
+    )
+  else:
+    text = (
+      "I couldn't retrieve and deliver the requested file to the task, so I "
+      "didn't start it. Please resend the file and try again."
+    )
+  try:
+    await send_message(
+      ws,
+      chat_id,
+      text,
+      reply_to,
+      request_id=_make_request_id("subagent_input_error"),
+    )
+  except Exception as exc:  # pylint: disable=broad-except
+    logger.exception(
+      "execute_subtask: failed to send ingress failure notice chat=%s: %s",
+      chat_id,
+      exc,
+      extra={"chat_id": chat_id},
+    )
 
 
 def _build_subtask_finished_lines(
@@ -149,46 +204,54 @@ async def _resolve_ctx_ids_to_input_files(
   materialized first so non-visual kinds (PDF/docx/…) referenced for the
   first time during steering are actually on disk before resolution.
   """
-  if not ctx_ids:
+  normalized_ids: list[str] = []
+  seen: set[str] = set()
+  for raw in ctx_ids or []:
+    cid = _normalize_context_msg_id(raw)
+    if not cid or not cid.isdigit() or len(cid) != 6 or cid in seen:
+      continue
+    seen.add(cid)
+    normalized_ids.append(cid)
+  if not normalized_ids:
     return []
-  await materialize_media_for_subagent(ws, chat_id, ctx_ids, media_paths_by_chat, history)
-  chat_store = media_paths_by_chat.get(chat_id, {})
+
+  resolutions = await materialize_media_for_subagent(
+    ws, chat_id, normalized_ids, media_paths_by_chat, history,
+  )
+  failures = [result.as_dict() for result in resolutions if not result.ok]
+  if len(resolutions) != len(normalized_ids):
+    returned = {result.context_msg_id for result in resolutions}
+    failures.extend({
+      "context_msg_id": cid,
+      "state": "unavailable",
+      "expected_media": None,
+      "paths": [],
+      "error": "resolver returned no status",
+    } for cid in normalized_ids if cid not in returned)
+  if failures:
+    raise SubAgentInputError(
+      "one or more requested context files could not be retrieved",
+      statuses=failures,
+    )
+
+  # Preserve every attachment in every requested message, not just atts[0].
   local_input_files: list[str] = []
-  tmp_dir = tempfile.mkdtemp(prefix="subagent_ctx_")
-  try:
-    file_idx = 1
-    for cid in ctx_ids:
-      # --- media resolution ---
-      atts = chat_store.get(cid)
-      media_path = None
-      if isinstance(atts, list) and atts:
-        first = atts[0]
-        p = first.get("path") if isinstance(first, dict) else None
-        if p and os.path.isfile(p):
-          media_path = p
-      elif isinstance(atts, str) and os.path.isfile(atts):
-        media_path = atts
-      if media_path:
-        ext = os.path.splitext(media_path)[1] or ".bin"
-        renamed = os.path.join(tmp_dir, f"media{file_idx}{ext}")
-        shutil.copyfile(media_path, renamed)
-        local_input_files.append(renamed)
-        file_idx += 1
-      # --- text resolution (on-demand scan of history deque) ---
-      msg_text = None
-      for msg in history:
-        if msg.context_msg_id == cid and msg.text:
-          msg_text = msg.text
-          break
-      if msg_text:
-        txt_path = os.path.join(tmp_dir, f"user_message{file_idx}.txt")
-        with open(txt_path, "w", encoding="utf-8") as f:
-          f.write(msg_text)
-        local_input_files.append(txt_path)
-        file_idx += 1
-    return stage_input_files(session_id, local_input_files)
-  finally:
-    shutil.rmtree(tmp_dir, ignore_errors=True)
+  seen_paths: set[str] = set()
+  for result in resolutions:
+    for raw_path in result.paths:
+      path = os.path.realpath(raw_path)
+      if path in seen_paths:
+        continue
+      seen_paths.add(path)
+      local_input_files.append(path)
+
+  staged = stage_input_files(session_id, local_input_files)
+  if len(staged) != len(local_input_files):
+    raise SubAgentInputError(
+      f"input staging accepted {len(staged)} of {len(local_input_files)} files",
+      statuses=[result.as_dict() for result in resolutions],
+    )
+  return staged
 
 
 async def _deliver_subagent_result(
@@ -211,6 +274,8 @@ async def _deliver_subagent_result(
   responder,
   pending_subagent_attachments: dict | None = None,
   pending_send_request_chat: OrderedDict[str, str] | None = None,
+  media_paths_by_chat: dict | None = None,
+  output_staging_base_dir=None,
 ) -> list[dict]:
   """Stage sub-agent outputs, re-invoke LLM2, and dispatch the resulting
   actions for a finalised sub-agent task.
@@ -255,6 +320,7 @@ async def _deliver_subagent_result(
           session_id,
           raw_paths,
           files_content=files_content if files_content else None,
+          base_dir=output_staging_base_dir,
         )
         if staged_outputs.skipped:
           logger.warning(
@@ -422,24 +488,21 @@ async def _deliver_subagent_result(
       # Intentionally skip ``_is_duplicate_reply`` here. The re-invoke is
       # the *delivery* of the sub-agent result and may legitimately
       # rephrase the original acknowledgement.
-      request_id = _make_request_id("send")
-      await send_message(
-        ws,
+      # Result delivery is durable only after the gateway positively ACKs it.
+      # Do not use the bridge's caller-supplied request-id path here: that mode
+      # intentionally returns after the frame write and can therefore mark a
+      # task delivered before Node rejects the send.
+      ack = await ws.send_message(
         chat_id,
-        reinvoke_text,
-        reinvoke_action.get("replyTo"),
-        request_id=request_id,
+        sanitize_whatsapp_text(reinvoke_text),
+        reply_to=reinvoke_action.get("replyTo"),
       )
+      sent_entry = _require_confirmed_send(ack, label="sub-agent result text")
       record_stat_fn(chat_id, "responses_sent")
-      if pending_send_request_chat is not None:
-        pending_send_request_chat[request_id] = chat_id
-        pending_send_request_chat.move_to_end(request_id)
-        while len(pending_send_request_chat) > 4096:
-          pending_send_request_chat.popitem(last=False)
       _prov_msg = WhatsAppMessage(
           timestamp_ms=int(time.time() * 1000),
           sender=assistant_name(),
-          context_msg_id="pending",
+          context_msg_id=str(sent_entry["contextMsgId"]),
           sender_ref=assistant_sender_ref(),
           sender_is_admin=False,
           text=reinvoke_text or None,
@@ -451,7 +514,10 @@ async def _deliver_subagent_result(
           quoted_sender_ref=None,
           quoted_sender_is_admin=False,
           quoted_sender_is_super_admin=False,
-          message_id=f"local-send-{request_id}",
+          message_id=str(
+            sent_entry.get("messageId")
+            or f"subagent-result-{session_id}"
+          ),
           role="assistant",
         )
       hydrate_quoted_from_history(_prov_msg, history)
@@ -544,46 +610,30 @@ async def _deliver_subagent_result(
   # bubble per file with no caption. Sent after the LLM2 text reply so
   # the conversation reads: text first, then files.
   #
-  # For each attachment we:
-  #   1. Build the request_id BEFORE sending so we can register the
-  #      pending sub-agent attachment mapping.
-  #   2. Send the attachment.
-  #   3. Create a provisional history entry (message_id=local-send-<rid>)
-  #      so that the action_ack handler can hydrate its context_msg_id.
-  #   4. Register the staged file info in ``pending_subagent_attachments``
-  #      so that the action_ack handler can store the path in
-  #      ``media_paths_by_chat`` once the real contextMsgId arrives.
+  # Every output attachment uses the SDK-allocated request-id path and waits for
+  # the authoritative gateway ACK. This prevents a successful transport write
+  # followed by a failed WhatsApp send from being mistaken for delivery.
   for staged_file in staged_outputs.staged:
-    attach_rid = _make_request_id("subagent_attach")
-    try:
-      await send_attachment(
-        ws,
-        chat_id,
-        staged_file.path,
-        staged_file.kind,
-        request_id=attach_rid,
-        file_name=staged_file.name,
-        mime=staged_file.mime,
-        thumbnail_base64=staged_file.thumbnail_base64,
-      )
-    except Exception as attach_err:  # pylint: disable=broad-except
-      logger.exception(
-        "execute_subtask: send_attachment failed session=%s file=%s: %s",
-        session_id,
-        staged_file.name,
-        attach_err,
-        extra={"chat_id": chat_id},
-      )
-      continue
-    # Provisional history entry for the file attachment. The real
-    # context_msg_id is filled in by ``_hydrate_provisional_context_id_from_ack``
-    # when the gateway acknowledges the send.
     attach_media_label = staged_file.kind or "document"
     attach_media_text = staged_file.name if staged_file.name else None
+    attachment: dict = {
+      "kind": attach_media_label,
+      "path": staged_file.path,
+      "fileName": staged_file.name,
+      "mime": staged_file.mime,
+    }
+    if staged_file.thumbnail_base64:
+      attachment["thumbnailBase64"] = staged_file.thumbnail_base64
+    ack = await ws.send_message(chat_id, attachments=[attachment])
+    sent_entry = _require_confirmed_send(
+      ack,
+      label=f"sub-agent output {staged_file.name}",
+    )
+    context_msg_id = str(sent_entry["contextMsgId"])
     _prov_msg = WhatsAppMessage(
         timestamp_ms=int(time.time() * 1000),
         sender=assistant_name(),
-        context_msg_id="pending",
+        context_msg_id=context_msg_id,
         sender_ref=assistant_sender_ref(),
         sender_is_admin=False,
         text=attach_media_text,
@@ -595,33 +645,28 @@ async def _deliver_subagent_result(
         quoted_sender_ref=None,
         quoted_sender_is_admin=False,
         quoted_sender_is_super_admin=False,
-        message_id=f"local-send-{attach_rid}",
+        message_id=str(
+          sent_entry.get("messageId")
+          or f"subagent-output-{session_id}-{staged_file.name}"
+        ),
         role="assistant",
     )
     hydrate_quoted_from_history(_prov_msg, history)
-    _append_history(
-      history,
-      _prov_msg,
-    )
-    # Register in pending_subagent_attachments so the action_ack handler
-    # can store the file path in media_paths_by_chat under the real
-    # contextMsgId once it arrives.
-    if pending_subagent_attachments is not None:
-      pending_subagent_attachments[attach_rid] = (chat_id, [{
+    _append_history(history, _prov_msg)
+    if media_paths_by_chat is not None:
+      media_paths_by_chat.setdefault(chat_id, {})[context_msg_id] = [{
         "kind": staged_file.kind,
         "mime": staged_file.mime,
         "fileName": staged_file.name,
         "path": staged_file.path,
-      }])
-      pending_subagent_attachments.move_to_end(attach_rid)
-      while len(pending_subagent_attachments) > 4096:
-        pending_subagent_attachments.popitem(last=False)
+        "received_at": time.time(),
+      }]
 
   # Defer clearing finished-task history until AFTER any correction
   # sub-agent actions are processed. If LLM2 re-dispatched a correction
   # task, the "recently finished" context is useful for the next turn.
   if not redispach_subagent_actions:
-    tracker.clear_history_for_chat(chat_id)
+    tracker.mark_delivered(session_id)
 
   return redispach_subagent_actions
 
@@ -631,6 +676,161 @@ class SubAgentCoordinator:
 
   def __init__(self, session) -> None:
     self._session = session
+    self._recovering_sessions: set[str] = set()
+
+  async def recover_pending_completions(self) -> None:
+    """Replay every durable, undelivered completion after bridge startup."""
+    tracker = self._session.subagent_tracker
+    pending = [
+      (task.chat_id, task.session_id)
+      for history in list(tracker._history.values())
+      for task in list(history)
+      if not tracker.is_delivered(task.session_id)
+    ]
+    for chat_id, session_id in pending:
+      try:
+        await self._recover_owned_completion(chat_id, session_id)
+      except asyncio.CancelledError:
+        raise
+      except Exception as exc:  # pylint: disable=broad-except
+        # The tracker intentionally retains the task. A later callback retry or
+        # bridge reconnect can try again without losing the report/files.
+        logger.exception(
+          "sub-agent startup recovery failed session=%s: %s",
+          session_id,
+          exc,
+          extra={"chat_id": chat_id},
+        )
+
+  async def _recover_owned_completion(
+    self,
+    chat_id: str,
+    session_id: str,
+    *,
+    attempts: int = 4,
+  ) -> None:
+    """Retry durable WhatsApp delivery, then tombstone the exact task."""
+    last_error: Exception | None = None
+    for attempt in range(1, max(1, attempts) + 1):
+      try:
+        await self.recover_completion(chat_id, session_id)
+        self._session.subagent_tracker.mark_delivered(session_id)
+        return
+      except asyncio.CancelledError:
+        raise
+      except Exception as exc:  # pylint: disable=broad-except
+        last_error = exc
+        if attempt >= max(1, attempts):
+          break
+        await asyncio.sleep(min(8.0, float(2 ** (attempt - 1))))
+    assert last_error is not None
+    raise last_error
+
+  async def recover_completion(self, chat_id: str, session_id: str) -> None:
+    """Deliver a durable result whose original coordinator waiter was lost.
+
+    After a bridge restart there is no live LLM turn to re-invoke, so recovery
+    intentionally sends the bounded raw report and each verified output file.
+    The webhook marks the tracker tombstone only after this coroutine returns.
+    """
+    session = self._session
+    tracker = session.subagent_tracker
+    if tracker.is_delivered(session_id):
+      return
+    if session_id in self._recovering_sessions:
+      raise RuntimeError(f"completion recovery already running: {session_id}")
+    self._recovering_sessions.add(session_id)
+    try:
+      lock = session.per_chat_lock[chat_id]
+      async with lock:
+        if tracker.is_delivered(session_id):
+          return
+        task = tracker.get_finished(session_id)
+        if task is None or task.chat_id != chat_id:
+          raise RuntimeError(f"finished sub-agent task is unavailable: {session_id}")
+
+        raw_paths = task.result.get("output_files") or []
+        files_content = task.result.get("output_files_content") or []
+        staged = await asyncio.to_thread(
+          stage_output_files,
+          session_id,
+          raw_paths,
+          files_content=files_content if files_content else None,
+          base_dir=tenant_staging_root(getattr(session, "folder_path", None)),
+        )
+        if staged.skipped:
+          reasons = "; ".join(
+            f"{entry.name}: {entry.reason}" for entry in staged.skipped
+          )
+          raise RuntimeError(f"recovery output staging incomplete: {reasons}")
+
+        report = (task.report or "").strip()
+        if not report and not staged.staged:
+          report = (
+            "The delegated task completed without a report or output file."
+            if task.status == "completed"
+            else "The delegated task failed without an error report."
+          )
+        if report:
+          ack = await session.sock.send_message(
+            chat_id,
+            sanitize_whatsapp_text(report),
+          )
+          sent_entry = _require_confirmed_send(
+            ack, label=f"recovered sub-agent report {session_id}",
+          )
+          context_id = sent_entry["contextMsgId"]
+          message_id = sent_entry.get("messageId")
+          _append_history(session.per_chat[chat_id], WhatsAppMessage(
+            timestamp_ms=int(time.time() * 1000),
+            sender=assistant_name(),
+            context_msg_id=str(context_id or "pending"),
+            sender_ref=assistant_sender_ref(),
+            sender_is_admin=False,
+            text=report,
+            message_id=str(message_id or f"recovered-report-{session_id}"),
+            role="assistant",
+          ))
+
+        for staged_file in staged.staged:
+          attachment: dict = {
+            "kind": staged_file.kind,
+            "path": staged_file.path,
+            "fileName": staged_file.name,
+            "mime": staged_file.mime,
+          }
+          if staged_file.thumbnail_base64:
+            attachment["thumbnailBase64"] = staged_file.thumbnail_base64
+          ack = await session.sock.send_message(
+            chat_id,
+            attachments=[attachment],
+          )
+          sent_entry = _require_confirmed_send(
+            ack, label=f"recovered sub-agent output {staged_file.name}",
+          )
+          context_id = sent_entry["contextMsgId"]
+          message_id = sent_entry.get("messageId")
+          if context_id:
+            session.media_paths_by_chat.setdefault(chat_id, {})[str(context_id)] = [{
+              "kind": staged_file.kind,
+              "mime": staged_file.mime,
+              "fileName": staged_file.name,
+              "path": staged_file.path,
+              "received_at": time.time(),
+            }]
+          _append_history(session.per_chat[chat_id], WhatsAppMessage(
+            timestamp_ms=int(time.time() * 1000),
+            sender=assistant_name(),
+            context_msg_id=str(context_id or "pending"),
+            sender_ref=assistant_sender_ref(),
+            sender_is_admin=False,
+            text=staged_file.name,
+            media=staged_file.kind,
+            message_id=str(message_id or f"recovered-file-{session_id}-{staged_file.name}"),
+            role="assistant",
+          ))
+    finally:
+      self._recovering_sessions.discard(session_id)
 
   async def queue_event(
     self,
@@ -695,6 +895,51 @@ class SubAgentCoordinator:
     pending_subagent_attachments = session.pending_subagent_attachments
     pending_send_request_chat = session.pending_send_request_chat
     _track_task = session._track_task
+    allowed_context_ids = set(allowed_context_ids or ())
+    raw_ctx_ids = action.get("contextMsgIds", []) or []
+    requested_ctx_ids: list[str] = []
+    invalid_ctx_ids: list[str] = []
+    seen_ctx_ids: set[str] = set()
+    available_file_ids = {
+      str(getattr(msg, "context_msg_id", "") or "")
+      for msg in history
+      if getattr(msg, "media", None)
+    }
+    available_file_ids.update(
+      str(cid) for cid, entries in media_paths_by_chat.get(chat_id, {}).items()
+      if entries
+    )
+    for raw in raw_ctx_ids:
+      cid = _normalize_context_msg_id(raw)
+      if (
+        not cid
+        or not cid.isdigit()
+        or len(cid) != 6
+        or cid not in allowed_context_ids
+        or cid not in available_file_ids
+      ):
+        invalid_ctx_ids.append(str(raw))
+        continue
+      if cid in seen_ctx_ids:
+        continue
+      seen_ctx_ids.add(cid)
+      requested_ctx_ids.append(cid)
+    if invalid_ctx_ids:
+      logger.warning(
+        "execute_subtask: rejected unavailable file context ids=%s chat=%s",
+        invalid_ctx_ids,
+        chat_id,
+        extra={"chat_id": chat_id, "available_file_ids": sorted(available_file_ids)},
+      )
+      await _send_subagent_ingress_failure(
+        ws,
+        chat_id,
+        fallback_reply_to,
+        steering=subagent_tracker.get_active_for_chat(chat_id) is not None,
+      )
+      return
+    action = dict(action)
+    action["contextMsgIds"] = requested_ctx_ids
     # Reject duplicate execute_subtask while another sub-agent task
     # is already in flight for this chat. The "Active sub-agent
     # task" context block (see SubTaskTracker.format_context) tells
@@ -722,8 +967,20 @@ class SubAgentCoordinator:
         except Exception as _steer_err:  # pylint: disable=broad-except
           logger.exception(
             "execute_subtask: steering file resolution failed chat=%s: %s",
-            chat_id, _steer_err, extra={"chat_id": chat_id},
+            chat_id,
+            _steer_err,
+            extra={
+              "chat_id": chat_id,
+              "resolution_statuses": getattr(_steer_err, "statuses", []),
+            },
           )
+          await _send_subagent_ingress_failure(
+            ws,
+            chat_id,
+            _steer_ctx_ids[-1] if _steer_ctx_ids else fallback_reply_to,
+            steering=True,
+          )
+          return
         logger.info(
           "execute_subtask: forwarding as steering to running "
           "sub-agent chat=%s active_session=%s files=%d instruction=%s",
@@ -733,9 +990,24 @@ class SubAgentCoordinator:
           _incoming[:120],
           extra={"chat_id": chat_id},
         )
-        await subagent_client.steer(
-          existing_task.session_id, _incoming, input_files=_steer_files,
-        )
+        try:
+          await subagent_client.steer(
+            existing_task.session_id, _incoming, input_files=_steer_files,
+          )
+        except Exception as _steer_err:  # pylint: disable=broad-except
+          logger.exception(
+            "execute_subtask: steering delivery failed chat=%s session=%s: %s",
+            chat_id,
+            existing_task.session_id,
+            _steer_err,
+            extra={"chat_id": chat_id},
+          )
+          await _send_subagent_ingress_failure(
+            ws,
+            chat_id,
+            _steer_ctx_ids[-1] if _steer_ctx_ids else fallback_reply_to,
+            steering=True,
+          )
       else:
         logger.warning(
           "execute_subtask: dropped (no instruction) for chat=%s",
@@ -752,9 +1024,27 @@ class SubAgentCoordinator:
     # Resolve contextMsgIds -> staged input file paths (media AND/OR message
     # text). Same resolution steering uses, so the primary and steering paths
     # ship identical files. See :func:`_resolve_ctx_ids_to_input_files`.
-    input_files = await _resolve_ctx_ids_to_input_files(
-      ws, chat_id, ctx_ids, media_paths_by_chat, history, session_id,
-    )
+    try:
+      input_files = await _resolve_ctx_ids_to_input_files(
+        ws, chat_id, ctx_ids, media_paths_by_chat, history, session_id,
+      )
+    except Exception as input_err:  # pylint: disable=broad-except
+      logger.exception(
+        "execute_subtask: input resolution failed session=%s: %s",
+        session_id,
+        input_err,
+        extra={
+          "chat_id": chat_id,
+          "resolution_statuses": getattr(input_err, "statuses", []),
+        },
+      )
+      await _send_subagent_ingress_failure(
+        ws,
+        chat_id,
+        ctx_ids[-1] if ctx_ids else fallback_reply_to,
+      )
+      cleanup_input_staging(session_id)
+      return
 
     task = SubTask(session_id=session_id, instruction=instruction, chat_id=chat_id)
     subagent_tracker.register(task)
@@ -972,6 +1262,10 @@ context block from ``SubTaskTracker.format_context``).
               responder=session._llm2,
               pending_subagent_attachments=pending_subagent_attachments,
               pending_send_request_chat=pending_send_request_chat,
+              media_paths_by_chat=media_paths_by_chat,
+              output_staging_base_dir=tenant_staging_root(
+                getattr(session, "folder_path", None)
+              ),
             )
             # If LLM2 re-dispatched a correction sub-agent task,
             # process it as a new execute_subtask action. We run
@@ -1003,9 +1297,27 @@ context block from ``SubTaskTracker.format_context``).
                 await send_message(ws, chat_id, _conf_text, fallback_reply_to, request_id=_conf_rid)
                 session._dashboard.record_stat(chat_id, "responses_sent")
               _new_session_id = f"{chat_id}_{uuid.uuid4().hex[:8]}_{int(time.time())}"
-              _input_files = await _resolve_ctx_ids_to_input_files(
-                ws, chat_id, _ctx_ids, media_paths_by_chat, history, _new_session_id,
-              )
+              try:
+                _input_files = await _resolve_ctx_ids_to_input_files(
+                  ws, chat_id, _ctx_ids, media_paths_by_chat, history, _new_session_id,
+                )
+              except Exception as _input_err:  # pylint: disable=broad-except
+                logger.exception(
+                  "execute_subtask: correction input resolution failed session=%s: %s",
+                  _new_session_id,
+                  _input_err,
+                  extra={
+                    "chat_id": chat_id,
+                    "resolution_statuses": getattr(_input_err, "statuses", []),
+                  },
+                )
+                await _send_subagent_ingress_failure(
+                  ws,
+                  chat_id,
+                  _ctx_ids[-1] if _ctx_ids else fallback_reply_to,
+                )
+                cleanup_input_staging(_new_session_id)
+                continue
               _task = SubTask(session_id=_new_session_id, instruction=_instruction, chat_id=chat_id)
               subagent_tracker.register(_task)
               logger.info(
@@ -1043,7 +1355,7 @@ context block from ``SubTaskTracker.format_context``).
               # Clear the now-stale finished-task history so the
               # next turn doesn't inject a "recently finished"
               # block that would confuse the model.
-              subagent_tracker.clear_history_for_chat(chat_id)
+              subagent_tracker.mark_delivered(session_id)
               # Spawn a new background task to wait for the
               # correction sub-agent and deliver its result.
               _bg2_session_id = _new_session_id
@@ -1137,6 +1449,10 @@ context block from ``SubTaskTracker.format_context``).
                       responder=session._llm2,
                       pending_subagent_attachments=pending_subagent_attachments,
                       pending_send_request_chat=pending_send_request_chat,
+                      media_paths_by_chat=media_paths_by_chat,
+                      output_staging_base_dir=tenant_staging_root(
+                        getattr(session, "folder_path", None)
+                      ),
                     )
                 except asyncio.CancelledError:
                   raise
@@ -1146,6 +1462,15 @@ context block from ``SubTaskTracker.format_context``).
                     session_id, _bg_err,
                     extra={"chat_id": chat_id},
                   )
+                  try:
+                    await self._recover_owned_completion(chat_id, session_id)
+                  except Exception as _recovery_err:  # pylint: disable=broad-except
+                    logger.exception(
+                      "execute_subtask: correction recovery exhausted session=%s: %s",
+                      session_id,
+                      _recovery_err,
+                      extra={"chat_id": chat_id},
+                    )
                 finally:
                   subagent_webhook.unregister_progress_event(session_id)
                   try:
@@ -1185,6 +1510,15 @@ context block from ``SubTaskTracker.format_context``).
           bg_err,
           extra={"chat_id": chat_id},
         )
+        try:
+          await self._recover_owned_completion(chat_id, session_id)
+        except Exception as recovery_err:  # pylint: disable=broad-except
+          logger.exception(
+            "execute_subtask: durable recovery exhausted session=%s: %s",
+            session_id,
+            recovery_err,
+            extra={"chat_id": chat_id},
+          )
 
     bg_task = asyncio.create_task(_run_subagent_post_processing())
     _track_task(bg_task)

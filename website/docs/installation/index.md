@@ -241,6 +241,7 @@ In the WazzapAgents `.env`, configure:
 
 ```bash
 SUBAGENT_URL=http://localhost:5000
+SUBAGENT_API_TOKEN=<the-same-main-api-token-in-both-services>
 SUBAGENT_WEBHOOK_PORT=8081
 SUBAGENT_WEBHOOK_URL=http://localhost:8081/subagent/callback
 ```
@@ -249,7 +250,16 @@ If WazzapSubAgents runs in Docker and needs to call back into WazzapAgents on th
 
 ```bash
 SUBAGENT_WEBHOOK_URL=http://host.docker.internal:8081/subagent/callback
+SUBAGENT_WEBHOOK_TOKEN=<the-same-long-random-secret-in-both-services>
 ```
+
+This non-loopback callback URL makes the bridge bind `0.0.0.0` automatically.
+Startup fails closed if the token is missing. For multiple accounts, use
+`http://host.docker.internal:{port}/subagent/callback` so each account remains
+routable. Explicit public or reverse-proxy ports are otherwise preserved.
+`SUBAGENT_API_TOKEN` authenticates the opposite direction (main API calls and
+large-output downloads), so use a different random value from
+`SUBAGENT_WEBHOOK_TOKEN`.
 
 :::tip
 The Docker Compose file in WazzapSubAgents already maps `host.docker.internal` on Linux with `host-gateway`.
@@ -267,7 +277,10 @@ WORKDIR_BASE=/storage/subagent_work
 
 When running natively (without Docker Compose), leave `SUBAGENT_INPUT_STAGING_DIR` unset and WazzapAgents will use `<project_root>/data/subagent_in` automatically.
 
-Make sure WazzapAgents can read the files returned by the Sub-Agent, otherwise output attachments cannot be sent back to WhatsApp.
+Same-host deployments can use the shared directory directly. Cross-host
+deployments stream non-inlined output files through the authenticated Sub-Agent
+API; WazzapAgents verifies the advertised byte count and SHA-256 before sending
+an attachment to WhatsApp.
 
 ### 4. Enable Sub-Agent in WhatsApp
 
@@ -337,8 +350,12 @@ Sub-Agent runs code inside a Docker sandbox. Although isolated, only run it on a
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SUBAGENT_URL` | `http://localhost:5000` | WazzapSubAgents API URL |
+| `SUBAGENT_API_TOKEN` | *(none)* | Bearer token for main API calls and non-inlined output downloads |
 | `SUBAGENT_WEBHOOK_PORT` | `8081` | Local callback webhook port |
 | `SUBAGENT_WEBHOOK_URL` | `http://localhost:8081/subagent/callback` | Callback URL sent to WazzapSubAgents |
+| `SUBAGENT_WEBHOOK_HOST` | *(automatic)* | Loopback for local URLs, `0.0.0.0` for remote/Docker URLs |
+| `SUBAGENT_WEBHOOK_TOKEN` | *(none)* | Shared callback secret; required on non-loopback binds |
+| `SUBAGENT_OUTPUT_DOWNLOAD_TIMEOUT_S` | `300` | Timeout for a streamed non-inlined output |
 | `SUBAGENT_ENABLED_DEFAULT` | `false` | Enable Sub-Agent by default for new chats |
 | `SUBAGENT_WAIT_TIMEOUT_S` | `300` | Maximum wait for Sub-Agent completion callback |
 

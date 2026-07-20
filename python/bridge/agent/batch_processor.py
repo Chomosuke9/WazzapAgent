@@ -107,6 +107,7 @@ from ..media import (
   _resolve_quoted_media_attachments,
   _resolve_sticker_media,
   _store_media_path,
+  materialize_media_for_subagent,
   materialize_visual_media,
   materialize_quoted_media,
   llm1_media_enabled,
@@ -1598,6 +1599,65 @@ class BatchProcessor:
           extra={"chat_id": chat_id},
         )
         return
+
+    # Persist sub-agent-eligible inbound media while the gateway still holds
+    # the source message proto. Waiting until a later execute_subtask call made
+    # availability depend on a volatile 1000-message Node cache (and on no Node
+    # restart occurring in between). Only chats with the feature enabled incur
+    # the eager download cost; the normal lazy vision path remains unchanged.
+    if db_get_subagent_enabled(chat_id):
+      eligible_kinds = {"image", "video", "audio", "document", "media"}
+      attachment_ctx_ids: list[str] = []
+      seen_attachment_ctx_ids: set[str] = set()
+      for attachment in payload.get("attachments") or []:
+        if not isinstance(attachment, dict):
+          continue
+        kind = str(attachment.get("kind") or "").strip().lower()
+        if kind not in eligible_kinds or attachment.get("path"):
+          continue
+        try:
+          declared_size = int(attachment.get("size") or 0)
+        except (TypeError, ValueError):
+          declared_size = 0
+        if declared_size > 200 * 1024 * 1024:
+          attachment["subagentBlockedReason"] = (
+            f"declared file size {declared_size} exceeds the 200 MB input limit"
+          )
+          continue
+        cid = _normalize_context_msg_id(
+          attachment.get("contextMsgId") or payload.get("contextMsgId")
+        )
+        if not cid or cid in seen_attachment_ctx_ids:
+          continue
+        seen_attachment_ctx_ids.add(cid)
+        attachment_ctx_ids.append(cid)
+
+      # Store pending metadata before the download, including oversize markers,
+      # so later resolution has an exact expected attachment count/reason.
+      _store_media_path(session.media_paths_by_chat, payload)
+      if attachment_ctx_ids:
+        async def _persist_inbound_media() -> None:
+          eager_results = await materialize_media_for_subagent(
+            ws,
+            chat_id,
+            attachment_ctx_ids,
+            session.media_paths_by_chat,
+          )
+          failed_eager = [result.as_dict() for result in eager_results if not result.ok]
+          if failed_eager:
+            # Do not drop the user's message. The coordinator retries on
+            # explicit use and then surfaces a corrective failure if needed.
+            logger.warning(
+              "sub-agent eager media persistence incomplete chat=%s",
+              chat_id,
+              extra={"chat_id": chat_id, "resolution_statuses": failed_eager},
+            )
+
+        # Incoming handlers run on the websocket frame pump. Awaiting an action
+        # ack here would deadlock that same pump, so launch immediately and let
+        # it receive its ack after this handler returns.
+        persistence_task = asyncio.create_task(_persist_inbound_media())
+        _track_task(persistence_task)
 
     pending = pending_by_chat[chat_id]
     now = time.monotonic()

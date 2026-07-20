@@ -268,6 +268,27 @@ def test_send_reliable_drops_oldest_over_1000():
     assert asyncio.run(asyncio.wait_for(scenario(), timeout=OP_TIMEOUT)) is True
 
 
+def test_cancelled_delivery_wait_removes_queued_action():
+    async def scenario():
+        transport = WSClientTransport(base_ms=10, max_ms=50, jitter_ratio=0)
+        task = asyncio.create_task(transport.send_reliable(
+            {"type": "action", "requestId": "r1"},
+            wait_for_delivery=True,
+            drop_oldest=False,
+        ))
+        await asyncio.sleep(0)
+        assert transport.get_reliable_queue_size() == 1
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        assert transport.get_reliable_queue_size() == 0
+        await transport.close()
+
+    asyncio.run(asyncio.wait_for(scenario(), timeout=OP_TIMEOUT))
+
+
 def test_send_reliable_queues_and_flushes_in_order_on_reconnect():
     async def scenario():
         received = []

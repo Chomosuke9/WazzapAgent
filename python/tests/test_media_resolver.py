@@ -51,11 +51,14 @@ def test_store_media_path_records_attachments():
   assert "received_at" in entries[0]
 
 
-def test_store_media_path_noop_without_ids_or_paths():
+def test_store_media_path_requires_ids_but_preserves_pending_metadata():
   store: dict = {}
   _store_media_path(store, {"attachments": [{"kind": "image", "path": "/tmp/x"}]})  # no ids
   _store_media_path(store, {"chatId": "c", "contextMsgId": "1", "attachments": [{"kind": "image"}]})  # no path
-  assert store == {}
+  assert list(store) == ["c"]
+  pending = store["c"]["1"][0]
+  assert pending["path"] is None
+  assert pending["pending"] is True
 
 
 def test_store_media_path_groups_by_attachment_ctx_id():
@@ -75,6 +78,20 @@ def test_store_media_path_groups_by_attachment_ctx_id():
   _store_media_path(store, payload)
   assert store["c@g.us"]["000085"][0]["path"] == "/tmp/a.jpg"
   assert store["c@g.us"]["000090"][0]["path"] == "/tmp/b.jpg"
+
+
+def test_pending_metadata_does_not_overwrite_eagerly_persisted_file(tmp_path):
+  media = tmp_path / "persisted.pdf"
+  media.write_bytes(b"pdf")
+  store = {"c": {"000001": [{
+    "kind": "document", "path": str(media), "received_at": time.time(),
+  }]}}
+  _store_media_path(store, {
+    "chatId": "c",
+    "contextMsgId": "000001",
+    "attachments": [{"kind": "document", "path": None, "pending": True}],
+  })
+  assert store["c"]["000001"][0]["path"] == str(media)
 
 
 # --- _merge_payload_attachments (burst attachment union + source stamping) ---

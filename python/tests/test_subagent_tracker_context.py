@@ -19,6 +19,7 @@ The fixes rely on three context blocks that LLM2 sees:
 
 from __future__ import annotations
 
+import base64
 import sys
 import time
 from pathlib import Path
@@ -208,3 +209,55 @@ def test_format_recent_finished_mentions_different_task_ok():
     block = tracker.format_recent_finished("chat-1")
     assert "THIS SAME task" in block
     assert "DIFFERENT new task" in block
+
+
+def test_tracker_recovers_active_task_across_restart(tmp_path):
+    state_path = tmp_path / "db" / "subagent_tracker.json"
+    first = SubTaskTracker(state_path=state_path)
+    first.register(SubTask(
+        session_id="survives-restart",
+        chat_id="chat-recovery",
+        instruction="prepare report",
+    ))
+
+    recovered = SubTaskTracker(state_path=state_path)
+    assert recovered.get_active_for_chat("chat-recovery") is not None
+    assert recovered.finalize(
+        "survives-restart", {"success": True, "report": "done after restart"},
+    ) is True
+
+    reloaded = SubTaskTracker(state_path=state_path)
+    block = reloaded.format_recent_finished("chat-recovery")
+    assert block is not None
+    assert "done after restart" in block
+
+
+def test_tracker_spools_inline_bytes_instead_of_persisting_base64(tmp_path):
+    state_path = tmp_path / "tracker.json"
+    tracker = SubTaskTracker(state_path=state_path)
+    tracker.register(SubTask(session_id="large", chat_id="chat", instruction="x"))
+    tracker.finalize("large", {
+        "success": True,
+        "output_files_content": [{
+            "name": "report.pdf",
+            "content_base64": base64.b64encode(b"%PDF durable").decode("ascii"),
+        }],
+    })
+
+    persisted = state_path.read_text(encoding="utf-8")
+    assert "content_base64" not in persisted
+    reloaded = SubTaskTracker(state_path=state_path)
+    recovered_task = reloaded._history["chat"][-1]
+    spooled_path = Path(recovered_task.result["output_files_content"][-1]["local_path"])
+    assert spooled_path.read_bytes() == b"%PDF durable"
+    reloaded.clear_history_for_chat("chat")
+    assert not spooled_path.exists()
+
+    # Delivery tombstone survives restart and makes a callback retry
+    # idempotently accepted instead of deferred as an unknown session.
+    after_delivery = SubTaskTracker(state_path=state_path)
+    assert after_delivery.is_delivered("large")
+    assert after_delivery.finalize(
+        "large", {"success": True, "report": "duplicate callback"},
+    ) is True
+    assert "large" not in after_delivery._deferred_results

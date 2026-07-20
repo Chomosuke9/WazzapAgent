@@ -542,12 +542,36 @@ class WaSocket:
           so a timeout/disconnect rejection is never logged as an unretrieved
           exception.
         """
-        future = self._pending.register(request_id, timeout=self._ack_timeout)
+        # Register before writing so an immediate gateway acknowledgement can
+        # never beat correlation setup.  The ack timer is armed only once the
+        # reliable transport confirms the frame was actually written; reconnect
+        # time therefore does not consume the acknowledgement budget.
+        future = self._pending.register(request_id, timeout=None)
         if caller_supplied:
             future.add_done_callback(_retrieve_future_outcome)
-            await self._transport.send(action_frame)
+        try:
+            reliable_send = getattr(self._transport, "send_reliable", None)
+            if reliable_send is None:
+                # Compatibility for injected/test transports implementing the
+                # original minimal ``send`` interface. The production
+                # WSClientTransport always takes the reliable branch.
+                delivery = self._transport.send(action_frame)
+            else:
+                delivery = reliable_send(
+                    action_frame,
+                    wait_for_delivery=True,
+                    drop_oldest=False,
+                )
+            await asyncio.wait_for(
+                delivery,
+                timeout=self._ack_timeout,
+            )
+        except Exception:
+            self._pending.discard(request_id)
+            raise
+        self._pending.arm_timeout(request_id, timeout=self._ack_timeout)
+        if caller_supplied:
             return None
-        await self._transport.send(action_frame)
         return await future
 
     # ------------------------------------------------------------------ #

@@ -127,6 +127,52 @@ def test_subagent_attachment_ack_stores_media_path():
   assert rid not in state["pending_subagent_attachments"]
 
 
+def test_failed_subagent_attachment_ack_is_retained_and_reported():
+  state = _fresh_state()
+  chat_id = "456@g.us"
+  rid = "subagent_attach-failed"
+  file_info = {"path": "/data/media/report.pdf", "name": "report.pdf"}
+  state["pending_subagent_attachments"][rid] = (chat_id, [file_info])
+
+  ack = AckResult(
+    request_id=rid,
+    action="send_message",
+    ok=False,
+    detail="attachment path is outside tenant media dir",
+    code="invalid_target",
+    result={},
+  )
+  asyncio.run(handle_action_ack(ack, **state))
+
+  assert rid in state["pending_subagent_attachments"]
+  retained = state["pending_subagent_attachments"][rid][1][0]
+  assert retained["ack_code"] == "invalid_target"
+  assert "outside tenant media" in retained["ack_error"]
+  assert state["media_paths_by_chat"][chat_id] == {}
+  assert "Failed to send sub-agent attachment" in state["per_chat"][chat_id][-1].text
+
+
+def test_success_ack_without_context_id_retains_pending_attachment():
+  state = _fresh_state()
+  chat_id = "456@g.us"
+  rid = "subagent_attach-missing-context"
+  state["pending_subagent_attachments"][rid] = (
+    chat_id, [{"path": "/data/media/report.pdf", "name": "report.pdf"}],
+  )
+
+  ack = AckResult(
+    request_id=rid,
+    action="send_message",
+    ok=True,
+    detail="sent",
+    result={"sent": [{"kind": "document", "contextMsgId": None}]},
+  )
+  asyncio.run(handle_action_ack(ack, **state))
+
+  assert rid in state["pending_subagent_attachments"]
+  assert state["media_paths_by_chat"][chat_id] == {}
+
+
 # ---------------------------------------------------------------------------
 # (c) run_command ack -> synthetic history line
 # ---------------------------------------------------------------------------

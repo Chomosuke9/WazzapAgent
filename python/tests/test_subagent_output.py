@@ -21,6 +21,7 @@ from bridge.subagent.output import (
   format_file_list,
   stage_input_files,
   stage_output_files,
+  tenant_staging_root,
 )
 from bridge.messaging.gateway import send_attachment
 from wasocket import WaSocket
@@ -657,6 +658,26 @@ class TestSendAttachment:
 # ---------------------------------------------------------------------------
 
 class TestStageOutputFilesFromContent:
+  def test_local_spool_uses_manifest_name_not_opaque_spool_name(self, tmp_path):
+    source = tmp_path / "callback-inbox" / "a1b2c3-opaque"
+    source.parent.mkdir()
+    source.write_bytes(b"%PDF-1.4 durable")
+
+    result = stage_output_files(
+      "sess_local",
+      [],
+      files_content=[{
+        "name": "quarterly-report.pdf",
+        "local_path": str(source),
+        "mime": "application/pdf",
+      }],
+      base_dir=tmp_path / "out",
+    )
+
+    assert len(result.staged) == 1
+    assert result.staged[0].name == "quarterly-report.pdf"
+    assert Path(result.staged[0].path).read_bytes() == source.read_bytes()
+
   def test_uses_files_content_to_write_file(self, tmp_path):
     pdf_bytes = b'%PDF-1.4'
     encoded = base64.b64encode(pdf_bytes).decode("ascii")
@@ -725,6 +746,23 @@ class TestStageOutputFilesFromContent:
     assert len(result.skipped) == 1
     assert "base64 decode failed" in result.skipped[0].reason
 
+  def test_invalid_inline_content_falls_back_to_same_named_raw_path(self, tmp_path):
+    source = tmp_path / "shared" / "report.pdf"
+    source.parent.mkdir()
+    source.write_bytes(b"%PDF-1.4 raw fallback")
+
+    result = stage_output_files(
+      "sess_fallback",
+      [str(source)],
+      files_content=[{
+        "name": "report.pdf", "content_base64": "not-valid-base64!!!",
+      }],
+      base_dir=tmp_path / "out",
+    )
+
+    assert len(result.staged) == 1
+    assert Path(result.staged[0].path).read_bytes() == source.read_bytes()
+
   def test_oversized_files_content_is_skipped(self, tmp_path, monkeypatch):
     monkeypatch.setattr("bridge.subagent.output.MAX_FILE_SIZE_BYTES", 4)
     data = b"12345678"  # 8 bytes > 4 byte limit
@@ -778,6 +816,17 @@ class TestStageOutputFilesFromContent:
     # The raw_path file (different name, not in files_content) must also be staged
     assert "big_video.mp4" in staged_names
     assert len(result.staged) == 2
+
+
+def test_tenant_staging_root_matches_node_tenant_layout(tmp_path, monkeypatch):
+  default_data = tmp_path / "default"
+  custom_media = tmp_path / "custom-media"
+  tenant_b = tmp_path / "tenant-b"
+  monkeypatch.setenv("DATA_DIR", str(default_data))
+  monkeypatch.setenv("MEDIA_DIR", str(custom_media))
+
+  assert tenant_staging_root(default_data) == custom_media.resolve() / "subagent_out"
+  assert tenant_staging_root(tenant_b) == tenant_b.resolve() / "media" / "subagent_out"
 
 
 # ---------------------------------------------------------------------------

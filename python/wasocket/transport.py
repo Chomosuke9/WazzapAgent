@@ -154,6 +154,13 @@ class WSClientTransport:
         self._reliable_queue: "collections.deque[Frame]" = collections.deque(
             maxlen=self.MAX_RELIABLE_QUEUE
         )
+        # A parallel deque keeps an optional delivery future for each reliable
+        # frame without changing the public/debug shape of ``_reliable_queue``.
+        # The future is settled only after ``ClientConnection.send`` succeeds.
+        self._reliable_waiters: "collections.deque[Optional[asyncio.Future]]" = (
+            collections.deque(maxlen=self.MAX_RELIABLE_QUEUE)
+        )
+        self._reliable_lock: Optional[asyncio.Lock] = None
 
         # Background tasks / signals.
         self._supervisor_task: Optional[asyncio.Task] = None
@@ -207,35 +214,113 @@ class WSClientTransport:
             return
         await self._send_raw(frame)
 
-    async def send_reliable(self, frame: Frame) -> None:
+    async def send_reliable(
+        self,
+        frame: Frame,
+        *,
+        wait_for_delivery: bool = False,
+        drop_oldest: bool = True,
+    ) -> None:
         """Send if OPEN, otherwise queue (bounded 1000, drop-oldest).
 
         Mirrors ``wsClient.sendReliable``: state-sync frames that must not be
         lost. Queued frames are flushed in order on the next successful connect.
         """
-        if self.is_connected():
-            await self._send_raw(frame)
-            return
-        if len(self._reliable_queue) >= self.MAX_RELIABLE_QUEUE:
-            logger.warning(
-                "reliable ws queue overflow; oldest message dropped (size=%d)",
-                len(self._reliable_queue),
-            )
-        # deque(maxlen=...) drops the oldest automatically on append.
-        self._reliable_queue.append(frame)
-        logger.debug("ws not ready, queued reliable message (size=%d)", len(self._reliable_queue))
+        if self._closed:
+            raise ConnectionError("websocket transport is closed")
+        if self._reliable_lock is None:
+            self._reliable_lock = asyncio.Lock()
+        loop = asyncio.get_running_loop()
+        waiter = loop.create_future() if wait_for_delivery else None
+        queued = False
+        async with self._reliable_lock:
+            if self.is_connected() and not self._reliable_queue:
+                try:
+                    await self._send_raw(frame)
+                except Exception:
+                    # The socket changed state between the OPEN check and the
+                    # write. Keep the action for the reconnect instead of
+                    # reporting success and losing it.
+                    queued = True
+                else:
+                    if waiter is not None and not waiter.done():
+                        waiter.set_result(None)
+            else:
+                queued = True
+
+            if queued:
+                if len(self._reliable_queue) >= self.MAX_RELIABLE_QUEUE:
+                    if not drop_oldest:
+                        raise OverflowError("reliable websocket queue is full")
+                    dropped_waiter = self._reliable_waiters.popleft()
+                    self._reliable_queue.popleft()
+                    if dropped_waiter is not None and not dropped_waiter.done():
+                        dropped_waiter.set_exception(
+                            OverflowError("reliable websocket frame was displaced")
+                        )
+                    logger.warning(
+                        "reliable ws queue overflow; oldest message dropped (size=%d)",
+                        len(self._reliable_queue),
+                    )
+                self._reliable_queue.append(frame)
+                self._reliable_waiters.append(waiter)
+                logger.debug(
+                    "ws not ready, queued reliable message (size=%d)",
+                    len(self._reliable_queue),
+                )
+
+        if waiter is not None:
+            try:
+                await waiter
+            except asyncio.CancelledError:
+                # A caller timeout means the action must not run later after it
+                # has already been reported as failed. Remove its exact queue
+                # entry if it has not been delivered yet.
+                await self._remove_reliable_waiter(waiter)
+                raise
 
     async def flush_reliable(self) -> None:
         """Drain the reliable queue in order if the socket is OPEN."""
-        if not self.is_connected():
+        if self._reliable_lock is None:
+            self._reliable_lock = asyncio.Lock()
+        sent = 0
+        async with self._reliable_lock:
+            while self._reliable_queue and self.is_connected():
+                frame = self._reliable_queue[0]
+                waiter = self._reliable_waiters[0]
+                # Pop only AFTER a successful write. A mid-flush disconnect
+                # leaves this frame and every subsequent frame queued.
+                await self._send_raw(frame)
+                self._reliable_queue.popleft()
+                self._reliable_waiters.popleft()
+                if waiter is not None and not waiter.done():
+                    waiter.set_result(None)
+                sent += 1
+        if sent:
+            logger.info("flushed queued reliable ws messages (count=%d)", sent)
+
+    async def _remove_reliable_waiter(self, target: asyncio.Future) -> None:
+        """Remove one not-yet-delivered reliable frame by waiter identity."""
+        if self._reliable_lock is None:
             return
-        if not self._reliable_queue:
-            return
-        queued = list(self._reliable_queue)
-        self._reliable_queue.clear()
-        for frame in queued:
-            await self._send_raw(frame)
-        logger.info("flushed queued reliable ws messages (count=%d)", len(queued))
+        async with self._reliable_lock:
+            frames: "collections.deque[Frame]" = collections.deque(
+                maxlen=self.MAX_RELIABLE_QUEUE
+            )
+            waiters: "collections.deque[Optional[asyncio.Future]]" = (
+                collections.deque(maxlen=self.MAX_RELIABLE_QUEUE)
+            )
+            removed = False
+            while self._reliable_queue:
+                frame = self._reliable_queue.popleft()
+                waiter = self._reliable_waiters.popleft()
+                if not removed and waiter is target:
+                    removed = True
+                    continue
+                frames.append(frame)
+                waiters.append(waiter)
+            self._reliable_queue = frames
+            self._reliable_waiters = waiters
 
     async def close(self) -> None:
         """Stop the supervisor/timers, best-effort flush, and close the socket.
@@ -250,10 +335,17 @@ class WSClientTransport:
         conn = self._connection
         # Best-effort: flush queued reliable frames while the socket is OPEN.
         if conn is not None and conn.state == State.OPEN and self._reliable_queue:
-            await self.flush_reliable()
+            try:
+                await self.flush_reliable()
+            except Exception as err:
+                logger.warning("reliable ws flush failed during close: %r", err)
         if self._reliable_queue:
             logger.info("ws close dropping queued reliable messages (dropped=%d)", len(self._reliable_queue))
             self._reliable_queue.clear()
+            while self._reliable_waiters:
+                waiter = self._reliable_waiters.popleft()
+                if waiter is not None and not waiter.done():
+                    waiter.set_exception(ConnectionError("websocket transport closed"))
 
         # Stop the supervisor (and therefore any in-flight reconnect/pump).
         if self._supervisor_task is not None:
@@ -493,11 +585,12 @@ class WSClientTransport:
     async def _send_raw(self, frame: Frame) -> None:
         conn = self._connection
         if conn is None:
-            return
+            raise ConnectionError("websocket is not connected")
         try:
             await conn.send(self._encode(frame))
         except Exception as err:
             logger.error("failed sending ws message: %r", err)
+            raise
 
     @staticmethod
     def _encode(frame: Frame) -> str:

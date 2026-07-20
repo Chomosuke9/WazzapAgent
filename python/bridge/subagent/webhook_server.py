@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import ipaddress
+import os
+from pathlib import Path
+import secrets
 import time
+from urllib.parse import urljoin, urlsplit
 from typing import Awaitable, Callable, Dict, Optional, Tuple
 
 try:
@@ -19,7 +25,16 @@ except ImportError:  # pragma: no cover - import-time guard
   aiohttp = None  # type: ignore
 
 from ..log import setup_logging
-from .config import SUBAGENT_WEBHOOK_PORT, subagent_webhook_host_env, subagent_webhook_max_body_bytes_raw
+from .config import (
+  SUBAGENT_OUTPUT_DOWNLOAD_TIMEOUT_S,
+  SUBAGENT_URL,
+  SUBAGENT_WEBHOOK_PORT,
+  subagent_api_token_env,
+  subagent_webhook_host_env,
+  subagent_webhook_max_body_bytes_raw,
+  subagent_webhook_token_env,
+)
+from .output import MAX_FILE_SIZE_BYTES
 from .tracker import SubTaskTracker
 
 logger = setup_logging()
@@ -27,6 +42,12 @@ logger = setup_logging()
 
 QueueEventHandler = Callable[[str, str, int, int], Awaitable[None]]
 # Signature: handler(chat_id, event_type, position, queue_size) -> awaitable
+CompletionRecoveryHandler = Callable[[str, str], Awaitable[None]]
+# Signature: handler(chat_id, session_id) -> awaitable
+
+
+class _OutputDownloadError(RuntimeError):
+  pass
 
 
 class SubAgentWebhookServer:
@@ -48,8 +69,10 @@ class SubAgentWebhookServer:
 
   def __init__(self, tracker: SubTaskTracker, port: int | None = None) -> None:
     self._tracker = tracker
-    self._port = port or SUBAGENT_WEBHOOK_PORT
+    self._port = SUBAGENT_WEBHOOK_PORT if port is None else port
+    self._bound_port = self._port
     self._completion_events: Dict[str, asyncio.Event] = {}
+    self._waiter_owned_sessions: set[str] = set()
     # Keepalive events: set each time a progress webhook arrives so the
     # bridge can reset its per-batch timeout instead of treating a slow
     # but still-working sub-agent as dead.
@@ -57,6 +80,7 @@ class SubAgentWebhookServer:
     self._runner: web.AppRunner | None = None
     self._site: web.TCPSite | None = None
     self._queue_handler: Optional[QueueEventHandler] = None
+    self._completion_recovery_handler: Optional[CompletionRecoveryHandler] = None
     # session_id -> (position, queue_size, last_emit_ts)
     self._queue_last_emit: Dict[str, Tuple[int, int, float]] = {}
     # Persistent-runner bookkeeping. ``_shutdown`` is set by
@@ -86,15 +110,41 @@ class SubAgentWebhookServer:
         "server. Install it via `pip install -r requirements.txt` (or "
         "`pip install aiohttp>=3.9.0`)."
       )
+    if self._runner is not None or self._site is not None:
+      return
     app = web.Application(client_max_size=self._client_max_size)
     app.router.add_post("/subagent/callback", self._handle_callback)
     app.router.add_get("/health", self._handle_health)
-    self._runner = web.AppRunner(app)
-    await self._runner.setup()
+    runner = web.AppRunner(app)
+    site: web.TCPSite | None = None
     host = subagent_webhook_host_env()
-    self._site = web.TCPSite(self._runner, host, self._port)
-    await self._site.start()
-    logger.info("SubAgent webhook server started on %s:%s", host, self._port)
+    try:
+      is_loopback = host.lower() == "localhost" or ipaddress.ip_address(host).is_loopback
+    except ValueError:
+      is_loopback = False
+    if not is_loopback and subagent_webhook_token_env() is None:
+      raise RuntimeError(
+        "SUBAGENT_WEBHOOK_TOKEN is required when SUBAGENT_WEBHOOK_HOST "
+        f"binds a non-loopback interface ({host!r})"
+      )
+    try:
+      await runner.setup()
+      site = web.TCPSite(runner, host, self._port)
+      await site.start()
+    except Exception:
+      try:
+        if site is not None:
+          await site.stop()
+      finally:
+        await runner.cleanup()
+      raise
+    self._runner = runner
+    self._site = site
+    server = getattr(site, "_server", None)
+    sockets = getattr(server, "sockets", None) or []
+    if sockets:
+      self._bound_port = int(sockets[0].getsockname()[1])
+    logger.info("SubAgent webhook server started on %s:%s", host, self._bound_port)
 
   async def start_persistent(self) -> None:
     """Start the webhook server and keep it alive indefinitely.
@@ -108,47 +158,42 @@ class SubAgentWebhookServer:
     The keeper stops only when ``stop_persistent()`` is called, which
     signals a graceful shutdown.
     """
+    if self._keeper_task is not None and not self._keeper_task.done():
+      return
     self._shutdown = False
 
+    # Gate bridge startup on a real successful bind.  Previously this method
+    # returned immediately after spawning the keeper, so a port collision could
+    # leave task submission enabled while the callback server retried forever.
+    await self.start()
+
     async def _keeper() -> None:
-      """Background loop: start the server, restart on crash."""
+      """Probe the live server and recover after post-start failures."""
       attempt = 0
       while not self._shutdown:
-        try:
-          await self.start()
-          # ``start()`` only returns after ``site.start()`` succeeds.
-          # The site keeps running until it is explicitly stopped or
-          # the runner is cleaned up. We periodically probe the
-          # /health endpoint so we can detect a silently-dead server
-          # (e.g. port became unavailable after startup).
-          while not self._shutdown:
-            await asyncio.sleep(self._HEALTH_CHECK_INTERVAL_S)
-            if self._shutdown:
-              break
-            # Probe /health to confirm the server is still alive.
-            # A live check is more reliable than checking object
-            # references which may remain non-None even after the
-            # server has stopped accepting connections.
-            if not await self._check_health():
-              logger.warning(
-                "SubAgent webhook server health check failed; restarting"
-              )
-              await self._do_stop()
-              break  # restart outer loop
-          # If we exited the inner loop due to _shutdown, stop cleanly.
-          if self._shutdown:
+        await asyncio.sleep(self._HEALTH_CHECK_INTERVAL_S)
+        if self._shutdown:
+          break
+        if await self._check_health():
+          attempt = 0
+          continue
+        logger.warning("SubAgent webhook server health check failed; restarting")
+        await self._do_stop()
+        while not self._shutdown:
+          try:
+            await self.start()
+            attempt = 0
+            break
+          except Exception as exc:  # pylint: disable=broad-except
+            attempt += 1
+            logger.error(
+              "SubAgent webhook restart failed (attempt %d); retrying in %ds: %s",
+              attempt,
+              self._RESTART_DELAY_S,
+              exc,
+            )
             await self._do_stop()
-            return
-        except Exception as exc:  # pylint: disable=broad-except
-          attempt += 1
-          logger.error(
-            "SubAgent webhook server crashed (attempt %d); restarting in %ds: %s",
-            attempt,
-            self._RESTART_DELAY_S,
-            exc,
-          )
-          await self._do_stop()
-          await asyncio.sleep(self._RESTART_DELAY_S)
+            await asyncio.sleep(self._RESTART_DELAY_S)
 
     self._keeper_task = asyncio.create_task(_keeper())
 
@@ -180,7 +225,7 @@ class SubAgentWebhookServer:
     """
     if aiohttp is None:
       return True  # can't check without aiohttp; assume ok
-    url = f"http://127.0.0.1:{self._port}/health"
+    url = f"http://127.0.0.1:{self._bound_port}/health"
     try:
       async with aiohttp.ClientSession() as session:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as resp:
@@ -190,19 +235,28 @@ class SubAgentWebhookServer:
 
   async def _do_stop(self) -> None:
     """Internal cleanup: stop the site and runner if they exist."""
-    if self._site is not None:
-      await self._site.stop()
-      self._site = None
-    if self._runner is not None:
-      await self._runner.cleanup()
-      self._runner = None
+    site, runner = self._site, self._runner
+    self._site = None
+    self._runner = None
+    try:
+      if site is not None:
+        await site.stop()
+    finally:
+      if runner is not None:
+        await runner.cleanup()
 
   def register_completion_event(self, session_id: str, event: asyncio.Event) -> None:
     self._completion_events[session_id] = event
+    self._waiter_owned_sessions.add(session_id)
+    # A callback may have raced registration and been replayed by the durable
+    # tracker. Do not make the coordinator wait for a second callback.
+    if self._tracker.is_finished(session_id):
+      event.set()
 
   def unregister_completion_event(self, session_id: str) -> None:
     """Remove completion event to prevent memory leak."""
     self._completion_events.pop(session_id, None)
+    self._waiter_owned_sessions.discard(session_id)
 
   def register_progress_event(self, session_id: str, event: asyncio.Event) -> None:
     """Register a keepalive event for *session_id* that is set each time a
@@ -224,6 +278,20 @@ class SubAgentWebhookServer:
     a stale ws is never written to.
     """
     self._queue_handler = handler
+
+  def set_completion_recovery_handler(
+    self, handler: Optional[CompletionRecoveryHandler],
+  ) -> None:
+    """Set the fallback used for results whose original waiter died on restart."""
+    self._completion_recovery_handler = handler
+
+  def clear_completion_recovery_handler_if(
+    self, handler: CompletionRecoveryHandler,
+  ) -> bool:
+    if self._completion_recovery_handler is handler:
+      self._completion_recovery_handler = None
+      return True
+    return False
 
   def clear_queue_handler_if(self, handler: QueueEventHandler) -> bool:
     """Clear the queue handler only if it is identically ``handler``.
@@ -268,7 +336,174 @@ class SubAgentWebhookServer:
     cleanly — never before."""
     self._queue_last_emit[session_id] = (position, queue_size, time.time())
 
+  @staticmethod
+  def _provided_token(request: web.Request) -> str:
+    headers = getattr(request, "headers", {}) or {}
+    direct = headers.get("X-Subagent-Webhook-Token", "")
+    if direct:
+      return str(direct)
+    authorization = str(headers.get("Authorization", ""))
+    if authorization.lower().startswith("bearer "):
+      return authorization[7:].strip()
+    return ""
+
+  def _is_authorized(self, request: web.Request) -> bool:
+    expected = subagent_webhook_token_env()
+    if expected is None:
+      return True
+    provided = self._provided_token(request)
+    return bool(provided) and secrets.compare_digest(provided, expected)
+
+  @staticmethod
+  def _origin(url: str) -> tuple[str, str, int | None]:
+    parts = urlsplit(url)
+    scheme = parts.scheme.lower()
+    port = parts.port
+    if port is None:
+      port = 443 if scheme == "https" else 80 if scheme == "http" else None
+    return scheme, (parts.hostname or "").lower(), port
+
+  @staticmethod
+  def _existing_download_matches(path, expected_size: int, expected_sha: str) -> bool:
+    try:
+      if path.stat().st_size != expected_size:
+        return False
+      digest = hashlib.sha256()
+      with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+          digest.update(chunk)
+      return digest.hexdigest() == expected_sha
+    except OSError:
+      return False
+
+  async def _materialize_downloadable_outputs(
+    self, session_id: str, result: dict,
+  ) -> dict:
+    """Stream omitted large outputs from the authenticated sub-agent API."""
+    manifest = result.get("output_files_content")
+    if not isinstance(manifest, list) or not manifest:
+      return result
+    base_url = SUBAGENT_URL.rstrip("/") + "/"
+    base_origin = self._origin(base_url)
+    updated_entries: list = []
+    materialized_any = False
+    download_spool_dir: str | None = None
+    # Output downloads are main -> sub-agent API calls.  Keep that credential
+    # separate from the reverse-direction callback secret so compromising one
+    # channel does not automatically authenticate the other.
+    token = subagent_api_token_env()
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    timeout = aiohttp.ClientTimeout(total=SUBAGENT_OUTPUT_DOWNLOAD_TIMEOUT_S)
+
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+      for index, raw_item in enumerate(manifest):
+        if not isinstance(raw_item, dict):
+          updated_entries.append(raw_item)
+          continue
+        item = dict(raw_item)
+        if item.get("content_base64") or item.get("local_path"):
+          updated_entries.append(item)
+          continue
+        download_url = item.get("download_url")
+        if not isinstance(download_url, str) or not download_url.strip():
+          updated_entries.append(item)
+          continue
+        resolved_url = urljoin(base_url, download_url.strip())
+        if self._origin(resolved_url) != base_origin:
+          raise _OutputDownloadError("download_url origin does not match SUBAGENT_URL")
+        try:
+          expected_size = int(item.get("size_bytes"))
+        except (TypeError, ValueError):
+          raise _OutputDownloadError("download manifest has invalid size_bytes") from None
+        expected_sha = str(item.get("sha256") or "").strip().lower()
+        if expected_size < 0 or expected_size > MAX_FILE_SIZE_BYTES:
+          raise _OutputDownloadError(
+            f"downloaded output size {expected_size} exceeds the 200 MB limit"
+          )
+        if len(expected_sha) != 64 or any(ch not in "0123456789abcdef" for ch in expected_sha):
+          raise _OutputDownloadError("download manifest has invalid sha256")
+        # Native/same-host deployments may expose the receiver's output path
+        # directly.  Prefer that verified file over a network round-trip, but
+        # never trust the path alone: size and digest must match the callback
+        # descriptor before the tracker records it.
+        shared_path = item.get("path")
+        if isinstance(shared_path, (str, os.PathLike)) and str(shared_path):
+          shared_file = Path(shared_path)
+          if await asyncio.to_thread(
+            self._existing_download_matches,
+            shared_file,
+            expected_size,
+            expected_sha,
+          ):
+            item["local_path"] = str(shared_file.resolve())
+            updated_entries.append(item)
+            materialized_any = True
+            continue
+        file_id = str(item.get("file_id") or f"output-{index}")
+        name = str(item.get("name") or f"output-{index}")
+        destination = self._tracker.callback_download_path(session_id, file_id, name)
+        if destination is None:
+          raise _OutputDownloadError("durable callback spool is not ready")
+        if await asyncio.to_thread(
+          self._existing_download_matches, destination, expected_size, expected_sha,
+        ):
+          item["local_path"] = str(destination.resolve())
+          updated_entries.append(item)
+          materialized_any = True
+          download_spool_dir = str(destination.parent.resolve())
+          continue
+        temporary = destination.with_suffix(destination.suffix + ".download")
+        digest = hashlib.sha256()
+        received = 0
+        try:
+          async with session.get(
+            resolved_url, headers=headers, allow_redirects=False,
+          ) as response:
+            if response.status != 200:
+              raise _OutputDownloadError(
+                f"output download returned HTTP {response.status}"
+              )
+            response_sha = response.headers.get("X-Content-SHA256")
+            if response_sha and response_sha.strip().lower() != expected_sha:
+              raise _OutputDownloadError("output response sha256 header mismatch")
+            with temporary.open("wb") as handle:
+              async for chunk in response.content.iter_chunked(1024 * 1024):
+                received += len(chunk)
+                if received > expected_size or received > MAX_FILE_SIZE_BYTES:
+                  raise _OutputDownloadError("output download exceeded declared size")
+                digest.update(chunk)
+                handle.write(chunk)
+          if received != expected_size:
+            raise _OutputDownloadError(
+              f"output download size mismatch ({received} != {expected_size})"
+            )
+          if digest.hexdigest() != expected_sha:
+            raise _OutputDownloadError("output download sha256 mismatch")
+          os.replace(temporary, destination)
+        except Exception:
+          try:
+            temporary.unlink(missing_ok=True)
+          except OSError:
+            pass
+          raise
+        item["local_path"] = str(destination.resolve())
+        updated_entries.append(item)
+        materialized_any = True
+        download_spool_dir = str(destination.parent.resolve())
+
+    if not materialized_any:
+      return result
+    hydrated = dict(result)
+    hydrated["output_files_content"] = updated_entries
+    # Tracker cleanup validates this path is under its own callback inbox.
+    if download_spool_dir:
+      hydrated["_spooled_output_dir"] = download_spool_dir
+    return hydrated
+
   async def _handle_callback(self, request: web.Request) -> web.Response:
+    if not self._is_authorized(request):
+      logger.warning("SubAgent callback: rejected invalid authentication token")
+      return web.json_response({"status": "unauthorized"}, status=401)
     try:
       data = await request.json()
     except web.HTTPRequestEntityTooLarge:
@@ -283,19 +518,25 @@ class SubAgentWebhookServer:
       logger.warning("SubAgent callback: invalid JSON received")
       return web.Response(status=400, text="Invalid JSON")
 
+    if not isinstance(data, dict):
+      return web.Response(status=400, text="JSON body must be an object")
     msg_type = data.get("type")
     session_id = data.get("session_id")
-    if not session_id:
+    if not isinstance(session_id, str) or not session_id.strip() or len(session_id) > 512:
       logger.warning("SubAgent callback: missing session_id")
-      return web.Response(status=400, text="Missing session_id")
+      return web.Response(status=400, text="Invalid session_id")
+    session_id = session_id.strip()
 
     if msg_type == "progress":
       entry = data.get("entry") or {}
-      step = entry.get("step", "unknown")
-      detail = entry.get("detail", "")
+      if not isinstance(entry, dict):
+        return web.Response(status=400, text="Invalid progress entry")
+      step = str(entry.get("step", "unknown"))
+      detail = str(entry.get("detail", ""))
       # ``reason`` is the new native-tool-call payload field; older sub-
       # agents that still emit only ``detail`` will leave it as None.
-      reason = entry.get("reason")
+      reason_value = entry.get("reason")
+      reason = str(reason_value) if reason_value is not None else None
       self._tracker.update_progress(session_id, step, detail, reason=reason)
       # Signal the keepalive event so the bridge resets its timeout.
       progress_event = self._progress_events.get(session_id)
@@ -316,10 +557,71 @@ class SubAgentWebhookServer:
 
     if msg_type == "complete":
       result = data.get("result") or {}
-      self._tracker.finalize(session_id, result)
+      if not isinstance(result, dict):
+        return web.Response(status=400, text="Invalid result")
+      if self._tracker.is_delivered(session_id):
+        return web.json_response({"status": "ok", "duplicate": True})
+      if (
+        session_id in self._waiter_owned_sessions
+        and session_id not in self._completion_events
+        and self._tracker.is_finished(session_id)
+      ):
+        return web.json_response({"status": "ok", "duplicate": True})
+      try:
+        result = await self._materialize_downloadable_outputs(session_id, result)
+      except _OutputDownloadError as exc:
+        logger.warning(
+          "SubAgent output download failed session=%s: %s", session_id, exc,
+        )
+        return web.json_response(
+          {"status": "output_download_failed", "retryable": True}, status=502,
+        )
+      accepted = self._tracker.finalize(session_id, result)
+      if not accepted:
+        # Retain the payload durably for a registration race/restart replay,
+        # but do not return 2xx: that would tell the sender it is safe to delete
+        # its only copy even though no task currently owns the result.
+        self._tracker.defer_completion(session_id, result)
+        logger.warning(
+          "SubAgent complete deferred: unknown session=%s; sender should retry",
+          session_id,
+        )
+        return web.json_response(
+          {"status": "pending_registration", "retryable": True}, status=409,
+        )
       event = self._completion_events.pop(session_id, None)
       if event is not None:
         event.set()
+        # If the first HTTP response is lost, a quick callback retry must stay
+        # owned by the live coordinator instead of taking the restart-recovery
+        # path and delivering a duplicate.
+        asyncio.get_running_loop().call_later(
+          300.0, self._waiter_owned_sessions.discard, session_id,
+        )
+      elif session_id in self._waiter_owned_sessions or self._tracker.is_delivered(session_id):
+        logger.info("SubAgent complete duplicate: session=%s", session_id)
+      else:
+        finished = self._tracker.get_finished(session_id)
+        handler = self._completion_recovery_handler
+        if finished is None:
+          return web.json_response(
+            {"status": "pending_registration", "retryable": True}, status=409,
+          )
+        if handler is None:
+          logger.warning("SubAgent recovery delivery not ready: session=%s", session_id)
+          return web.json_response(
+            {"status": "recovery_not_ready", "retryable": True}, status=503,
+          )
+        try:
+          await handler(finished.chat_id, session_id)
+        except Exception as exc:  # pylint: disable=broad-except
+          logger.exception(
+            "SubAgent recovery delivery failed session=%s: %s", session_id, exc,
+          )
+          return web.json_response(
+            {"status": "recovery_failed", "retryable": True}, status=500,
+          )
+        self._tracker.mark_delivered(session_id)
       # Also clean up the keepalive event — no more progress will arrive.
       self._progress_events.pop(session_id, None)
       # Drop dedup state — once the session is finalised, any future
@@ -355,6 +657,13 @@ class SubAgentWebhookServer:
           data,
         )
         return web.Response(status=400, text="Bad position/queue_size")
+
+      # Waiting in the global FIFO is legitimate activity. Treat every valid
+      # queue callback (including a deduped notification or one received while
+      # the WhatsApp gateway handler is reconnecting) as a timeout keepalive.
+      progress_event = self._progress_events.get(session_id)
+      if progress_event is not None and not progress_event.is_set():
+        progress_event.set()
 
       if self._is_duplicate_queue_event(session_id, position, queue_size):
         logger.debug(
