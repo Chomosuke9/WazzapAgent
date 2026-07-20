@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 
+import bridge.session as session_module
 from bridge.session import AgentSession
 from wasocket.events import WhatsAppMessage
 
@@ -54,6 +55,64 @@ class StubWaSocket:
       result = handler(payload)
       if asyncio.iscoroutine(result):
         await result
+
+
+class _LifecycleWaSocket(StubWaSocket):
+  """Run-loop fake that exposes exactly when the gateway handshake completes."""
+
+  def __init__(self, folder_path: str, events: list[str]) -> None:
+    super().__init__(folder_path)
+    self.events = events
+    self.connected = False
+
+  async def connect(self, _node_url: str) -> None:
+    self.events.append("connect:start")
+    await asyncio.sleep(0)
+    self.connected = True
+    self.events.append("connect:done")
+
+  async def disconnect(self) -> None:
+    self.connected = False
+    self.events.append("disconnect")
+
+
+class _LifecycleScheduledTasks:
+  def __init__(self, sock: _LifecycleWaSocket, events: list[str]) -> None:
+    self.sock = sock
+    self.events = events
+    self.connected_when_rearmed = False
+
+  def rearm_pending(self) -> None:
+    self.connected_when_rearmed = self.sock.connected
+    self.events.append("scheduled:rearm")
+
+
+class _LifecycleDirectInvoke:
+  def __init__(self, sock: _LifecycleWaSocket, events: list[str]) -> None:
+    self.sock = sock
+    self.events = events
+    self.connected_when_started = False
+
+  async def start(self) -> None:
+    self.connected_when_started = self.sock.connected
+    self.events.append("direct:start")
+
+  async def stop(self) -> None:
+    self.events.append("direct:stop")
+
+
+class _LifecycleDashboard:
+  def __init__(self, events: list[str]) -> None:
+    self.events = events
+
+  async def start_flush_loop(self) -> asyncio.Task:
+    async def _wait_forever() -> None:
+      await asyncio.Event().wait()
+
+    return asyncio.create_task(_wait_forever())
+
+  def flush_to_db(self) -> None:
+    self.events.append("dashboard:flush")
 
 
 def _ctx_only_payload(chat_id: str, text: str) -> dict:
@@ -229,3 +288,43 @@ def test_register_wires_all_expected_events():
   }
   assert expected <= wired
   assert sess._queue_handler is not None
+
+
+# ---------------------------------------------------------------------------
+# run() lifecycle ordering
+# ---------------------------------------------------------------------------
+
+def test_run_connects_before_rearm_and_direct_invoke_start(tmp_path, monkeypatch):
+  """Cold outbound work must not become active before hello/hello_ack."""
+
+  async def scenario():
+    events: list[str] = []
+    sock = _LifecycleWaSocket(str(tmp_path), events)
+    session = AgentSession(sock)
+    session.register()
+
+    scheduled = _LifecycleScheduledTasks(sock, events)
+    direct = _LifecycleDirectInvoke(sock, events)
+    session._scheduled = scheduled
+    session._direct_invoke = direct
+    session._dashboard = _LifecycleDashboard(events)
+
+    # Keep this lifecycle test focused on ordering, not process-global DB
+    # checkpoint bookkeeping performed during normal shutdown.
+    monkeypatch.setattr(session_module, "db_checkpoint_all_dbs", lambda: None)
+    monkeypatch.setattr(session_module, "db_close_all_connections", lambda: None)
+
+    stop_event = asyncio.Event()
+    stop_event.set()
+    await asyncio.wait_for(
+      session.run("ws://node.invalid:3000", stop_event), timeout=5.0,
+    )
+
+    assert scheduled.connected_when_rearmed is True
+    assert direct.connected_when_started is True
+    assert events.index("connect:done") < events.index("scheduled:rearm")
+    assert events.index("connect:done") < events.index("direct:start")
+    # The reorder remains inside run()'s existing cleanup boundary.
+    assert events.index("direct:stop") < events.index("disconnect")
+
+  asyncio.run(scenario())

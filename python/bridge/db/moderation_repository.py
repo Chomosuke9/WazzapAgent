@@ -114,16 +114,17 @@ def clear_mutes(chat_id: str) -> None:
 @_db_resilient('moderation')
 def is_muted(chat_id: str, sender_ref: str) -> bool:
   """Check if a user is currently muted (cache-first, instant)."""
+  cache_key = _tenant_cache_key(chat_id)
   with _cache_lock:
-    chat_mutes = _mute_cache.get(_tenant_cache_key(chat_id))
-    if chat_mutes is not None:
-      entry = chat_mutes.get(sender_ref)
-      if entry is not None:
-        if _is_mute_active(entry):
-          return True
-        # Expired — clean up cache
-        chat_mutes.pop(sender_ref, None)
+    chat_mutes = _mute_cache.get(cache_key)
+    if chat_mutes is not None and sender_ref in chat_mutes:
+      entry = chat_mutes[sender_ref]
+      if entry is None:
         return False
+      if _is_mute_active(entry):
+        return True
+      # Expired — make the next lookup verify + clean up the persisted row.
+      chat_mutes.pop(sender_ref, None)
       return False
 
   _ensure_split_ready()
@@ -133,6 +134,10 @@ def is_muted(chat_id: str, sender_ref: str) -> bool:
     (chat_id, sender_ref),
   ).fetchone()
   if row is None:
+    # Cache this sender-specific miss without claiming that the rest of the
+    # chat's persisted mute rows have been loaded.
+    with _cache_lock:
+      _mute_cache.setdefault(cache_key, {})[sender_ref] = None
     return False
   entry = {
     'muted_at': row['muted_at'],
@@ -141,11 +146,12 @@ def is_muted(chat_id: str, sender_ref: str) -> bool:
   }
   active = _is_mute_active(entry)
   with _cache_lock:
-    if _tenant_cache_key(chat_id) not in _mute_cache:
-      _mute_cache[_tenant_cache_key(chat_id)] = {}
+    if cache_key not in _mute_cache:
+      _mute_cache[cache_key] = {}
     if active:
-      _mute_cache[_tenant_cache_key(chat_id)][sender_ref] = entry
+      _mute_cache[cache_key][sender_ref] = entry
     else:
+      _mute_cache[cache_key][sender_ref] = None
       conn.execute(
         'DELETE FROM chat_mutes WHERE chat_id = ? AND sender_ref = ?',
         (chat_id, sender_ref),

@@ -172,6 +172,11 @@ def _resolve_quoted_media_attachments(
 
 def _guess_mime_from_path(file_path: str) -> str:
   """Guess MIME type from file path."""
+  # On Windows, ``mimetypes`` consults the registry before its built-in table.
+  # Some hosts register .webp as image/jpeg, which makes quoted stickers reach
+  # vision providers with a MIME type that does not match their bytes.
+  if os.path.splitext(file_path)[1].lower() == ".webp":
+    return "image/webp"
   guessed = mimetypes.guess_type(file_path)[0]
   return guessed or "image/jpeg"
 

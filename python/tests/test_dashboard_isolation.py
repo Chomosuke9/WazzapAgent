@@ -11,6 +11,7 @@ NO-HANG DISCIPLINE: pure synchronous DB ops; no sockets connect; temp dirs only.
 """
 from __future__ import annotations
 
+from contextlib import ExitStack
 import sys
 import tempfile
 from pathlib import Path
@@ -19,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bridge.session import AgentSession  # noqa: E402
 from bridge.dashboard import _period_keys  # noqa: E402
-from bridge.db import get_stats  # noqa: E402
+from bridge.db import close_all_connections, get_stats  # noqa: E402
 from wasocket import make_wa_socket  # noqa: E402
 
 
@@ -29,7 +30,11 @@ def _session(folder: str) -> AgentSession:
 
 
 def test_stats_db_isolation_no_cross_tenant_flush():
-    with tempfile.TemporaryDirectory(prefix="dash_iso_") as tmp:
+    with ExitStack() as stack:
+        tmp = stack.enter_context(tempfile.TemporaryDirectory(prefix="dash_iso_"))
+        # SQLite permits unlinking open databases on POSIX, but Windows does
+        # not. Close tenant-keyed handles before TemporaryDirectory tears down.
+        stack.callback(close_all_connections)
         tmp_path = Path(tmp)
         folder_a = str(tmp_path / "tenantA")
         folder_b = str(tmp_path / "tenantB")

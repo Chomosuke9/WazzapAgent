@@ -339,19 +339,25 @@ class AgentSession:
 
     self.subagent_webhook.set_queue_handler(self._queue_handler)
 
-    # Feature 5: re-arm any scheduled tasks persisted before this boot. Runs
-    # under the tenant DB context bound above so it reads THIS account's
-    # settings.db; armed timers inherit the context for their own DB access.
-    self._scheduled.rearm_pending()
-
-    # Direct-invoke HTTP endpoint: bind now (no-op unless DIRECT_INVOKE_API_KEY
-    # is set). Shares the session run lifecycle; its background re-invokes bind
-    # the tenant context themselves (see _submit_direct_invoke).
-    await self._direct_invoke.start()
-
     try:
       await ws.connect(node_url)
       logger.info("Connected to Node gateway at %s", node_url)
+
+      # Only activate cold outbound work after the hello/hello_ack handshake.
+      # Otherwise an overdue task (or an early direct-invoke request) can reach
+      # WaSocket while its best-effort transport is disconnected, be silently
+      # dropped, and still be treated as completed.
+      #
+      # Re-arming runs under the tenant DB context bound above so it reads THIS
+      # account's settings.db; armed timers inherit the context for their own
+      # DB access.
+      self._scheduled.rearm_pending()
+
+      # Direct-invoke HTTP endpoint: bind only once outbound delivery is ready
+      # (no-op unless DIRECT_INVOKE_API_KEY is set). Its background re-invokes
+      # bind the tenant context themselves (see _submit_direct_invoke).
+      await self._direct_invoke.start()
+
       await stop_event.wait()
     finally:
       # Stop accepting new direct-invoke requests before tearing down state.

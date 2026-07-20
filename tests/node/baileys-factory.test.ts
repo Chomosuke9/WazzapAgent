@@ -19,9 +19,25 @@ import {
 // no `fetchLatestBaileysVersion` network call and no real WhatsApp socket are
 // ever made. The fake exposes just enough surface for the factory to wire its
 // listeners (`ev.on`) and for the shared helpers to read `user`.
+type FakeEventHandler = (payload: unknown) => unknown;
+
 class FakeSock {
-  ev = { on: (_event: string, _handler: unknown) => {} };
+  private readonly handlers = new Map<string, FakeEventHandler[]>();
+
+  ev = {
+    on: (event: string, handler: FakeEventHandler) => {
+      const handlers = this.handlers.get(event) ?? [];
+      handlers.push(handler);
+      this.handlers.set(event, handlers);
+    },
+  };
+
   user = { id: '0@s.whatsapp.net' };
+
+  emit(event: string, payload: unknown): void {
+    for (const handler of this.handlers.get(event) ?? []) handler(payload);
+  }
+
   async sendMessage(): Promise<Record<string, unknown>> {
     return {};
   }
@@ -41,6 +57,39 @@ function rmrf(p: string): void {
   } catch {
     /* best-effort cleanup */
   }
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+async function waitFor(
+  predicate: () => boolean,
+  message: string,
+  timeoutMs = 2000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.ok(predicate(), message);
+}
+
+function closeUpdate(statusCode = 500): Record<string, unknown> {
+  return {
+    connection: 'close',
+    lastDisconnect: { error: { output: { statusCode } } },
+  };
+}
+
+function cleanupAccount(folder: string): void {
+  get(folder)?.database?.close();
+  remove(folder);
+  rmrf(folder);
 }
 
 test('ensureFolderLayout creates auth/ db/ media/ stickers/ under the tenant folder', () => {
@@ -129,6 +178,101 @@ test('same folderPath again returns the SAME entry (idempotent) once a socket is
   } finally {
     remove(folder);
     rmrf(folder);
+    __setSocketCreatorForTests(null);
+  }
+});
+
+test('concurrent creates for one folder share a single socket build', async () => {
+  const folder = tmpFolder('wazzap-concurrent-build-');
+  const gate = deferred();
+  let creatorCalls = 0;
+  __setSocketCreatorForTests(async () => {
+    creatorCalls += 1;
+    await gate.promise;
+    return new FakeSock() as unknown as never;
+  });
+
+  try {
+    const firstPromise = createOrResumeAccount({ folderPath: folder, printQr: false });
+    const secondPromise = createOrResumeAccount({ folderPath: folder, printQr: false });
+
+    await waitFor(() => creatorCalls > 0, 'the first socket build should start');
+    gate.resolve();
+
+    const [first, second] = await Promise.all([firstPromise, secondPromise]);
+    assert.equal(creatorCalls, 1, 'only one Baileys socket may be created per tenant');
+    assert.strictEqual(second, first, 'both callers receive the same account entry');
+    assert.strictEqual(second.sock, first.sock, 'both callers observe the same socket');
+  } finally {
+    gate.resolve();
+    cleanupAccount(folder);
+    __setSocketCreatorForTests(null);
+  }
+});
+
+test('reconnect build coalesces with create and stale close events cannot replace the new socket', async () => {
+  const folder = tmpFolder('wazzap-reconnect-race-');
+  const reconnectGate = deferred();
+  const sockets: FakeSock[] = [];
+  let creatorCalls = 0;
+  let closeCallbacks = 0;
+
+  __setSocketCreatorForTests(async () => {
+    creatorCalls += 1;
+    const sock = new FakeSock();
+    sockets.push(sock);
+    if (creatorCalls === 2) await reconnectGate.promise;
+    return sock as unknown as never;
+  });
+
+  try {
+    const entry = await createOrResumeAccount({
+      folderPath: folder,
+      printQr: false,
+      onStatusChange: (status) => {
+        if (status === 'close') closeCallbacks += 1;
+      },
+    });
+    const oldSock = sockets[0]!;
+
+    // The first close starts a replacement build and immediately makes both
+    // socket references unavailable to ctx-first action helpers.
+    oldSock.emit('connection.update', closeUpdate());
+    await waitFor(() => creatorCalls === 2, 'the reconnect socket build should start');
+    assert.equal(entry.sock, undefined);
+    assert.equal(entry.ctx.sock, undefined);
+
+    // A duplicate close from the no-longer-current socket must be ignored even
+    // while its replacement is still being constructed.
+    oldSock.emit('connection.update', closeUpdate());
+    assert.equal(closeCallbacks, 1, 'duplicate stale close must not be forwarded');
+
+    // A Python hello during the WhatsApp reconnect shares the same build rather
+    // than creating a third socket against the tenant's auth directory.
+    const duringReconnect = createOrResumeAccount({ folderPath: folder, printQr: false });
+    reconnectGate.resolve();
+    const resumed = await duringReconnect;
+    const replacement = sockets[1]!;
+
+    assert.equal(creatorCalls, 2, 'hello during reconnect must reuse the replacement build');
+    assert.strictEqual(resumed, entry);
+    assert.strictEqual(entry.sock, replacement);
+    assert.strictEqual(entry.ctx.sock, replacement);
+
+    // Once the replacement is live, a delayed close from the old generation
+    // must not clear it, regress status, or initiate another reconnect.
+    replacement.emit('connection.update', { connection: 'open' });
+    assert.equal(entry.waStatus, 'open');
+    oldSock.emit('connection.update', closeUpdate());
+
+    assert.equal(closeCallbacks, 1);
+    assert.equal(creatorCalls, 2);
+    assert.strictEqual(entry.sock, replacement);
+    assert.strictEqual(entry.ctx.sock, replacement);
+    assert.equal(entry.waStatus, 'open');
+  } finally {
+    reconnectGate.resolve();
+    cleanupAccount(folder);
     __setSocketCreatorForTests(null);
   }
 });

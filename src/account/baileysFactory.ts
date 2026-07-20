@@ -108,6 +108,14 @@ const defaultSocketCreator: SocketCreator = async (authState) => {
 let socketCreator: SocketCreator = defaultSocketCreator;
 
 /**
+ * Per-tenant socket builds currently in flight. Both the initial
+ * `createOrResumeAccount` path and Baileys reconnects must share this
+ * coordinator: otherwise a Python `hello` arriving while WhatsApp is
+ * reconnecting can create a second socket against the same auth directory.
+ */
+const socketBuilds = new Map<string, Promise<void>>();
+
+/**
  * TEST SEAM — override the Baileys socket creator so tests run fully offline
  * (no `fetchLatestBaileysVersion` network call, no real socket). Pass `null` to
  * restore the default creator.
@@ -264,8 +272,37 @@ export async function createOrResumeAccount(
   entry.ctx.stickersDir = mediaDirs.stickersDir;
   entry.ctx.stickerUploadDir = mediaDirs.stickerUploadDir;
 
-  await buildSocket(entry, layout.authDir, opts);
+  await ensureSocketBuilt(entry, layout.authDir, opts);
   return entry;
+}
+
+/**
+ * Ensure at most one socket build runs for a tenant at a time. The promise is
+ * removed after success or failure so a later call can retry a failed build.
+ */
+async function ensureSocketBuilt(
+  entry: AccountEntry,
+  authDir: string,
+  opts: BaileysFactoryOptions,
+): Promise<void> {
+  if (entry.sock) return;
+
+  const existing = socketBuilds.get(entry.folderPath);
+  if (existing) {
+    await existing;
+    return;
+  }
+
+  const build = buildSocket(entry, authDir, opts);
+  socketBuilds.set(entry.folderPath, build);
+  try {
+    await build;
+  } finally {
+    // Identity guard: never let an older build clear a newer coordinator.
+    if (socketBuilds.get(entry.folderPath) === build) {
+      socketBuilds.delete(entry.folderPath);
+    }
+  }
 }
 
 /**
@@ -476,6 +513,17 @@ function attachConnectionListener(
   // otherwise mint a NEW code, confusing the user).
   let pairingRequested = false;
   sock.ev.on("connection.update", (update) => {
+    // A replaced socket can still deliver a queued/delayed update. Only the
+    // socket currently bound to this tenant may mutate status or trigger a
+    // rebuild; otherwise a stale close can tear down its live replacement.
+    if (entry.sock !== sock) {
+      logger.debug(
+        { folderPath, connection: update.connection },
+        "ignoring connection update from stale WhatsApp socket",
+      );
+      return;
+    }
+
     const { connection, lastDisconnect, qr } = update;
     if (qr) {
       // Pairing-code flow (no QR): when WA_PAIRING_NUMBER is configured and this
@@ -525,10 +573,15 @@ function attachConnectionListener(
       } catch (err) {
         logger.error({ err }, "onStatusChange handler failed");
       }
+      // Clear both canonical references while reconnecting so ctx-first action
+      // helpers cannot keep sending through the socket that just closed. This
+      // also leaves a logged-out account accurately marked as having no live
+      // socket, while preserving the no-auto-reconnect loggedOut branch below.
+      entry.sock = undefined;
+      if (entry.ctx.sock === sock) entry.ctx.sock = undefined;
       if (statusCode !== DisconnectReason.loggedOut) {
         // Rebuild only the socket; folder/DB/context setup is preserved.
-        entry.sock = undefined;
-        buildSocket(entry, authDir, opts).catch((err) =>
+        ensureSocketBuilt(entry, authDir, opts).catch((err) =>
           logger.error({ err, folderPath }, "reconnect failed"),
         );
       } else {

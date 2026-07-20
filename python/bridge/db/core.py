@@ -99,8 +99,9 @@ _subagent_enabled_cache: dict[str, bool] = {}
 # (global + per-chat) memory list injected into LLM2 every turn. Cleared
 # wholesale on any settings invalidation (global memory affects every chat).
 _memory_cache: dict = {}
-# Mute cache: {chat_id: {sender_ref: {"muted_at": str, "duration_m": int, "notified": bool}}}
-_mute_cache: dict[str, dict[str, dict]] = {}
+# Mute cache: {(tenant, chat_id): {sender_ref: entry | None}}. ``None`` is a
+# DB-confirmed negative lookup; an absent sender key has not been loaded yet.
+_mute_cache: dict[tuple[str, str], dict[str, Optional[dict]]] = {}
 _cache_lock = threading.Lock()
 
 
