@@ -217,6 +217,7 @@ class WaSocket:
         reply_to: Optional[str] = None,
         attachments: Optional[List[dict]] = None,
         request_id: Optional[str] = None,
+        wait_for_ack: bool = False,
     ) -> dict:
         """Send a text message (+ optional attachments). Returns the
         ``send_message`` ActionResult (``{sent: [...], replyTo}``) when the SDK
@@ -239,7 +240,10 @@ class WaSocket:
             attachments=attachments,
         )
         return await self._dispatch_action(
-            frame, rid, caller_supplied=request_id is not None
+            frame,
+            rid,
+            caller_supplied=request_id is not None,
+            wait_for_supplied_ack=wait_for_ack,
         )
 
     async def send_quiz(
@@ -520,7 +524,12 @@ class WaSocket:
     # ------------------------------------------------------------------ #
 
     async def _dispatch_action(
-        self, action_frame: object, request_id: str, *, caller_supplied: bool
+        self,
+        action_frame: object,
+        request_id: str,
+        *,
+        caller_supplied: bool,
+        wait_for_supplied_ack: bool = False,
     ) -> Optional[dict]:
         """Send an action frame, routing it through :class:`PendingAcks`.
 
@@ -546,33 +555,42 @@ class WaSocket:
         # never beat correlation setup.  The ack timer is armed only once the
         # reliable transport confirms the frame was actually written; reconnect
         # time therefore does not consume the acknowledgement budget.
-        future = self._pending.register(request_id, timeout=None)
-        if caller_supplied:
-            future.add_done_callback(_retrieve_future_outcome)
-        try:
-            reliable_send = getattr(self._transport, "send_reliable", None)
-            if reliable_send is None:
-                # Compatibility for injected/test transports implementing the
-                # original minimal ``send`` interface. The production
-                # WSClientTransport always takes the reliable branch.
-                delivery = self._transport.send(action_frame)
-            else:
-                delivery = reliable_send(
-                    action_frame,
-                    wait_for_delivery=True,
-                    drop_oldest=False,
+        await_ack = not caller_supplied or wait_for_supplied_ack
+        attempts = 3 if await_ack else 1
+        for attempt in range(1, attempts + 1):
+            future = self._pending.register(request_id, timeout=None)
+            if not await_ack:
+                future.add_done_callback(_retrieve_future_outcome)
+            try:
+                reliable_send = getattr(self._transport, "send_reliable", None)
+                if reliable_send is None:
+                    delivery = self._transport.send(action_frame)
+                else:
+                    delivery = reliable_send(
+                        action_frame,
+                        wait_for_delivery=True,
+                        drop_oldest=False,
+                    )
+                await asyncio.wait_for(delivery, timeout=self._ack_timeout)
+            except Exception:
+                self._pending.discard(request_id)
+                raise
+            self._pending.arm_timeout(request_id, timeout=self._ack_timeout)
+            if not await_ack:
+                return None
+            try:
+                return await future
+            except errors.TimeoutError:
+                if attempt >= attempts:
+                    raise
+                logger.warning(
+                    "action ack timed out; retrying same request id (%s, attempt=%d)",
+                    request_id,
+                    attempt + 1,
                 )
-            await asyncio.wait_for(
-                delivery,
-                timeout=self._ack_timeout,
-            )
-        except Exception:
-            self._pending.discard(request_id)
-            raise
-        self._pending.arm_timeout(request_id, timeout=self._ack_timeout)
-        if caller_supplied:
-            return None
-        return await future
+        raise errors.TimeoutError(
+            "ack wait timed out", code="timeout", request_id=request_id,
+        )
 
     # ------------------------------------------------------------------ #
     # Internal: transport callbacks

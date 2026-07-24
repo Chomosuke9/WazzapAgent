@@ -86,7 +86,9 @@ class SubAgentClient:
       "steering_id": steering_id,
       "instruction": instruction,
     }
-    expected_manifest = self._expected_input_manifest(input_files or [])
+    expected_manifest = await asyncio.to_thread(
+      self._expected_input_manifest, input_files or [],
+    )
     if input_files:
       try:
         wire_files, inline_files = await self._prepare_input_transfer(
@@ -182,7 +184,9 @@ class SubAgentClient:
     }
     if previous_session_id is not None:
       payload["previous_session_id"] = previous_session_id
-    expected_manifest = self._expected_input_manifest(input_files)
+    expected_manifest = await asyncio.to_thread(
+      self._expected_input_manifest, input_files,
+    )
     wire_files, inline_files = await self._prepare_input_transfer(
       input_files,
       expected_manifest,
@@ -291,7 +295,7 @@ class SubAgentClient:
     losses. Uploaded entries are checksum-bound and later acknowledged again by
     ``/execute`` or ``/steer``.
     """
-    inline_files = self._encode_input_files(input_files)
+    inline_files = await asyncio.to_thread(self._encode_input_files, input_files)
     inline_identities = Counter(
       (
         str(item.get("name") or ""),

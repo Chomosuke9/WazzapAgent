@@ -29,6 +29,9 @@
  * run offline and assert on the frames sent to the registry client.
  */
 import logger from '../logger.js';
+import { createHash } from 'node:crypto';
+import { mkdir, open, readFile, rename } from 'node:fs/promises';
+import path from 'node:path';
 import * as registry from '../server/accountRegistry.js';
 import {
   sendOutgoing,
@@ -69,6 +72,7 @@ import { MAX_QUIZ_IDS } from '../wa/domain/caches.js';
 import type {
   AccountEntry,
   InboundActionFrame,
+  OutboundFrame,
   ActionAckPayload,
   ActionResult,
   WsErrorPayload,
@@ -147,6 +151,126 @@ interface EmitActionAckArgs {
   code?: ErrorCode | string | null;
 }
 
+interface ActionReceipt {
+  fingerprint: string;
+  frames: OutboundFrame[];
+  completedAt: number;
+  state: 'running' | 'complete';
+}
+
+const receiptCaches = new Map<string, Map<string, ActionReceipt>>();
+const receiptLoads = new Map<string, Promise<Map<string, ActionReceipt>>>();
+const actionCaptures = new Map<string, OutboundFrame[]>();
+const inFlightActions = new Map<string, { fingerprint: string; promise: Promise<ActionReceipt> }>();
+const receiptWrites = new Map<string, Promise<void>>();
+
+function actionKey(folderPath: string, requestId: string): string {
+  return `${folderPath}\0${requestId}`;
+}
+
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, item]) => [key, canonical(item)]),
+    );
+  }
+  return value;
+}
+
+function actionFingerprint(frame: InboundActionFrame): string {
+  return createHash('sha256').update(JSON.stringify(canonical(frame))).digest('hex');
+}
+
+function receiptPath(folderPath: string): string {
+  return path.join(folderPath, 'db', 'action-receipts.json');
+}
+
+async function loadReceiptCache(folderPath: string): Promise<Map<string, ActionReceipt>> {
+  const cached = receiptCaches.get(folderPath);
+  if (cached) return cached;
+  const pending = receiptLoads.get(folderPath);
+  if (pending) return pending;
+  const load = (async () => {
+    const result = new Map<string, ActionReceipt>();
+    try {
+      const raw = JSON.parse(await readFile(receiptPath(folderPath), 'utf8')) as { receipts?: unknown[] };
+      if (!Array.isArray(raw?.receipts)) throw new Error('action receipt file has no receipts array');
+      for (const item of raw.receipts) {
+        if (!item || typeof item !== 'object') throw new Error('action receipt entry is invalid');
+        const record = item as Record<string, unknown>;
+        if (typeof record.requestId !== 'string' || typeof record.fingerprint !== 'string' || !Array.isArray(record.frames)) {
+          throw new Error('action receipt entry is incomplete');
+        }
+        // Receipts written before the running-claim upgrade had no state and
+        // were only created after completion, so they are safe legacy
+        // "complete" entries. Any other explicit value is malformed.
+        const receiptState = record.state === undefined ? 'complete' : record.state;
+        if (receiptState !== 'running' && receiptState !== 'complete') {
+          throw new Error('action receipt entry has an invalid state');
+        }
+        result.set(record.requestId, {
+          fingerprint: record.fingerprint,
+          frames: record.frames as OutboundFrame[],
+          completedAt: Number(record.completedAt) || 0,
+          state: receiptState,
+        });
+      }
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code !== 'ENOENT') {
+        logger.error({ err, folderPath }, 'failed loading durable action receipts');
+        throw err;
+      }
+    }
+    receiptCaches.set(folderPath, result);
+    return result;
+  })();
+  receiptLoads.set(folderPath, load);
+  try {
+    return await load;
+  } finally {
+    if (receiptLoads.get(folderPath) === load) receiptLoads.delete(folderPath);
+  }
+}
+
+async function persistReceiptCache(folderPath: string, cache: Map<string, ActionReceipt>): Promise<void> {
+  const previous = receiptWrites.get(folderPath) ?? Promise.resolve();
+  const write = previous.catch(() => undefined).then(async () => {
+    const destination = receiptPath(folderPath);
+    await mkdir(path.dirname(destination), { recursive: true });
+    const temporary = `${destination}.${process.pid}.${Date.now()}.tmp`;
+    const receipts = [...cache.entries()].map(([requestId, receipt]) => ({ requestId, ...receipt }));
+    const handle = await open(temporary, 'w');
+    try {
+      await handle.writeFile(JSON.stringify({ version: 1, receipts }), 'utf8');
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(temporary, destination);
+  });
+  receiptWrites.set(folderPath, write);
+  try {
+    await write;
+  } finally {
+    if (receiptWrites.get(folderPath) === write) receiptWrites.delete(folderPath);
+  }
+}
+
+function sendActionFrame(entry: AccountEntry, frame: OutboundFrame): void {
+  const payload = 'payload' in frame ? frame.payload as { requestId?: unknown } : undefined;
+  const requestId = typeof payload?.requestId === 'string' ? payload.requestId : undefined;
+  const capture = requestId ? actionCaptures.get(actionKey(entry.folderPath, requestId)) : undefined;
+  if (capture) {
+    capture.push(frame);
+    return;
+  }
+  registry.sendReliableToClient(entry.folderPath, frame);
+}
+
 /**
  * Emit an `action_ack` (and, for a successful `send_message`, the legacy
  * `send_ack`) to the account's bound Python client. Best-effort: dropped by
@@ -164,9 +288,9 @@ export function emitActionAck(
   };
   if (result && typeof result === 'object') payload.result = result as ActionResult;
   if (code) payload.code = code as ErrorCode;
-  registry.sendToClient(entry.folderPath, { type: 'action_ack', payload });
+  sendActionFrame(entry, { type: 'action_ack', payload });
   if (action === 'send_message' && ok) {
-    registry.sendToClient(entry.folderPath, {
+    sendActionFrame(entry, {
       type: 'send_ack',
       payload: { requestId: requestId as string },
     });
@@ -197,7 +321,7 @@ export function emitActionError(
     requestId,
     action,
   };
-  registry.sendToClient(entry.folderPath, { type: 'error', payload });
+  sendActionFrame(entry, { type: 'error', payload });
 }
 
 // ---- injectable wa/* seam -------------------------------------------------
@@ -306,7 +430,7 @@ const handleKickMember: ActionHandler = async (entry, _payload, requestId, deps)
     result: kickResult as Record<string, unknown>,
     code: failure.code,
   });
-  registry.sendToClient(entry.folderPath, {
+  sendActionFrame(entry, {
     type: 'error',
     payload: {
       message: 'kick_member failed',
@@ -690,7 +814,7 @@ async function routeAction(
   }
 
   if (type && type !== 'hello') {
-    registry.sendToClient(entry.folderPath, {
+    sendActionFrame(entry, {
       type: 'error',
       payload: {
         message: `unsupported command: ${type}`,
@@ -715,15 +839,145 @@ export async function dispatchAction(
   deps: Partial<DispatchDeps> = {},
 ): Promise<void> {
   const merged: DispatchDeps = { ...DEFAULT_DEPS, ...deps };
+  const payload = frame?.payload as unknown as Record<string, unknown> | undefined;
+  const requestId = typeof payload?.requestId === 'string' && payload.requestId.trim()
+    ? payload.requestId
+    : undefined;
+  const action = frame?.type;
+
+  const execute = async (): Promise<void> => {
+    try {
+      await routeAction(entry, frame, merged);
+    } catch (err) {
+      logger.error({ err, action, folderPath: entry.folderPath }, 'failed handling ws action');
+      emitActionError(entry, { requestId, action, err });
+    }
+  };
+
+  if (!requestId) {
+    await execute();
+    return;
+  }
+
+  const fingerprint = actionFingerprint(frame);
+  const key = actionKey(entry.folderPath, requestId);
+  let cache: Map<string, ActionReceipt>;
   try {
-    await routeAction(entry, frame, merged);
+    cache = await loadReceiptCache(entry.folderPath);
   } catch (err) {
-    const action = frame?.type;
-    logger.error({ err, action, folderPath: entry.folderPath }, 'failed handling ws action');
-    emitActionError(entry, {
-      requestId: (frame?.payload as unknown as Record<string, unknown> | undefined)?.requestId as string | undefined,
+    logger.error(
+      { err, folderPath: entry.folderPath, requestId, action },
+      'refusing action because durable receipts are unreadable',
+    );
+    emitActionAck(entry, {
+      requestId,
       action,
-      err,
+      ok: false,
+      detail: 'Action receipt storage is unreadable; action was not executed',
+      code: 'send_failed',
     });
+    return;
+  }
+  const completed = cache.get(requestId);
+  if (completed) {
+    if (completed.fingerprint !== fingerprint) {
+      emitActionAck(entry, {
+        requestId,
+        action,
+        ok: false,
+        detail: 'requestId is already bound to a different action payload',
+        code: 'invalid_target',
+      });
+      return;
+    }
+    if (completed.state === 'running') {
+      emitActionAck(entry, {
+        requestId,
+        action,
+        ok: false,
+        detail: 'A previous execution may have completed; refusing to execute it again',
+        code: 'send_failed',
+      });
+      return;
+    }
+    for (const receiptFrame of completed.frames) {
+      registry.sendReliableToClient(entry.folderPath, receiptFrame);
+    }
+    return;
+  }
+
+  const running = inFlightActions.get(key);
+  if (running) {
+    if (running.fingerprint !== fingerprint) {
+      emitActionAck(entry, {
+        requestId,
+        action,
+        ok: false,
+        detail: 'requestId is already executing a different action payload',
+        code: 'invalid_target',
+      });
+      return;
+    }
+    await running.promise;
+    return;
+  }
+
+  const promise = (async (): Promise<ActionReceipt> => {
+    const claim: ActionReceipt = {
+      fingerprint,
+      frames: [],
+      completedAt: 0,
+      state: 'running',
+    };
+    cache.set(requestId, claim);
+    try {
+      await persistReceiptCache(entry.folderPath, cache);
+    } catch (err) {
+      cache.delete(requestId);
+      logger.error(
+        { err, folderPath: entry.folderPath, requestId, action },
+        'refusing action because its durable execution claim could not be persisted',
+      );
+      emitActionAck(entry, {
+        requestId,
+        action,
+        ok: false,
+        detail: 'Action receipt storage is unavailable; action was not executed',
+        code: 'send_failed',
+      });
+      return claim;
+    }
+    const frames: OutboundFrame[] = [];
+    actionCaptures.set(key, frames);
+    try {
+      await execute();
+    } finally {
+      actionCaptures.delete(key);
+    }
+    const receipt: ActionReceipt = {
+      fingerprint,
+      frames,
+      completedAt: Date.now(),
+      state: 'complete',
+    };
+    cache.set(requestId, receipt);
+    try {
+      await persistReceiptCache(entry.folderPath, cache);
+    } catch (err) {
+      logger.error(
+        { err, folderPath: entry.folderPath, requestId, action },
+        'failed persisting action receipt; retaining in-memory dedupe',
+      );
+    }
+    for (const receiptFrame of frames) {
+      registry.sendReliableToClient(entry.folderPath, receiptFrame);
+    }
+    return receipt;
+  })();
+  inFlightActions.set(key, { fingerprint, promise });
+  try {
+    await promise;
+  } finally {
+    inFlightActions.delete(key);
   }
 }

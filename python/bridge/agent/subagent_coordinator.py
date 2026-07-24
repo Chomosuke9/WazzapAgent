@@ -23,6 +23,7 @@ the original closures.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import time
 import uuid
@@ -86,6 +87,11 @@ class SubAgentInputError(RuntimeError):
   def __init__(self, message: str, *, statuses: list[dict] | None = None) -> None:
     super().__init__(message)
     self.statuses = statuses or []
+
+
+def _recovery_request_id(session_id: str, part: str) -> str:
+  digest = hashlib.sha256(f"{session_id}\0{part}".encode("utf-8")).hexdigest()[:32]
+  return f"subrec-{digest}"
 
 
 def _require_confirmed_send(ack: object, *, label: str) -> dict:
@@ -245,7 +251,9 @@ async def _resolve_ctx_ids_to_input_files(
       seen_paths.add(path)
       local_input_files.append(path)
 
-  staged = stage_input_files(session_id, local_input_files)
+  staged = await asyncio.to_thread(
+    stage_input_files, session_id, local_input_files,
+  )
   if len(staged) != len(local_input_files):
     raise SubAgentInputError(
       f"input staging accepted {len(staged)} of {len(local_input_files)} files",
@@ -312,7 +320,9 @@ async def _deliver_subagent_result(
     if final_task.status == "completed":
       # Dashboard: count successfully completed sub-agent tasks.
       record_stat_fn(chat_id, "subagent_tasks_completed")
-      raw_paths = final_task.result.get("output_files") or []
+      # Remote absolute paths are untrusted. Receiver outputs arrive as inline
+      # bytes or authenticated download descriptors materialized by the webhook.
+      raw_paths: list[str] = []
       files_content = final_task.result.get("output_files_content") or []
       if (isinstance(raw_paths, list) and raw_paths) or (isinstance(files_content, list) and files_content):
         staged_outputs = await asyncio.to_thread(
@@ -321,6 +331,7 @@ async def _deliver_subagent_result(
           raw_paths,
           files_content=files_content if files_content else None,
           base_dir=output_staging_base_dir,
+          allowed_local_root=tracker.callback_inbox_root(),
         )
         if staged_outputs.skipped:
           logger.warning(
@@ -459,7 +470,10 @@ async def _deliver_subagent_result(
     a.get("type") == "send_message" and (a.get("text") or "").strip()
     for a in reinvoke_actions
   )
-  if not has_reinvoke_text and final_task is not None:
+  has_correction_action = any(
+    a.get("type") == "execute_subtask" for a in reinvoke_actions
+  )
+  if not has_reinvoke_text and not has_correction_action and final_task is not None:
     fallback_text = (
       final_task.report
       or ("Sub-agent failed without a report."
@@ -481,10 +495,27 @@ async def _deliver_subagent_result(
       "replyTo": fallback_reply_to,
     }]
 
+  text_delivery_index = 0
   for reinvoke_action in reinvoke_actions:
     reinvoke_type = reinvoke_action.get("type")
     if reinvoke_type == "send_message":
       reinvoke_text = reinvoke_action.get("text") or ""
+      delivery_part = (
+        "report" if text_delivery_index == 0 else f"report:{text_delivery_index}"
+      )
+      text_delivery_index += 1
+      if tracker.is_delivery_part_done(session_id, delivery_part):
+        continue
+      intent = tracker.prepare_delivery_part(
+        session_id,
+        delivery_part,
+        {
+          "kind": "text",
+          "text": sanitize_whatsapp_text(reinvoke_text),
+          "reply_to": reinvoke_action.get("replyTo"),
+        },
+      )
+      delivery_text = str(intent["text"])
       # Intentionally skip ``_is_duplicate_reply`` here. The re-invoke is
       # the *delivery* of the sub-agent result and may legitimately
       # rephrase the original acknowledgement.
@@ -494,8 +525,10 @@ async def _deliver_subagent_result(
       # task delivered before Node rejects the send.
       ack = await ws.send_message(
         chat_id,
-        sanitize_whatsapp_text(reinvoke_text),
-        reply_to=reinvoke_action.get("replyTo"),
+        delivery_text,
+        reply_to=intent.get("reply_to"),
+        request_id=_recovery_request_id(session_id, delivery_part),
+        wait_for_ack=True,
       )
       sent_entry = _require_confirmed_send(ack, label="sub-agent result text")
       record_stat_fn(chat_id, "responses_sent")
@@ -505,9 +538,9 @@ async def _deliver_subagent_result(
           context_msg_id=str(sent_entry["contextMsgId"]),
           sender_ref=assistant_sender_ref(),
           sender_is_admin=False,
-          text=reinvoke_text or None,
+          text=delivery_text or None,
           media=None,
-          quoted_message_id=_normalize_context_msg_id(reinvoke_action.get("replyTo")),
+          quoted_message_id=_normalize_context_msg_id(intent.get("reply_to")),
           quoted_sender=None,
           quoted_text=None,
           quoted_media=None,
@@ -525,6 +558,7 @@ async def _deliver_subagent_result(
         history,
         _prov_msg,
       )
+      tracker.mark_delivery_part_done(session_id, delivery_part)
       _code = extract_first_code_block(reinvoke_text)
       if _code:
         await send_copy_code(
@@ -613,7 +647,10 @@ async def _deliver_subagent_result(
   # Every output attachment uses the SDK-allocated request-id path and waits for
   # the authoritative gateway ACK. This prevents a successful transport write
   # followed by a failed WhatsApp send from being mistaken for delivery.
-  for staged_file in staged_outputs.staged:
+  for index, staged_file in enumerate(staged_outputs.staged):
+    delivery_part = f"file:{index}:{staged_file.name}:{staged_file.size_bytes}"
+    if tracker.is_delivery_part_done(session_id, delivery_part):
+      continue
     attach_media_label = staged_file.kind or "document"
     attach_media_text = staged_file.name if staged_file.name else None
     attachment: dict = {
@@ -624,7 +661,17 @@ async def _deliver_subagent_result(
     }
     if staged_file.thumbnail_base64:
       attachment["thumbnailBase64"] = staged_file.thumbnail_base64
-    ack = await ws.send_message(chat_id, attachments=[attachment])
+    intent = tracker.prepare_delivery_part(
+      session_id,
+      delivery_part,
+      {"kind": "attachment", "attachment": attachment},
+    )
+    ack = await ws.send_message(
+      chat_id,
+      attachments=[intent["attachment"]],
+      request_id=_recovery_request_id(session_id, delivery_part),
+      wait_for_ack=True,
+    )
     sent_entry = _require_confirmed_send(
       ack,
       label=f"sub-agent output {staged_file.name}",
@@ -653,6 +700,7 @@ async def _deliver_subagent_result(
     )
     hydrate_quoted_from_history(_prov_msg, history)
     _append_history(history, _prov_msg)
+    tracker.mark_delivery_part_done(session_id, delivery_part)
     if media_paths_by_chat is not None:
       media_paths_by_chat.setdefault(chat_id, {})[context_msg_id] = [{
         "kind": staged_file.kind,
@@ -749,7 +797,7 @@ class SubAgentCoordinator:
         if task is None or task.chat_id != chat_id:
           raise RuntimeError(f"finished sub-agent task is unavailable: {session_id}")
 
-        raw_paths = task.result.get("output_files") or []
+        raw_paths: list[str] = []
         files_content = task.result.get("output_files_content") or []
         staged = await asyncio.to_thread(
           stage_output_files,
@@ -757,24 +805,37 @@ class SubAgentCoordinator:
           raw_paths,
           files_content=files_content if files_content else None,
           base_dir=tenant_staging_root(getattr(session, "folder_path", None)),
+          allowed_local_root=tracker.callback_inbox_root(),
         )
+        report = (task.report or "").strip()
         if staged.skipped:
           reasons = "; ".join(
             f"{entry.name}: {entry.reason}" for entry in staged.skipped
           )
-          raise RuntimeError(f"recovery output staging incomplete: {reasons}")
-
-        report = (task.report or "").strip()
+          warning = f"Some output files could not be recovered: {reasons}"
+          report = f"{report}\n\n{warning}" if report else warning
         if not report and not staged.staged:
           report = (
             "The delegated task completed without a report or output file."
             if task.status == "completed"
             else "The delegated task failed without an error report."
           )
-        if report:
+        if report and not tracker.is_delivery_part_done(session_id, "report"):
+          intent = tracker.prepare_delivery_part(
+            session_id,
+            "report",
+            {
+              "kind": "text",
+              "text": sanitize_whatsapp_text(report),
+              "reply_to": None,
+            },
+          )
           ack = await session.sock.send_message(
             chat_id,
-            sanitize_whatsapp_text(report),
+            intent["text"],
+            reply_to=intent.get("reply_to"),
+            request_id=_recovery_request_id(session_id, "report"),
+            wait_for_ack=True,
           )
           sent_entry = _require_confirmed_send(
             ack, label=f"recovered sub-agent report {session_id}",
@@ -791,8 +852,12 @@ class SubAgentCoordinator:
             message_id=str(message_id or f"recovered-report-{session_id}"),
             role="assistant",
           ))
+          tracker.mark_delivery_part_done(session_id, "report")
 
-        for staged_file in staged.staged:
+        for index, staged_file in enumerate(staged.staged):
+          part = f"file:{index}:{staged_file.name}:{staged_file.size_bytes}"
+          if tracker.is_delivery_part_done(session_id, part):
+            continue
           attachment: dict = {
             "kind": staged_file.kind,
             "path": staged_file.path,
@@ -801,9 +866,16 @@ class SubAgentCoordinator:
           }
           if staged_file.thumbnail_base64:
             attachment["thumbnailBase64"] = staged_file.thumbnail_base64
+          intent = tracker.prepare_delivery_part(
+            session_id,
+            part,
+            {"kind": "attachment", "attachment": attachment},
+          )
           ack = await session.sock.send_message(
             chat_id,
-            attachments=[attachment],
+            attachments=[intent["attachment"]],
+            request_id=_recovery_request_id(session_id, part),
+            wait_for_ack=True,
           )
           sent_entry = _require_confirmed_send(
             ack, label=f"recovered sub-agent output {staged_file.name}",
@@ -829,6 +901,7 @@ class SubAgentCoordinator:
             message_id=str(message_id or f"recovered-file-{session_id}-{staged_file.name}"),
             role="assistant",
           ))
+          tracker.mark_delivery_part_done(session_id, part)
     finally:
       self._recovering_sessions.discard(session_id)
 
@@ -1472,6 +1545,7 @@ context block from ``SubTaskTracker.format_context``).
                       extra={"chat_id": chat_id},
                     )
                 finally:
+                  subagent_webhook.unregister_completion_event(session_id)
                   subagent_webhook.unregister_progress_event(session_id)
                   try:
                     cleanup_input_staging(session_id)
@@ -1519,6 +1593,8 @@ context block from ``SubTaskTracker.format_context``).
             recovery_err,
             extra={"chat_id": chat_id},
           )
+      finally:
+        subagent_webhook.unregister_completion_event(session_id)
 
     bg_task = asyncio.create_task(_run_subagent_post_processing())
     _track_task(bg_task)

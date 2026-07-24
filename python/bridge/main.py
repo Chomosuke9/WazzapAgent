@@ -41,7 +41,10 @@ def _resolve_webhook_url(webhook_port: int, index: int = 0) -> str:
         if "{port}" in value or "{index}" in value:
             return value.replace("{port}", str(webhook_port)).replace("{index}", str(index))
         parts = urlsplit(value)
-        if index > 0 and (parts.hostname or "").lower() in {"localhost", "127.0.0.1", "::1"}:
+        if (
+            (parts.hostname or "").lower() in {"localhost", "127.0.0.1", "::1"}
+            and (index > 0 or parts.port is None)
+        ):
             host = parts.hostname or "localhost"
             if ":" in host and not host.startswith("["):
                 host = f"[{host}]"

@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import shutil
+import tempfile
 import time
 from collections import OrderedDict, deque
 from pathlib import Path
@@ -12,6 +13,14 @@ from typing import Deque, Dict, Optional
 
 from .config import SUBAGENT_PROGRESS_DETAIL_MAX_CHARS, SUBAGENT_REPORT_MAX_CHARS
 from .models import ProgressEntry, SubTask
+
+
+class SubTaskPersistenceError(RuntimeError):
+    """Raised when durable tracker state cannot be committed."""
+
+
+class SubTaskOutputError(ValueError):
+    """Raised when callback output bytes or metadata are not trustworthy."""
 
 
 def _truncate(text: Optional[str], limit: int) -> Optional[str]:
@@ -39,6 +48,8 @@ class SubTaskTracker:
         # re-sending a report/attachment after the original result was already
         # delivered and its history entry was cleared.
         self._delivered_sessions: OrderedDict[str, float] = OrderedDict()
+        self._delivery_checkpoints: Dict[str, set[str]] = {}
+        self._delivery_intents: Dict[str, Dict[str, dict]] = {}
         self._state_path = Path(state_path).expanduser().resolve() if state_path else None
         self._load_state()
 
@@ -139,13 +150,28 @@ class SubTaskTracker:
                     self._deferred_results[str(session_id)] = item
             for session_id, delivered_at in (raw.get("delivered_sessions") or {}).items():
                 self._delivered_sessions[str(session_id)] = float(delivered_at)
-        except Exception:
-            # A corrupt recovery file must never prevent the bridge from
-            # starting. Preserve it for diagnosis and begin with empty state.
+            for session_id, parts in (raw.get("delivery_checkpoints") or {}).items():
+                if isinstance(parts, list):
+                    self._delivery_checkpoints[str(session_id)] = {
+                        str(part) for part in parts if isinstance(part, str)
+                    }
+            for session_id, intents in (raw.get("delivery_intents") or {}).items():
+                if isinstance(intents, dict):
+                    self._delivery_intents[str(session_id)] = {
+                        str(part): dict(intent)
+                        for part, intent in intents.items()
+                        if isinstance(part, str) and isinstance(intent, dict)
+                    }
+        except Exception as exc:
+            # Starting with empty state could duplicate already-delivered
+            # WhatsApp messages or orphan active callbacks. Preserve the bad
+            # file for diagnosis, then fail closed.
             self._active.clear()
             self._history.clear()
             self._deferred_results.clear()
             self._delivered_sessions.clear()
+            self._delivery_checkpoints.clear()
+            self._delivery_intents.clear()
             try:
                 corrupt = self._state_path.with_suffix(
                     self._state_path.suffix + f".corrupt-{int(time.time())}"
@@ -153,6 +179,9 @@ class SubTaskTracker:
                 os.replace(self._state_path, corrupt)
             except OSError:
                 pass
+            raise SubTaskPersistenceError(
+                f"sub-agent tracker state is corrupt: {exc}"
+            ) from exc
 
     def _persist_state(self) -> None:
         if self._state_path is None:
@@ -169,18 +198,41 @@ class SubTaskTracker:
                 for session_id, result in self._deferred_results.items()
             },
             "delivered_sessions": dict(self._delivered_sessions),
+            "delivery_checkpoints": {
+                session_id: sorted(parts)
+                for session_id, parts in self._delivery_checkpoints.items()
+            },
+            "delivery_intents": self._delivery_intents,
         }
         try:
             self._state_path.parent.mkdir(parents=True, exist_ok=True)
-            tmp_path = self._state_path.with_suffix(self._state_path.suffix + ".tmp")
-            tmp_path.write_text(
-                json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str),
-                encoding="utf-8",
+            fd, tmp_name = tempfile.mkstemp(
+                prefix=f".{self._state_path.name}.",
+                suffix=".tmp",
+                dir=self._state_path.parent,
             )
-            os.replace(tmp_path, self._state_path)
-        except OSError:
-            # Tracking remains functional in memory on read-only filesystems.
-            return
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    json.dump(
+                        payload,
+                        handle,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        default=str,
+                    )
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(tmp_name, self._state_path)
+            except Exception:
+                try:
+                    os.unlink(tmp_name)
+                except FileNotFoundError:
+                    pass
+                raise
+        except OSError as exc:
+            raise SubTaskPersistenceError(
+                f"could not persist sub-agent tracker state: {exc}"
+            ) from exc
 
     def _spool_inline_outputs(self, session_id: str, result: dict) -> dict:
         """Durably turn inline callback bytes into local-path manifest entries.
@@ -190,11 +242,15 @@ class SubTaskTracker:
         base64 strings. The normal output staging path later copies these files
         into the tenant's Node-allowlisted media directory.
         """
-        if self._state_path is None or not isinstance(result, dict):
+        if not isinstance(result, dict):
             return result
         inline = result.get("output_files_content")
         if not isinstance(inline, list) or not inline:
             return result
+        if self._state_path is None:
+            raise SubTaskOutputError("durable callback spool is not configured")
+        if len(inline) > 64:
+            raise SubTaskOutputError("callback declares more than 64 output files")
         spool_root = (
             self._state_path.parent
             / "subagent_callback_inbox"
@@ -202,57 +258,99 @@ class SubTaskTracker:
         )
         written: list[Path] = []
         local_entries: list[dict] = []
-        used_names: set[str] = set()
+        total_size = 0
+        allowed_root = (self._state_path.parent / "subagent_callback_inbox").resolve()
         try:
             spool_root.mkdir(parents=True, exist_ok=True)
             for index, item in enumerate(inline):
                 if not isinstance(item, dict):
-                    continue
+                    raise SubTaskOutputError("inline output entry must be an object")
                 encoded = item.get("content_base64")
                 if not isinstance(encoded, (str, bytes)) or not encoded:
-                    # A previously downloaded large-output entry already has a
-                    # durable local_path; preserve it alongside newly spooled
-                    # inline entries.
+                    local_path = item.get("local_path")
+                    if local_path:
+                        candidate = Path(str(local_path)).expanduser().resolve()
+                        try:
+                            candidate.relative_to(allowed_root)
+                        except ValueError as exc:
+                            raise SubTaskOutputError(
+                                "local output path is outside the tenant callback inbox"
+                            ) from exc
+                        if candidate.is_symlink() or not candidate.is_file():
+                            raise SubTaskOutputError("local output file is unavailable")
+                        declared_size = item.get("size", item.get("size_bytes"))
+                        declared_sha = str(item.get("sha256") or "").lower()
+                        if isinstance(declared_size, bool) or not isinstance(declared_size, int):
+                            raise SubTaskOutputError("local output has invalid size")
+                        digest = hashlib.sha256()
+                        size = 0
+                        with candidate.open("rb") as handle:
+                            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                                size += len(chunk)
+                                digest.update(chunk)
+                        if size != declared_size or digest.hexdigest() != declared_sha:
+                            raise SubTaskOutputError("local output size/checksum mismatch")
                     local_entries.append(dict(item))
                     continue
                 original_name = Path(str(item.get("name") or f"output-{index}")).name
                 if original_name in {"", ".", ".."}:
                     original_name = f"output-{index}"
-                stem, suffix = os.path.splitext(original_name)
-                final_name = original_name
-                collision = 1
-                while final_name in used_names:
-                    final_name = f"{stem}_{collision}{suffix}"
-                    collision += 1
-                used_names.add(final_name)
                 decoded = base64.b64decode(encoded, validate=True)
+                declared_size = item.get("size", item.get("size_bytes"))
+                declared_sha = str(item.get("sha256") or "").lower()
+                if isinstance(declared_size, bool) or not isinstance(declared_size, int):
+                    raise SubTaskOutputError("inline output has invalid size")
+                if declared_size != len(decoded):
+                    raise SubTaskOutputError("inline output size mismatch")
+                digest = hashlib.sha256(decoded).hexdigest()
+                if len(declared_sha) != 64 or digest != declared_sha:
+                    raise SubTaskOutputError("inline output checksum mismatch")
+                if declared_size > 200 * 1024 * 1024:
+                    raise SubTaskOutputError("inline output exceeds the 200 MB file limit")
+                total_size += declared_size
+                if total_size > 256 * 1024 * 1024:
+                    raise SubTaskOutputError("inline outputs exceed the 256 MB aggregate limit")
+                final_name = f"{index:04d}-{digest[:12]}-{original_name}"
                 destination = spool_root / final_name
-                temporary = destination.with_suffix(destination.suffix + ".tmp")
-                temporary.write_bytes(decoded)
-                os.replace(temporary, destination)
-                written.append(destination)
+                if not destination.is_file():
+                    fd, temporary = tempfile.mkstemp(prefix=".inline-", dir=spool_root)
+                    try:
+                        with os.fdopen(fd, "wb") as handle:
+                            handle.write(decoded)
+                            handle.flush()
+                            os.fsync(handle.fileno())
+                        os.replace(temporary, destination)
+                        written.append(destination)
+                    except Exception:
+                        try:
+                            os.unlink(temporary)
+                        except FileNotFoundError:
+                            pass
+                        raise
                 local_entry = {
                     key: value for key, value in item.items()
                     if key != "content_base64"
                 }
                 local_entry["local_path"] = str(destination.resolve())
                 local_entries.append(local_entry)
-        except (OSError, ValueError, TypeError):
-            # Leave the original inline payload intact so normal in-memory
-            # delivery can still proceed even if durable spooling is unavailable.
+        except (OSError, ValueError, TypeError) as exc:
             for path in written:
                 try:
                     path.unlink(missing_ok=True)
                 except OSError:
                     pass
-            return result
-        if not written:
-            return result
+            if isinstance(exc, SubTaskOutputError):
+                raise
+            raise SubTaskOutputError(f"could not durably spool callback output: {exc}") from exc
         spooled = dict(result)
         spooled["output_files_content"] = local_entries
         spooled["output_files_content_spooled"] = True
         spooled["_spooled_output_dir"] = str(spool_root.resolve())
         return spooled
+
+    def prepare_result(self, session_id: str, result: dict) -> dict:
+        """Validate and durably materialize callback bytes before HTTP ACK."""
+        return self._spool_inline_outputs(session_id, result)
 
     def callback_download_path(
         self, session_id: str, file_id: str, name: str,
@@ -271,6 +369,12 @@ class SubTaskTracker:
         file_key = hashlib.sha256(str(file_id).encode("utf-8")).hexdigest()[:12]
         spool_root.mkdir(parents=True, exist_ok=True)
         return spool_root / f"{file_key}-{safe_name}"
+
+    def callback_inbox_root(self) -> Path | None:
+        """Return the only root trusted for callback-created local files."""
+        if self._state_path is None:
+            return None
+        return (self._state_path.parent / "subagent_callback_inbox").resolve()
 
     def _cleanup_result_spool(self, result: dict) -> None:
         raw = result.get("_spooled_output_dir") if isinstance(result, dict) else None
@@ -343,7 +447,7 @@ class SubTaskTracker:
             return f"{entry.step}: {reason}"
         return f"{entry.step}: {entry.detail}"
 
-    def finalize(self, session_id: str, result: dict) -> bool:
+    def finalize(self, session_id: str, result: dict, *, prepared: bool = False) -> bool:
         """Finalize a known task, returning whether the result was accepted.
 
         Duplicate/late completions for a task already in history are treated
@@ -353,12 +457,19 @@ class SubTaskTracker:
         """
         if session_id in self._delivered_sessions:
             return True
-        task = self._active.pop(session_id, None)
+        task = self._active.get(session_id)
         if task is None:
             for history in self._history.values():
                 for candidate in history:
                     if candidate.session_id == session_id:
-                        result = self._spool_inline_outputs(session_id, result)
+                        if not prepared:
+                            result = self._spool_inline_outputs(session_id, result)
+                        previous = (
+                            candidate.end_time,
+                            candidate.result,
+                            candidate.status,
+                            candidate.report,
+                        )
                         candidate.end_time = time.time()
                         candidate.result = result
                         success = result.get("success", False)
@@ -366,10 +477,22 @@ class SubTaskTracker:
                         raw_report_value = result.get("report") or result.get("error") or None
                         raw_report = str(raw_report_value) if raw_report_value is not None else None
                         candidate.report = _truncate(raw_report, SUBAGENT_REPORT_MAX_CHARS)
-                        self._persist_state()
+                        try:
+                            self._persist_state()
+                        except Exception:
+                            (
+                                candidate.end_time,
+                                candidate.result,
+                                candidate.status,
+                                candidate.report,
+                            ) = previous
+                            raise
                         return True
             return False
-        result = self._spool_inline_outputs(session_id, result)
+        if not prepared:
+            result = self._spool_inline_outputs(session_id, result)
+        self._active.pop(session_id, None)
+        previous = (task.end_time, task.result, task.status, task.report)
         task.end_time = time.time()
         task.result = result
         success = result.get("success", False)
@@ -377,19 +500,42 @@ class SubTaskTracker:
         raw_report_value = result.get("report") or result.get("error") or None
         raw_report = str(raw_report_value) if raw_report_value is not None else None
         task.report = _truncate(raw_report, SUBAGENT_REPORT_MAX_CHARS)
-        self._history.setdefault(task.chat_id, deque(maxlen=50)).append(task)
-        self._persist_state()
+        history = self._history.setdefault(task.chat_id, deque(maxlen=50))
+        evicted = history[0] if len(history) == history.maxlen else None
+        history.append(task)
+        try:
+            self._persist_state()
+        except Exception:
+            try:
+                history.remove(task)
+            except ValueError:
+                pass
+            if evicted is not None:
+                history.appendleft(evicted)
+            task.end_time, task.result, task.status, task.report = previous
+            self._active[session_id] = task
+            raise
         return True
 
-    def defer_completion(self, session_id: str, result: dict) -> None:
+    def defer_completion(
+        self, session_id: str, result: dict, *, prepared: bool = False,
+    ) -> None:
         """Retain an unknown completion for registration/restart recovery."""
-        result = self._spool_inline_outputs(session_id, result)
+        if not prepared:
+            result = self._spool_inline_outputs(session_id, result)
+        previous = self._deferred_results.get(session_id)
         self._deferred_results[session_id] = result
         self._deferred_results.move_to_end(session_id)
         while len(self._deferred_results) > self._MAX_DEFERRED_COMPLETIONS:
             _old_session, old_result = self._deferred_results.popitem(last=False)
             self._cleanup_result_spool(old_result)
-        self._persist_state()
+        try:
+            self._persist_state()
+        except Exception:
+            self._deferred_results.pop(session_id, None)
+            if previous is not None:
+                self._deferred_results[session_id] = previous
+            raise
 
     def is_finished(self, session_id: str) -> bool:
         return any(
@@ -408,12 +554,69 @@ class SubTaskTracker:
     def is_delivered(self, session_id: str) -> bool:
         return session_id in self._delivered_sessions
 
+    def is_delivery_part_done(self, session_id: str, part: str) -> bool:
+        return part in self._delivery_checkpoints.get(session_id, set())
+
+    def get_delivery_intent(self, session_id: str, part: str) -> dict | None:
+        intent = self._delivery_intents.get(session_id, {}).get(part)
+        return dict(intent) if intent is not None else None
+
+    def prepare_delivery_part(
+        self, session_id: str, part: str, intent: dict,
+    ) -> dict:
+        """Persist the exact outbound payload before attempting delivery."""
+        existing = self.get_delivery_intent(session_id, part)
+        if existing is not None:
+            return existing
+        intents = self._delivery_intents.setdefault(session_id, {})
+        intents[part] = dict(intent)
+        try:
+            self._persist_state()
+        except Exception:
+            intents.pop(part, None)
+            if not intents:
+                self._delivery_intents.pop(session_id, None)
+            raise
+        return dict(intent)
+
+    def mark_delivery_part_done(self, session_id: str, part: str) -> None:
+        parts = self._delivery_checkpoints.setdefault(session_id, set())
+        if part in parts:
+            return
+        previous_intent = self._delivery_intents.get(session_id, {}).pop(part, None)
+        parts.add(part)
+        try:
+            self._persist_state()
+        except Exception:
+            parts.discard(part)
+            if not parts:
+                self._delivery_checkpoints.pop(session_id, None)
+            if previous_intent is not None:
+                self._delivery_intents.setdefault(session_id, {})[part] = previous_intent
+            raise
+        intents = self._delivery_intents.get(session_id)
+        if intents is not None and not intents:
+            self._delivery_intents.pop(session_id, None)
+
     def mark_delivered(self, session_id: str) -> None:
+        previous_history = {
+            chat_id: deque(history, maxlen=history.maxlen)
+            for chat_id, history in self._history.items()
+        }
+        previous_delivered = OrderedDict(self._delivered_sessions)
+        previous_checkpoints = {
+            key: set(parts) for key, parts in self._delivery_checkpoints.items()
+        }
+        previous_intents = {
+            key: {part: dict(intent) for part, intent in intents.items()}
+            for key, intents in self._delivery_intents.items()
+        }
+        removed_tasks: list[SubTask] = []
         for chat_id, history in list(self._history.items()):
             retained: Deque[SubTask] = deque(maxlen=50)
             for task in history:
                 if task.session_id == session_id:
-                    self._cleanup_task_spool(task)
+                    removed_tasks.append(task)
                 else:
                     retained.append(task)
             if retained:
@@ -424,7 +627,18 @@ class SubTaskTracker:
         self._delivered_sessions.move_to_end(session_id)
         while len(self._delivered_sessions) > self._MAX_DELIVERED_TOMBSTONES:
             self._delivered_sessions.popitem(last=False)
-        self._persist_state()
+        self._delivery_checkpoints.pop(session_id, None)
+        self._delivery_intents.pop(session_id, None)
+        try:
+            self._persist_state()
+        except Exception:
+            self._history = previous_history
+            self._delivered_sessions = previous_delivered
+            self._delivery_checkpoints = previous_checkpoints
+            self._delivery_intents = previous_intents
+            raise
+        for task in removed_tasks:
+            self._cleanup_task_spool(task)
 
     def get_active_for_chat(self, chat_id: str) -> SubTask | None:
         for task in self._active.values():

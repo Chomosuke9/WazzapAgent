@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import type WebSocket from 'ws';
 import type { AccountEntry } from '../../src/protocol/types.ts';
 
@@ -8,6 +11,7 @@ import { createAccountContext } from '../../src/account/accountContext.ts';
 import { dispatchAction, type DispatchDeps } from '../../src/account/actionDispatcher.ts';
 
 const OPEN = 1;
+const TEST_ROOT = path.join(tmpdir(), `wazzapagent-download-${process.pid}-${Date.now()}`);
 
 class FakeWebSocket {
   readyState = OPEN;
@@ -26,7 +30,7 @@ function makeAccount(folderPath: string): { entry: AccountEntry; client: FakeWeb
 }
 
 test('download_media downloads on demand for a cached message (feature 8)', async () => {
-  const folder = '/tenants/dl-hit';
+  const folder = path.join(TEST_ROOT, 'dl-hit');
   const { entry, client } = makeAccount(folder);
 
   // Seed a cached image message proto.
@@ -62,10 +66,11 @@ test('download_media downloads on demand for a cached message (feature 8)', asyn
   assert.equal(ack.payload.result.messageId, 'wamid-img-1');
 
   remove(folder);
+  await rm(folder, { recursive: true, force: true });
 });
 
 test('download_media replies not_found when the proto was evicted', async () => {
-  const folder = '/tenants/dl-miss';
+  const folder = path.join(TEST_ROOT, 'dl-miss');
   const { entry, client } = makeAccount(folder);
 
   let saveCalled = 0;
@@ -86,4 +91,5 @@ test('download_media replies not_found when the proto was evicted', async () => 
   assert.equal(ack.payload.code, 'not_found');
 
   remove(folder);
+  await rm(folder, { recursive: true, force: true });
 });

@@ -547,32 +547,48 @@ async def test_output_download_checksum_failure_is_retryable(
 
 
 @pytest.mark.asyncio
-async def test_verified_shared_output_path_avoids_network_download(
+async def test_callback_path_is_ignored_and_output_is_downloaded(
   tmp_path, monkeypatch,
 ):
+  from aiohttp import web
   import bridge.subagent.webhook_server as webhook_module
 
   content = b"shared filesystem output"
   source = tmp_path / "receiver" / "opaque-file"
   source.parent.mkdir()
   source.write_bytes(content)
-  monkeypatch.setattr(webhook_module, "SUBAGENT_URL", "http://127.0.0.1:1")
+  async def download(_request):
+    return web.Response(body=content)
+
+  app = web.Application()
+  app.router.add_get("/sessions/shared/outputs/shared-1", download)
+  runner = web.AppRunner(app)
+  await runner.setup()
+  site = web.TCPSite(runner, "127.0.0.1", 0)
+  await site.start()
+  port = site._server.sockets[0].getsockname()[1]
+  monkeypatch.setattr(webhook_module, "SUBAGENT_URL", f"http://127.0.0.1:{port}")
   monkeypatch.delenv("SUBAGENT_API_TOKEN", raising=False)
   tracker = SubTaskTracker(state_path=tmp_path / "tracker.json")
   server = SubAgentWebhookServer(tracker, port=0)
 
-  hydrated = await server._materialize_downloadable_outputs("shared", {
-    "output_files_content": [{
-      "file_id": "shared-1",
-      "name": "original-name.txt",
-      "path": str(source),
-      "size_bytes": len(content),
-      "sha256": hashlib.sha256(content).hexdigest(),
-      "download_url": "/sessions/shared/outputs/shared-1",
-    }],
-  })
+  try:
+    hydrated = await server._materialize_downloadable_outputs("shared", {
+      "output_files_content": [{
+        "file_id": "shared-1",
+        "name": "original-name.txt",
+        "path": str(source),
+        "size_bytes": len(content),
+        "sha256": hashlib.sha256(content).hexdigest(),
+        "download_url": "/sessions/shared/outputs/shared-1",
+      }],
+    })
+  finally:
+    await runner.cleanup()
 
-  assert hydrated["output_files_content"][0]["local_path"] == str(source.resolve())
+  local_path = Path(hydrated["output_files_content"][0]["local_path"])
+  assert local_path != source.resolve()
+  assert local_path.read_bytes() == content
 
 
 @pytest.mark.asyncio

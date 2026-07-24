@@ -37,9 +37,11 @@ def test_returns_none_when_no_attachable_files():
   assert _files_for_subagent_block(hist) is None
 
 
-def test_stickers_are_excluded_as_noise():
+def test_stickers_are_available_to_subagents():
   hist = [_msg("000201", sender="A", sender_ref="a", media="sticker", text="<media:sticker=thumbs_up>")]
-  assert _files_for_subagent_block(hist) is None
+  block = _files_for_subagent_block(hist)
+  assert block is not None
+  assert "[#000201]" in block
 
 
 def test_dedupes_and_includes_assistant_files():

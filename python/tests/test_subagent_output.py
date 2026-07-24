@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import os
 import sys
@@ -670,8 +671,11 @@ class TestStageOutputFilesFromContent:
         "name": "quarterly-report.pdf",
         "local_path": str(source),
         "mime": "application/pdf",
+        "size": source.stat().st_size,
+        "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
       }],
       base_dir=tmp_path / "out",
+      allowed_local_root=source.parent,
     )
 
     assert len(result.staged) == 1

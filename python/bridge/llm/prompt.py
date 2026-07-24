@@ -100,10 +100,10 @@ def _format_current_window(msg: WhatsAppMessage) -> str:
     return format_history([msg], history=[msg])
 
 
-# Media kinds that are useful as sub-agent inputs. Stickers are intentionally
-# excluded: they are emoji-like reactions, not files a user asks the bot to
-# "process" or "send back", and listing them only adds noise.
-_SUBAGENT_FILE_KINDS = {"image", "video", "audio", "document", "media"}
+# Every file-bearing inbound kind is eligible. Stickers are WebP/media files
+# too; excluding them made an explicit user request to inspect or transform a
+# sticker impossible even though the gateway still had the bytes.
+_SUBAGENT_FILE_KINDS = {"image", "video", "audio", "document", "sticker", "media"}
 
 
 def _files_for_subagent_block(
@@ -188,7 +188,7 @@ def _files_for_subagent_block(
         + "\n".join(entries)
         + "\nNever use the request/mention message's ID or an ID from a `REPLYING "
         "TO` line. If the file isn't listed, re-read the chat — don't invent an ID.\n"
-        "For optimization purpose, we don't include sticker in here.\n"
+        "Stickers are included because they may be the exact media the user wants processed.\n"
         "</files_in_chat>"
     )
 

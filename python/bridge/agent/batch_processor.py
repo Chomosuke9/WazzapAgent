@@ -1606,7 +1606,7 @@ class BatchProcessor:
     # restart occurring in between). Only chats with the feature enabled incur
     # the eager download cost; the normal lazy vision path remains unchanged.
     if db_get_subagent_enabled(chat_id):
-      eligible_kinds = {"image", "video", "audio", "document", "media"}
+      eligible_kinds = {"image", "video", "audio", "document", "sticker", "media"}
       attachment_ctx_ids: list[str] = []
       seen_attachment_ctx_ids: set[str] = set()
       for attachment in payload.get("attachments") or []:

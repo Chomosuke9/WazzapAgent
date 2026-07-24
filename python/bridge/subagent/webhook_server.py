@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 import ipaddress
 import os
-from pathlib import Path
 import secrets
 import time
 from urllib.parse import urljoin, urlsplit
@@ -35,7 +34,11 @@ from .config import (
   subagent_webhook_token_env,
 )
 from .output import MAX_FILE_SIZE_BYTES
-from .tracker import SubTaskTracker
+from .tracker import (
+  SubTaskOutputError,
+  SubTaskPersistenceError,
+  SubTaskTracker,
+)
 
 logger = setup_logging()
 
@@ -71,6 +74,7 @@ class SubAgentWebhookServer:
     self._tracker = tracker
     self._port = SUBAGENT_WEBHOOK_PORT if port is None else port
     self._bound_port = self._port
+    self._bound_host = subagent_webhook_host_env()
     self._completion_events: Dict[str, asyncio.Event] = {}
     self._waiter_owned_sessions: set[str] = set()
     # Keepalive events: set each time a progress webhook arrives so the
@@ -118,6 +122,7 @@ class SubAgentWebhookServer:
     runner = web.AppRunner(app)
     site: web.TCPSite | None = None
     host = subagent_webhook_host_env()
+    self._bound_host = host
     try:
       is_loopback = host.lower() == "localhost" or ipaddress.ip_address(host).is_loopback
     except ValueError:
@@ -225,7 +230,16 @@ class SubAgentWebhookServer:
     """
     if aiohttp is None:
       return True  # can't check without aiohttp; assume ok
-    url = f"http://127.0.0.1:{self._bound_port}/health"
+    host = self._bound_host.strip()
+    if host in {"", "0.0.0.0"}:
+      probe_host = "127.0.0.1"
+    elif host == "::":
+      probe_host = "[::1]"
+    elif ":" in host and not host.startswith("["):
+      probe_host = f"[{host}]"
+    else:
+      probe_host = host
+    url = f"http://{probe_host}:{self._bound_port}/health"
     try:
       async with aiohttp.ClientSession() as session:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as resp:
@@ -380,13 +394,19 @@ class SubAgentWebhookServer:
     self, session_id: str, result: dict,
   ) -> dict:
     """Stream omitted large outputs from the authenticated sub-agent API."""
-    manifest = result.get("output_files_content")
-    if not isinstance(manifest, list) or not manifest:
-      return result
+    inline_manifest = result.get("output_files_content") or []
+    omitted_manifest = result.get("output_files_omitted") or []
+    if not isinstance(inline_manifest, list) or not isinstance(omitted_manifest, list):
+      raise _OutputDownloadError("output manifests must be arrays")
+    manifest = [*inline_manifest, *omitted_manifest]
+    if not manifest:
+      sanitized = dict(result)
+      # Raw absolute paths are never authoritative across this trust boundary.
+      sanitized["output_files"] = []
+      return sanitized
     base_url = SUBAGENT_URL.rstrip("/") + "/"
     base_origin = self._origin(base_url)
     updated_entries: list = []
-    materialized_any = False
     download_spool_dir: str | None = None
     # Output downloads are main -> sub-agent API calls.  Keep that credential
     # separate from the reverse-direction callback secret so compromising one
@@ -401,7 +421,9 @@ class SubAgentWebhookServer:
           updated_entries.append(raw_item)
           continue
         item = dict(raw_item)
-        if item.get("content_base64") or item.get("local_path"):
+        if item.get("local_path"):
+          raise _OutputDownloadError("callback-supplied local_path is forbidden")
+        if item.get("content_base64"):
           updated_entries.append(item)
           continue
         download_url = item.get("download_url")
@@ -422,23 +444,6 @@ class SubAgentWebhookServer:
           )
         if len(expected_sha) != 64 or any(ch not in "0123456789abcdef" for ch in expected_sha):
           raise _OutputDownloadError("download manifest has invalid sha256")
-        # Native/same-host deployments may expose the receiver's output path
-        # directly.  Prefer that verified file over a network round-trip, but
-        # never trust the path alone: size and digest must match the callback
-        # descriptor before the tracker records it.
-        shared_path = item.get("path")
-        if isinstance(shared_path, (str, os.PathLike)) and str(shared_path):
-          shared_file = Path(shared_path)
-          if await asyncio.to_thread(
-            self._existing_download_matches,
-            shared_file,
-            expected_size,
-            expected_sha,
-          ):
-            item["local_path"] = str(shared_file.resolve())
-            updated_entries.append(item)
-            materialized_any = True
-            continue
         file_id = str(item.get("file_id") or f"output-{index}")
         name = str(item.get("name") or f"output-{index}")
         destination = self._tracker.callback_download_path(session_id, file_id, name)
@@ -449,7 +454,6 @@ class SubAgentWebhookServer:
         ):
           item["local_path"] = str(destination.resolve())
           updated_entries.append(item)
-          materialized_any = True
           download_spool_dir = str(destination.parent.resolve())
           continue
         temporary = destination.with_suffix(destination.suffix + ".download")
@@ -472,7 +476,7 @@ class SubAgentWebhookServer:
                 if received > expected_size or received > MAX_FILE_SIZE_BYTES:
                   raise _OutputDownloadError("output download exceeded declared size")
                 digest.update(chunk)
-                handle.write(chunk)
+                await asyncio.to_thread(handle.write, chunk)
           if received != expected_size:
             raise _OutputDownloadError(
               f"output download size mismatch ({received} != {expected_size})"
@@ -488,13 +492,12 @@ class SubAgentWebhookServer:
           raise
         item["local_path"] = str(destination.resolve())
         updated_entries.append(item)
-        materialized_any = True
         download_spool_dir = str(destination.parent.resolve())
 
-    if not materialized_any:
-      return result
     hydrated = dict(result)
     hydrated["output_files_content"] = updated_entries
+    hydrated["output_files"] = []
+    hydrated["output_files_omitted"] = []
     # Tracker cleanup validates this path is under its own callback inbox.
     if download_spool_dir:
       hydrated["_spooled_output_dir"] = download_spool_dir
@@ -576,12 +579,40 @@ class SubAgentWebhookServer:
         return web.json_response(
           {"status": "output_download_failed", "retryable": True}, status=502,
         )
-      accepted = self._tracker.finalize(session_id, result)
+      try:
+        result = await asyncio.to_thread(
+          self._tracker.prepare_result, session_id, result,
+        )
+        accepted = self._tracker.finalize(session_id, result, prepared=True)
+      except SubTaskOutputError as exc:
+        logger.warning(
+          "SubAgent callback output rejected session=%s: %s", session_id, exc,
+        )
+        return web.json_response(
+          {"status": "invalid_output", "retryable": False}, status=422,
+        )
+      except SubTaskPersistenceError as exc:
+        logger.error(
+          "SubAgent callback persistence failed session=%s: %s", session_id, exc,
+        )
+        return web.json_response(
+          {"status": "persistence_unavailable", "retryable": True}, status=503,
+        )
       if not accepted:
         # Retain the payload durably for a registration race/restart replay,
         # but do not return 2xx: that would tell the sender it is safe to delete
         # its only copy even though no task currently owns the result.
-        self._tracker.defer_completion(session_id, result)
+        try:
+          self._tracker.defer_completion(session_id, result, prepared=True)
+        except SubTaskPersistenceError as exc:
+          logger.error(
+            "SubAgent deferred callback persistence failed session=%s: %s",
+            session_id,
+            exc,
+          )
+          return web.json_response(
+            {"status": "persistence_unavailable", "retryable": True}, status=503,
+          )
         logger.warning(
           "SubAgent complete deferred: unknown session=%s; sender should retry",
           session_id,
@@ -592,12 +623,6 @@ class SubAgentWebhookServer:
       event = self._completion_events.pop(session_id, None)
       if event is not None:
         event.set()
-        # If the first HTTP response is lost, a quick callback retry must stay
-        # owned by the live coordinator instead of taking the restart-recovery
-        # path and delivering a duplicate.
-        asyncio.get_running_loop().call_later(
-          300.0, self._waiter_owned_sessions.discard, session_id,
-        )
       elif session_id in self._waiter_owned_sessions or self._tracker.is_delivered(session_id):
         logger.info("SubAgent complete duplicate: session=%s", session_id)
       else:

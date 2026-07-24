@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import WebSocket, { type WebSocketServer } from 'ws';
 
 import { startWsServer } from '../../src/server/wsServer.ts';
@@ -122,7 +125,9 @@ test('send_message action -> action_ack(ok) + send_ack', { timeout: 15000 }, asy
   const wss = startWsServer(0);
   // folderPath MUST be config.dataDir so the global getSock() shim (keyed to the
   // default tenant) resolves to our FakeSock and sendOutgoing resolves offline.
-  const folderPath = config.dataDir;
+  const previousDataDir = config.dataDir;
+  const folderPath = await mkdtemp(path.join(tmpdir(), 'wazzap-ws-send-'));
+  config.dataDir = folderPath;
   let client: WebSocket | undefined;
   try {
     const port = await listeningPort(wss);
@@ -155,7 +160,10 @@ test('send_message action -> action_ack(ok) + send_ack', { timeout: 15000 }, asy
   } finally {
     client?.close();
     await new Promise<void>((r) => wss.close(() => r()));
-    remove(config.dataDir);
+    get(folderPath)?.database?.close();
+    remove(folderPath);
+    config.dataDir = previousDataDir;
+    await rm(folderPath, { recursive: true, force: true });
     __setSocketCreatorForTests(null);
   }
 });

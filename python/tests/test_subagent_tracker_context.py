@@ -20,14 +20,20 @@ The fixes rely on three context blocks that LLM2 sees:
 from __future__ import annotations
 
 import base64
+import hashlib
 import sys
 import time
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from bridge.subagent.tracker import SubTaskTracker  # noqa: E402
+from bridge.subagent.tracker import (  # noqa: E402
+    SubTaskPersistenceError,
+    SubTaskTracker,
+)
 from bridge.subagent.models import SubTask  # noqa: E402
 
 
@@ -241,6 +247,8 @@ def test_tracker_spools_inline_bytes_instead_of_persisting_base64(tmp_path):
         "output_files_content": [{
             "name": "report.pdf",
             "content_base64": base64.b64encode(b"%PDF durable").decode("ascii"),
+            "size": len(b"%PDF durable"),
+            "sha256": hashlib.sha256(b"%PDF durable").hexdigest(),
         }],
     })
 
@@ -261,3 +269,26 @@ def test_tracker_spools_inline_bytes_instead_of_persisting_base64(tmp_path):
         "large", {"success": True, "report": "duplicate callback"},
     ) is True
     assert "large" not in after_delivery._deferred_results
+
+
+def test_delivery_intent_survives_restart_until_part_is_confirmed(tmp_path):
+    state_path = tmp_path / "tracker.json"
+    tracker = SubTaskTracker(state_path=state_path)
+    intent = {"kind": "text", "text": "finished", "reply_to": None}
+    assert tracker.prepare_delivery_part("session", "report", intent) == intent
+
+    recovered = SubTaskTracker(state_path=state_path)
+    assert recovered.get_delivery_intent("session", "report") == intent
+    recovered.mark_delivery_part_done("session", "report")
+
+    confirmed = SubTaskTracker(state_path=state_path)
+    assert confirmed.is_delivery_part_done("session", "report") is True
+    assert confirmed.get_delivery_intent("session", "report") is None
+
+
+def test_corrupt_tracker_state_fails_closed(tmp_path):
+    state_path = tmp_path / "tracker.json"
+    state_path.write_text("{not-json", encoding="utf-8")
+    with pytest.raises(SubTaskPersistenceError, match="state is corrupt"):
+        SubTaskTracker(state_path=state_path)
+    assert list(tmp_path.glob("tracker.json.corrupt-*"))

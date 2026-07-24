@@ -36,6 +36,7 @@ This module:
 from __future__ import annotations
 
 import base64
+import hashlib
 import mimetypes
 import os
 import shutil
@@ -386,6 +387,7 @@ def stage_output_files(
   *,
   files_content: list[dict] | None = None,
   base_dir: Path | None = None,
+  allowed_local_root: Path | None = None,
 ) -> StagedOutputs:
   """Copy ``raw_paths`` into ``<base_dir>/<session_id>/`` and validate them.
 
@@ -459,6 +461,24 @@ def stage_output_files(
       local_path = item.get("local_path")
       if isinstance(local_path, (str, os.PathLike)) and str(local_path):
         source = str(local_path)
+        if allowed_local_root is None:
+          skipped.append(SkippedFile(
+            source_path=source, name=name, reason="untrusted local output path",
+          ))
+          continue
+        try:
+          raw_candidate = Path(source).expanduser()
+          if raw_candidate.is_symlink():
+            raise ValueError("local output path is a symlink")
+          candidate = raw_candidate.resolve()
+          candidate.relative_to(allowed_local_root.expanduser().resolve())
+        except (OSError, ValueError):
+          skipped.append(SkippedFile(
+            source_path=source, name=name,
+            reason="local output path is outside the callback inbox",
+          ))
+          continue
+        source = str(candidate)
         if not os.path.isfile(source):
           skipped.append(SkippedFile(
             source_path=source, name=name, reason="downloaded local file not found",
@@ -476,6 +496,33 @@ def stage_output_files(
             source_path=source,
             name=name,
             reason=f"file too large ({_format_size(local_size)} > 200 MB)",
+          ))
+          continue
+        declared_size = item.get("size", item.get("size_bytes"))
+        declared_sha = str(item.get("sha256") or "").lower()
+        if (
+          isinstance(declared_size, bool)
+          or not isinstance(declared_size, int)
+          or declared_size != local_size
+          or len(declared_sha) != 64
+        ):
+          skipped.append(SkippedFile(
+            source_path=source, name=name, reason="local output metadata is invalid",
+          ))
+          continue
+        digest = hashlib.sha256()
+        try:
+          with open(source, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+              digest.update(chunk)
+        except OSError as err:
+          skipped.append(SkippedFile(
+            source_path=source, name=name, reason=f"checksum read failed: {err}",
+          ))
+          continue
+        if digest.hexdigest() != declared_sha:
+          skipped.append(SkippedFile(
+            source_path=source, name=name, reason="local output checksum mismatch",
           ))
           continue
         provided_mime = str(item.get("mime") or "")

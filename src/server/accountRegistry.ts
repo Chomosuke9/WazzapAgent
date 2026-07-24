@@ -110,11 +110,24 @@ function clientIsOpen(client: WebSocket | undefined): client is WebSocket {
   return !!client && client.readyState === WebSocket.OPEN;
 }
 
-function sendRaw(client: WebSocket, frame: OutboundFrame): void {
+function sendRaw(client: WebSocket, frame: OutboundFrame): boolean {
   try {
     client.send(JSON.stringify(frame));
+    return true;
   } catch (err) {
     logger.error({ err }, 'failed sending frame to account client');
+    return false;
+  }
+}
+
+function enqueueReliable(entry: AccountEntry, frame: OutboundFrame): void {
+  entry.reliableQueue.push(frame);
+  if (entry.reliableQueue.length > MAX_RELIABLE_QUEUE) {
+    entry.reliableQueue.shift();
+    logger.warn(
+      { folderPath: entry.folderPath, queueSize: entry.reliableQueue.length },
+      'reliable account queue overflow; oldest frame dropped',
+    );
   }
 }
 
@@ -139,17 +152,10 @@ export function sendToClient(folderPath: string, frame: OutboundFrame): void {
 export function sendReliableToClient(folderPath: string, frame: OutboundFrame): void {
   const entry = getOrCreate(folderPath);
   if (clientIsOpen(entry.client)) {
-    sendRaw(entry.client, frame);
-    return;
+    if (sendRaw(entry.client, frame)) return;
+    entry.client = undefined;
   }
-  entry.reliableQueue.push(frame);
-  if (entry.reliableQueue.length > MAX_RELIABLE_QUEUE) {
-    entry.reliableQueue.shift();
-    logger.warn(
-      { folderPath, queueSize: entry.reliableQueue.length },
-      'reliable account queue overflow; oldest frame dropped',
-    );
-  }
+  enqueueReliable(entry, frame);
   logger.debug(
     { folderPath, queueSize: entry.reliableQueue.length, type: frame?.type },
     'no open client, queued reliable frame',
@@ -165,8 +171,15 @@ export function flushReliableQueue(folderPath: string): void {
   if (!entry || !clientIsOpen(entry.client)) return;
   if (entry.reliableQueue.length === 0) return;
   const queued = entry.reliableQueue.splice(0, entry.reliableQueue.length);
-  for (const frame of queued) {
-    sendRaw(entry.client, frame);
+  let sent = 0;
+  for (let index = 0; index < queued.length; index += 1) {
+    const frame = queued[index];
+    if (!sendRaw(entry.client, frame)) {
+      entry.client = undefined;
+      entry.reliableQueue.unshift(...queued.slice(index));
+      break;
+    }
+    sent += 1;
   }
-  logger.info({ folderPath, count: queued.length }, 'flushed queued reliable frames to account client');
+  logger.info({ folderPath, count: sent }, 'flushed queued reliable frames to account client');
 }

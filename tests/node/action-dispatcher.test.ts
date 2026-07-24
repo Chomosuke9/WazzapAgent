@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import type WebSocket from 'ws';
 import type { AccountEntry, AccountContext } from '../../src/protocol/types.ts';
 
@@ -16,6 +19,7 @@ import {
 
 // The `ws` OPEN constant value is 1 (per the WebSocket spec / ws library).
 const OPEN = 1;
+const TEST_ROOT = path.join(tmpdir(), `wazzapagent-action-${process.pid}-${Date.now()}`);
 
 /**
  * Minimal fake of a `ws` WebSocket: OPEN readyState plus a send() that records
@@ -52,19 +56,21 @@ function makeAccount(folderPath: string): { entry: AccountEntry; client: FakeWeb
 }
 
 test('send_message routes to account A and emits action_ack(ok, result.sent) + send_ack to A', async () => {
-  const folderA = '/tenants/dispatch-A';
-  const folderB = '/tenants/dispatch-B';
+  const folderA = path.join(TEST_ROOT, 'dispatch-A');
+  const folderB = path.join(TEST_ROOT, 'dispatch-B');
   const { entry: entryA, client: clientA } = makeAccount(folderA);
   const { client: clientB } = makeAccount(folderB);
 
   // Capture the ctx the wa/ module receives to prove per-account routing.
   let seenFolderPath: string | null = null;
+  let sendCount = 0;
   const sentResult = {
     sent: [{ kind: 'text', contextMsgId: '000125', messageId: 'wamid-abc' }],
     replyTo: null,
   };
   const deps: Partial<DispatchDeps> = {
     sendOutgoing: (async (ctx: AccountContext) => {
+      sendCount += 1;
       seenFolderPath = ctx.folderPath;
       return sentResult;
     }) as DispatchDeps['sendOutgoing'],
@@ -95,15 +101,70 @@ test('send_message routes to account A and emits action_ack(ok, result.sent) + s
   assert.ok(sendAck, 'legacy send_ack present');
   assert.equal(sendAck!.payload.requestId, 'send-1');
 
+  await dispatchAction(
+    entryA,
+    { type: 'send_message', payload: { requestId: 'send-1', chatId: '123@g.us', text: 'hi' } },
+    deps,
+  );
+  assert.equal(sendCount, 1, 'same requestId and payload replays without sending twice');
+  assert.equal(clientA.frames().length, 4, 'durable receipt replays both terminal frames');
+
+  await dispatchAction(
+    entryA,
+    { type: 'send_message', payload: { requestId: 'send-1', chatId: '123@g.us', text: 'changed' } },
+    deps,
+  );
+  assert.equal(sendCount, 1, 'same requestId cannot be rebound to a different payload');
+  const conflict = clientA.frames().at(-1);
+  assert.equal(conflict?.type, 'action_ack');
+  assert.equal(conflict?.payload.ok, false);
+
   // Account B's client must receive nothing — strict per-account isolation.
   assert.equal(clientB.sent.length, 0, 'account B client untouched');
 
   remove(folderA);
   remove(folderB);
+  await rm(folderA, { recursive: true, force: true });
+  await rm(folderB, { recursive: true, force: true });
+});
+
+test('corrupt durable action receipts fail closed without executing the action', async () => {
+  const folder = path.join(TEST_ROOT, 'dispatch-corrupt-receipt');
+  await mkdir(path.join(folder, 'db'), { recursive: true });
+  await writeFile(path.join(folder, 'db', 'action-receipts.json'), '{not-json', 'utf8');
+  const { entry, client } = makeAccount(folder);
+  let sendCount = 0;
+  const deps: Partial<DispatchDeps> = {
+    sendOutgoing: (async () => {
+      sendCount += 1;
+      return { sent: [] };
+    }) as DispatchDeps['sendOutgoing'],
+  };
+
+  await dispatchAction(
+    entry,
+    {
+      type: 'send_message',
+      payload: {
+        requestId: 'send-corrupt-receipt',
+        chatId: '123@g.us',
+        text: 'must not be sent',
+      },
+    },
+    deps,
+  );
+
+  assert.equal(sendCount, 0);
+  const ack = client.frames().find((frame) => frame.type === 'action_ack');
+  assert.equal(ack?.payload.ok, false);
+  assert.match(String(ack?.payload.detail), /unreadable/i);
+
+  remove(folder);
+  await rm(folder, { recursive: true, force: true });
 });
 
 test('kick_member failure emits action_ack(ok:false) with priority code + matching error frame', async () => {
-  const folder = '/tenants/dispatch-kick';
+  const folder = path.join(TEST_ROOT, 'dispatch-kick');
   const { entry, client } = makeAccount(folder);
 
   // Two failures: a send_failed AND a permission_denied. Per CONTRACT.md §2
@@ -160,10 +221,11 @@ test('kick_member failure emits action_ack(ok:false) with priority code + matchi
   assert.equal(errP.detail, 'network blip');
 
   remove(folder);
+  await rm(folder, { recursive: true, force: true });
 });
 
 test('mark_read emits NO ack', async () => {
-  const folder = '/tenants/dispatch-markread';
+  const folder = path.join(TEST_ROOT, 'dispatch-markread');
   const { entry, client } = makeAccount(folder);
 
   let called = false;
@@ -183,4 +245,5 @@ test('mark_read emits NO ack', async () => {
   assert.equal(client.sent.length, 0, 'mark_read must emit no ack/error frame');
 
   remove(folder);
+  await rm(folder, { recursive: true, force: true });
 });
