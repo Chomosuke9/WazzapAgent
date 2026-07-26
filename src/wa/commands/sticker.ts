@@ -474,6 +474,8 @@ async function handleSticker({ chatId, chatType: _chatType, senderIsAdmin: _send
     if (mediaPath) {
       try { await fs.remove(mediaPath); } catch { /* ignore */ }
     }
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+    await reactWithProgress('');
   }
 }
 
