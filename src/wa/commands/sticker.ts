@@ -8,7 +8,7 @@ const { Image: WebpImage } = webpmux;
 import logger from '../../logger.js';
 import { sendOutgoing } from '../outbound.js';
 import { unwrapMessage } from '../domain/messageParser.js';
-import { downloadMediaToFile, mapMediaKind } from '../../mediaHandler.js';
+import { downloadMediaToFile, mapMediaKind, shouldRetryStickerAsImage } from '../../mediaHandler.js';
 import config from '../../config.js';
 import { withTimeout } from '../utils.js';
 import type { DownloadableMessage } from 'baileys';
@@ -27,7 +27,7 @@ const STICKER_PACK_NAME = config.stickerPackName;
 const STICKER_EMOJI = config.stickerEmoji;
 
 const SUPPORTED_IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.bmp']);
-const SUPPORTED_VIDEO_EXT = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm', '.3gp', '.gif']);
+const SUPPORTED_VIDEO_EXT = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm', '.webp', '.3gp', '.gif']);
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -53,14 +53,21 @@ async function downloadMediaContent(
   mediaDir: string = config.mediaDir,
 ): Promise<string | null> {
   const mediaKind = mapMediaKind(contentType);
-  if (!mediaKind || !['image', 'video'].includes(mediaKind)) return null;
+  if (!mediaKind || !['image', 'video', 'sticker'].includes(mediaKind)) return null;
 
   try {
-    const extMap: Record<string, string> = { image: 'jpg', video: 'mp4' };
+    const extMap: Record<string, string> = { image: 'jpg', video: 'mp4', sticker: 'webp' };
     const ext = extMap[mediaKind] || 'bin';
     const filename = `${messageId}_${mediaKind}.${ext}`;
     const filepath = path.join(mediaDir, filename);
-    await downloadMediaToFile(content, mediaKind as 'image' | 'video', filepath, withTimeout);
+    try {
+      await downloadMediaToFile(content, mediaKind as 'image' | 'video' | 'sticker', filepath, withTimeout);
+    } catch (err) {
+      if (mediaKind !== 'sticker' || !shouldRetryStickerAsImage(err)) throw err;
+      logger.warn({ err, messageId }, 'sticker decrypt failed, retrying as image');
+      await fs.remove(filepath).catch(() => {});
+      await downloadMediaToFile(content, 'image', filepath, withTimeout);
+    }
     return filepath;
   } catch (err) {
     logger.warn({ err, messageId, contentType }, 'failed to download media for sticker');
@@ -114,6 +121,36 @@ function fitFontSize(text: string, maxWidth: number, size: number): number {
   // extra room for the 1px letter spacing used by the overlay.
   const ideal = Math.floor((maxWidth - Math.max(0, text.length - 1)) / (text.length * 0.62));
   return Math.min(MAX, Math.max(MIN, ideal));
+}
+
+type StickerMediaCandidate = {
+  content: DownloadableMessage;
+  contentType: 'imageMessage' | 'videoMessage' | 'stickerMessage';
+  isAnimated: boolean;
+};
+
+function stickerMediaCandidate(
+  contentType: string | null | undefined,
+  message: {
+    imageMessage?: DownloadableMessage | null;
+    videoMessage?: (DownloadableMessage & { gifPlayback?: boolean | null }) | null;
+    stickerMessage?: (DownloadableMessage & { isAnimated?: boolean | null }) | null;
+  } | null | undefined,
+): StickerMediaCandidate | null {
+  if (contentType === 'imageMessage' && message?.imageMessage) {
+    return { content: message.imageMessage, contentType, isAnimated: false };
+  }
+  if (contentType === 'videoMessage' && message?.videoMessage) {
+    return { content: message.videoMessage, contentType, isAnimated: true };
+  }
+  if (contentType === 'stickerMessage' && message?.stickerMessage) {
+    return {
+      content: message.stickerMessage,
+      contentType,
+      isAnimated: Boolean(message.stickerMessage.isAnimated),
+    };
+  }
+  return null;
 }
 
 type ImageBounds = { left: number; top: number; width: number; height: number };
@@ -192,12 +229,15 @@ async function createStickerFile(mediaPath: string, upperText: string | null = n
   const shortId = randomUUID().slice(0, 8);
   const outPath = path.join(mediaDir, `sticker_${shortId}.webp`);
 
-  const metadata = await sharp(mediaPath).metadata();
+  // Reading into memory prevents Sharp from retaining a Windows file handle
+  // to a replied WebP sticker, which would block cleanup in handleSticker.
+  const mediaBuffer = await fs.readFile(mediaPath);
+  const metadata = await sharp(mediaBuffer).metadata();
   const imageBounds = metadata.width && metadata.height
     ? containImageBounds(metadata.width, metadata.height, STICKER_SIZE)
     : { left: 0, top: 0, width: STICKER_SIZE, height: STICKER_SIZE };
 
-  let img = sharp(mediaPath).resize(STICKER_SIZE, STICKER_SIZE, {
+  let img = sharp(mediaBuffer).resize(STICKER_SIZE, STICKER_SIZE, {
     fit: 'contain',
     withoutEnlargement: false,
     background: { r: 0, g: 0, b: 0, alpha: 0 },
@@ -358,28 +398,32 @@ async function handleSticker({ chatId, chatType: _chatType, senderIsAdmin: _send
   let isAnimated = false;
 
   // Case 1: message IS the media (e.g. image sent with caption "/sticker")
-  if (contentType === 'imageMessage') {
-    mediaPath = await downloadMediaContent(innerMessage!.imageMessage!, contentType, msg!.key.id, mediaDir);
-  } else if (contentType === 'videoMessage') {
-    mediaPath = await downloadMediaContent(innerMessage!.videoMessage!, contentType, msg!.key.id, mediaDir);
-    isAnimated = true;
+  const directMedia = stickerMediaCandidate(contentType, innerMessage);
+  if (directMedia) {
+    mediaPath = await downloadMediaContent(directMedia.content, directMedia.contentType, msg!.key.id, mediaDir);
+    isAnimated = directMedia.isAnimated;
   }
 
   // Case 2: message is a text reply to a media message (extendedTextMessage with contextInfo)
   if (!mediaPath) {
-    // contextInfo can be on extendedTextMessage OR directly on imageMessage/videoMessage
+    // contextInfo can be on text or directly on any supported media message.
     const contextInfo =
       innerMessage?.extendedTextMessage?.contextInfo ??
       innerMessage?.imageMessage?.contextInfo ??
-      innerMessage?.videoMessage?.contextInfo;
+      innerMessage?.videoMessage?.contextInfo ??
+      innerMessage?.stickerMessage?.contextInfo;
 
     if (contextInfo?.quotedMessage) {
       const { contentType: qType, message: qMsg } = unwrapMessage(contextInfo.quotedMessage) || {};
-      if (qType === 'imageMessage') {
-        mediaPath = await downloadMediaContent(qMsg!.imageMessage!, qType, contextInfo.stanzaId, mediaDir);
-      } else if (qType === 'videoMessage') {
-        mediaPath = await downloadMediaContent(qMsg!.videoMessage!, qType, contextInfo.stanzaId, mediaDir);
-        isAnimated = true;
+      const quotedMedia = stickerMediaCandidate(qType, qMsg);
+      if (quotedMedia) {
+        mediaPath = await downloadMediaContent(
+          quotedMedia.content,
+          quotedMedia.contentType,
+          contextInfo.stanzaId,
+          mediaDir,
+        );
+        isAnimated = quotedMedia.isAnimated;
       }
     }
   }
@@ -387,7 +431,7 @@ async function handleSticker({ chatId, chatType: _chatType, senderIsAdmin: _send
   if (!mediaPath) {
     try {
       await sock.sendMessage(chatId, {
-        text: 'Send an image/video with the caption `/sticker`, or reply to an image/video with `/sticker`.',
+        text: 'Send an image/video with the caption `/sticker`, or reply to an image/video/sticker with `/sticker`.',
       });
     } catch (err) { /* ignore */ }
     return;
@@ -428,11 +472,12 @@ export const stickerTextInternals = {
   containImageBounds,
   buildTextOverlaySvg,
   createStickerFile,
+  stickerMediaCandidate,
 };
 
 export const stickerCommand: CommandHandler = {
   commands: ["sticker", "stickers"],
-  description: "Create a WhatsApp sticker from an image or video. Send an image with the caption `/sticker` or reply to an image/video with `/sticker`. Add meme text with the format `/sticker bottom_text#top_text`. Example: `/sticker so me#when monday arrives`.",
+  description: "Create a WhatsApp sticker from an image, video, or existing sticker. Send an image with the caption `/sticker` or reply to an image/video/sticker with `/sticker`. Add meme text with the format `/sticker bottom_text#top_text`. Example: `/sticker so me#when monday arrives`.",
   permission: "public",
   run: (_sock, _message, ctx) => handleSticker(ctx),
 };

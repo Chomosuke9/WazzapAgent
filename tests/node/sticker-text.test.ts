@@ -7,7 +7,13 @@ import sharp from 'sharp';
 
 import { stickerTextInternals } from '../../src/wa/commands/sticker.js';
 
-const { buildTextOverlaySvg, containImageBounds, createStickerFile, fitFontSize } = stickerTextInternals;
+const {
+  buildTextOverlaySvg,
+  containImageBounds,
+  createStickerFile,
+  fitFontSize,
+  stickerMediaCandidate,
+} = stickerTextInternals;
 
 test('sticker text uses a smaller maximum font size', () => {
   assert.equal(fitFontSize('HI', 472, 512), 51);
@@ -87,4 +93,47 @@ test('real sticker conversion handles tiny, extreme-ratio, and large images', as
     // Native Sharp/webpmux handles can be released a moment later on Windows.
     await rm(tempDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
+});
+
+test('replying to a static sticker selects the WebP image pipeline', () => {
+  const content = { mimetype: 'image/webp', isAnimated: false } as never;
+
+  assert.deepEqual(stickerMediaCandidate('stickerMessage', { stickerMessage: content }), {
+    content,
+    contentType: 'stickerMessage',
+    isAnimated: false,
+  });
+});
+
+test('an existing static WebP sticker can be converted with new text', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'sticker-reply-webp-'));
+  try {
+    const inputPath = path.join(tempDir, 'replied-sticker.webp');
+    await sharp({
+      create: {
+        width: 512,
+        height: 512,
+        channels: 4,
+        background: { r: 70, g: 40, b: 150, alpha: 1 },
+      },
+    }).webp().toFile(inputPath);
+
+    const outputPath = await createStickerFile(inputPath, 'NEW TOP', 'NEW BOTTOM', tempDir);
+    const metadata = await sharp(await readFile(outputPath)).metadata();
+    assert.equal(metadata.format, 'webp');
+    assert.equal(metadata.width, 512);
+    assert.equal(metadata.height, 512);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+test('replying to an animated sticker selects the animated pipeline', () => {
+  const content = { mimetype: 'image/webp', isAnimated: true } as never;
+
+  assert.deepEqual(stickerMediaCandidate('stickerMessage', { stickerMessage: content }), {
+    content,
+    contentType: 'stickerMessage',
+    isAnimated: true,
+  });
 });
