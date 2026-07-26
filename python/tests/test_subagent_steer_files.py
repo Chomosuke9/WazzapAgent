@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from pathlib import Path
 
 from bridge.session import AgentSession
 from bridge.agent.subagent_coordinator import SubAgentCoordinator
@@ -109,12 +110,13 @@ def test_steering_forwards_resolved_context_files(tmp_path, monkeypatch):
   session_id, instruction, files = recording.calls[0]
   assert session_id == "sess-1"
   assert instruction == "use this PDF, keep everything else the same"
-  # The real media is staged. Its caption/filename is deliberately NOT turned
-  # into a placeholder text file that could mask a missing PDF.
+  # The real media and its message text are both staged by contract. A missing
+  # PDF still fails closed before either input can be forwarded.
   assert files, "steering must forward resolved input files"
   assert all(os.path.isfile(p) for p in files)
   assert any(p.endswith(".pdf") for p in files)
-  assert not any(p.endswith(".txt") for p in files)
+  text_file = next(p for p in files if p.endswith(".txt"))
+  assert Path(text_file).read_text(encoding="utf-8") == "report.pdf"
 
 
 def test_steering_without_ctx_ids_forwards_no_files(tmp_path, monkeypatch):

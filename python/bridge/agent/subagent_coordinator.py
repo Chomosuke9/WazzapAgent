@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
+import tempfile
 import time
 import uuid
 from collections import OrderedDict, deque
@@ -200,9 +201,9 @@ async def _resolve_ctx_ids_to_input_files(
   """Resolve ``ctx_ids`` to staged sub-agent input file paths.
 
   Mirrors the primary-submit resolution in :meth:`SubAgentCoordinator.submit_subtask`
-  so steering can carry the SAME files: each contextMsgId can yield a media
-  attachment (copied + extension-preserved) and/or the message text (written
-  to ``user_message<N>.txt``). The collected files are staged into the
+  so steering can carry the SAME files: each contextMsgId can yield one or
+  more media attachments (copied + extension-preserved) and/or the message
+  text (written to ``user_message<N>.txt``). The collected files are staged into the
   cross-process exchange dir via :func:`stage_input_files` so the paths
   resolve on both the bridge and the (possibly containerised) sub-agent side.
 
@@ -224,7 +225,23 @@ async def _resolve_ctx_ids_to_input_files(
   resolutions = await materialize_media_for_subagent(
     ws, chat_id, normalized_ids, media_paths_by_chat, history,
   )
-  failures = [result.as_dict() for result in resolutions if not result.ok]
+  text_by_id: dict[str, str] = {}
+  for msg in history or ():
+    cid = _normalize_context_msg_id(getattr(msg, "context_msg_id", None))
+    text = getattr(msg, "text", None)
+    if cid in seen and cid not in text_by_id and isinstance(text, str) and text:
+      text_by_id[cid] = text
+
+  # A positively identified text-only message is successfully resolvable when
+  # its text exists in history. Actual/unknown media failures remain
+  # fail-closed, including a media message whose caption is still available.
+  failures = [
+    result.as_dict()
+    for result in resolutions
+    if not result.ok and not (
+      result.expected_media is False and result.context_msg_id in text_by_id
+    )
+  ]
   if len(resolutions) != len(normalized_ids):
     returned = {result.context_msg_id for result in resolutions}
     failures.extend({
@@ -240,26 +257,39 @@ async def _resolve_ctx_ids_to_input_files(
       statuses=failures,
     )
 
-  # Preserve every attachment in every requested message, not just atts[0].
-  local_input_files: list[str] = []
-  seen_paths: set[str] = set()
-  for result in resolutions:
-    for raw_path in result.paths:
-      path = os.path.realpath(raw_path)
-      if path in seen_paths:
-        continue
-      seen_paths.add(path)
-      local_input_files.append(path)
+  resolutions_by_id = {result.context_msg_id: result for result in resolutions}
+  # Preserve every attachment in every requested message, not just atts[0],
+  # and retain the historical numbering contract for generated text files.
+  with tempfile.TemporaryDirectory(prefix="subagent_ctx_") as tmp_dir:
+    local_input_files: list[str] = []
+    seen_paths: set[str] = set()
+    file_idx = 1
+    for cid in normalized_ids:
+      result = resolutions_by_id.get(cid)
+      for raw_path in result.paths if result is not None else ():
+        path = os.path.realpath(raw_path)
+        if path in seen_paths:
+          continue
+        seen_paths.add(path)
+        local_input_files.append(path)
+        file_idx += 1
+      msg_text = text_by_id.get(cid)
+      if msg_text is not None:
+        txt_path = os.path.join(tmp_dir, f"user_message{file_idx}.txt")
+        with open(txt_path, "w", encoding="utf-8") as txt_file:
+          txt_file.write(msg_text)
+        local_input_files.append(txt_path)
+        file_idx += 1
 
-  staged = await asyncio.to_thread(
-    stage_input_files, session_id, local_input_files,
-  )
-  if len(staged) != len(local_input_files):
-    raise SubAgentInputError(
-      f"input staging accepted {len(staged)} of {len(local_input_files)} files",
-      statuses=[result.as_dict() for result in resolutions],
+    staged = await asyncio.to_thread(
+      stage_input_files, session_id, local_input_files,
     )
-  return staged
+    if len(staged) != len(local_input_files):
+      raise SubAgentInputError(
+        f"input staging accepted {len(staged)} of {len(local_input_files)} files",
+        statuses=[result.as_dict() for result in resolutions],
+      )
+    return staged
 
 
 async def _deliver_subagent_result(

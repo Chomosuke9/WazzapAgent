@@ -157,6 +157,21 @@ def test_materialize_quoted_noop_without_quoted():
     assert sock.calls == []
 
 
+def test_materialize_quoted_skips_typed_text_message():
+    """Quoted extended text is not a downloadable visual attachment."""
+    payload = {
+        "chatId": "c@g.us",
+        "quoted": {
+            "contextMsgId": "000151",
+            "messageId": "wamid-text",
+            "type": "extendedTextMessage",
+        },
+    }
+    sock = FakeSock(raises=AssertionError("text download must not be attempted"))
+    asyncio.run(materialize_quoted_media(sock, payload, {}))
+    assert sock.calls == []
+
+
 # --- materialize_media_for_subagent (sub-agent input fix) ---
 
 def test_subagent_materialize_downloads_document(tmp_path):

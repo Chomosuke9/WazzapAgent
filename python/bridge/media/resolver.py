@@ -345,6 +345,16 @@ async def materialize_quoted_media(sock, payload: dict, media_paths_by_chat: dic
   quoted_message_id = quoted.get("messageId")
   if not chat_id or not (quoted_ctx_id or quoted_message_id):
     return
+  # Newer gateway payloads tell us the quoted message type. Do not ask the
+  # gateway to download plain text (or another non-visual kind): it can only
+  # answer ``invalid_target: unsupported media type``. Keep the type-less
+  # fallback for older/synthetic payloads where the only way to discover a
+  # quoted image/sticker is to try the download.
+  quoted_type = str(quoted.get("type") or "").strip().lower()
+  if quoted_type and not any(
+    visual_kind in quoted_type for visual_kind in _VISUAL_DOWNLOAD_KINDS
+  ):
+    return
   # Already on disk? Nothing to do.
   existing = media_paths_by_chat.get(chat_id, {}).get(quoted_ctx_id) if quoted_ctx_id else None
   if isinstance(existing, list) and any(

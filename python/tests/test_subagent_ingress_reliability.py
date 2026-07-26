@@ -38,7 +38,7 @@ def _history(cid: str, *, media="document", text="report.pdf"):
   )]
 
 
-def test_resolver_stages_every_attachment_without_caption_placeholder(tmp_path, monkeypatch):
+def test_resolver_stages_every_attachment_and_message_text(tmp_path, monkeypatch):
   monkeypatch.setenv("SUBAGENT_INPUT_STAGING_DIR", str(tmp_path / "staging"))
   first = tmp_path / "first.pdf"
   second = tmp_path / "second.csv"
@@ -54,11 +54,12 @@ def test_resolver_stages_every_attachment_without_caption_placeholder(tmp_path, 
     _history("000123"), "sess-all",
   ))
 
-  assert len(files) == 2
+  assert len(files) == 3
   assert {Path(path).name for path in files} == {
-    "first.pdf", "second.csv",
+    "first.pdf", "second.csv", "user_message3.txt",
   }
-  assert not any(path.endswith(".txt") for path in files)
+  text_path = next(Path(path) for path in files if path.endswith(".txt"))
+  assert text_path.read_text(encoding="utf-8") == "report.pdf"
 
 
 def test_resolver_fails_closed_with_structured_download_status(tmp_path, monkeypatch):
@@ -81,6 +82,23 @@ def test_resolver_fails_closed_with_structured_download_status(tmp_path, monkeyp
     "error": "proto evicted",
   }]
   assert not (tmp_path / "staging" / "sess-fail").exists()
+
+
+def test_resolver_stages_known_text_only_context_id_as_txt(tmp_path, monkeypatch):
+  """A referenced text message becomes an input text file by contract."""
+  monkeypatch.setenv("SUBAGENT_INPUT_STAGING_DIR", str(tmp_path / "staging"))
+  history = _history("000125", media=None, text="please research this")
+  sock = _DownloadSock(error=AssertionError("text must not be downloaded"))
+
+  files = asyncio.run(_resolve_ctx_ids_to_input_files(
+    sock, "chat", ["000125"], {}, history, "sess-text",
+  ))
+
+  assert len(files) == 1
+  assert Path(files[0]).name == "user_message1.txt"
+  assert Path(files[0]).read_text(encoding="utf-8") == "please research this"
+  assert sock.calls == []
+  assert Path(files[0]).parent == tmp_path / "staging" / "sess-text"
 
 
 def _receipt(session_id: str, data: bytes) -> dict:
