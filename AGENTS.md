@@ -556,8 +556,8 @@ true = interactive card via sendRichMessage, mobile only),
 `SUBAGENT_URL`, `SUBAGENT_WEBHOOK_PORT` (BASE port, default 8081; multi-account:
 account N binds `SUBAGENT_WEBHOOK_PORT + N`, index 0 keeps the base so
 single-account is unchanged),
-`SUBAGENT_WEBHOOK_URL`, `SUBAGENT_WEBHOOK_HOST` (webhook bind host, default `127.0.0.1` (loopback); set `0.0.0.0` only for a remote sub-agent), `SUBAGENT_WAIT_TIMEOUT_S` (default 300),
-`SUBAGENT_MAX_WAIT_S` (default 1800), `SUBAGENT_ENABLED_DEFAULT` (default false),
+`SUBAGENT_WEBHOOK_URL`, `SUBAGENT_WEBHOOK_HOST` (webhook bind host, default `127.0.0.1` (loopback); set `0.0.0.0` only for a remote sub-agent), `SUBAGENT_WAIT_TIMEOUT_S` (default 900),
+`SUBAGENT_MAX_WAIT_S` (default 7200), `SUBAGENT_ENABLED_DEFAULT` (default false),
 `SUBAGENT_INPUT_STAGING_DIR`, `SUBAGENT_MAX_INLINE_FILE_BYTES`, `SUBAGENT_WEBHOOK_MAX_BODY_BYTES`
 
 **Direct-invoke endpoint (bot-first messaging):**

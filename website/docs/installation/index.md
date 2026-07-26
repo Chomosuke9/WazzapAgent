@@ -355,9 +355,15 @@ Sub-Agent runs code inside a Docker sandbox. Although isolated, only run it on a
 | `SUBAGENT_WEBHOOK_URL` | `http://localhost:8081/subagent/callback` | Callback URL sent to WazzapSubAgents |
 | `SUBAGENT_WEBHOOK_HOST` | *(automatic)* | Loopback for local URLs, `0.0.0.0` for remote/Docker URLs |
 | `SUBAGENT_WEBHOOK_TOKEN` | *(none)* | Shared callback secret; required on non-loopback binds |
-| `SUBAGENT_OUTPUT_DOWNLOAD_TIMEOUT_S` | `300` | Timeout for a streamed non-inlined output |
+| `SUBAGENT_HTTP_TIMEOUT` | `120` | Timeout for an individual Sub-Agent HTTP request |
+| `SUBAGENT_OUTPUT_DOWNLOAD_TIMEOUT_S` | `900` | Timeout for a streamed non-inlined output |
+| `SUBAGENT_STEER_CONSUME_TIMEOUT_S` | `1800` | Maximum wait for accepted steering to be consumed |
 | `SUBAGENT_ENABLED_DEFAULT` | `false` | Enable Sub-Agent by default for new chats |
-| `SUBAGENT_WAIT_TIMEOUT_S` | `300` | Maximum wait for Sub-Agent completion callback |
+| `SUBAGENT_WAIT_TIMEOUT_S` | `900` | Maximum silent wait for a Sub-Agent completion callback |
+| `SUBAGENT_MAX_WAIT_S` | `7200` | Absolute wall-clock limit for one Sub-Agent task |
+| `SUBAGENT_SUBMIT_RETRY_MAX` | `5` | Retry budget for transient submit and steering failures |
+| `SUBAGENT_SUBMIT_RETRY_BASE_BACKOFF` | `2.0` | Initial retry delay in seconds |
+| `SUBAGENT_SUBMIT_RETRY_MAX_BACKOFF` | `60.0` | Maximum retry delay in seconds |
 
 ### LLM1 (Routing)
 
