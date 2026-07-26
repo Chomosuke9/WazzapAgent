@@ -397,9 +397,18 @@ async function handleSticker({ chatId, chatType: _chatType, senderIsAdmin: _send
   let mediaPath: string | null = null;
   let isAnimated = false;
 
+  const reactWithProgress = async (emoji: string): Promise<void> => {
+    try {
+      await sock.sendMessage(chatId, { react: { text: emoji, key: msg!.key } });
+    } catch (err) {
+      logger.warn({ err, chatId, emoji }, 'failed to update sticker progress reaction');
+    }
+  };
+
   // Case 1: message IS the media (e.g. image sent with caption "/sticker")
   const directMedia = stickerMediaCandidate(contentType, innerMessage);
   if (directMedia) {
+    await reactWithProgress('⬇️');
     mediaPath = await downloadMediaContent(directMedia.content, directMedia.contentType, msg!.key.id, mediaDir);
     isAnimated = directMedia.isAnimated;
   }
@@ -417,6 +426,7 @@ async function handleSticker({ chatId, chatType: _chatType, senderIsAdmin: _send
       const { contentType: qType, message: qMsg } = unwrapMessage(contextInfo.quotedMessage) || {};
       const quotedMedia = stickerMediaCandidate(qType, qMsg);
       if (quotedMedia) {
+        await reactWithProgress('⬇️');
         mediaPath = await downloadMediaContent(
           quotedMedia.content,
           quotedMedia.contentType,
@@ -437,6 +447,8 @@ async function handleSticker({ chatId, chatType: _chatType, senderIsAdmin: _send
     return;
   }
 
+  await reactWithProgress('🔁');
+
   let stickerPath: string | null = null;
   try {
     if (isAnimated) {
@@ -450,6 +462,7 @@ async function handleSticker({ chatId, chatType: _chatType, senderIsAdmin: _send
       attachments: [{ kind: 'sticker', path: stickerPath }],
       replyTo: msg!.key.id as string,
     });
+    await reactWithProgress('✅');
     logger.info({ chatId, isAnimated }, 'Sticker created and sent');
   } catch (err: unknown) {
     logger.error({ err, chatId, isAnimated }, 'failed to create sticker');
