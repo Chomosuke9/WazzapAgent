@@ -976,7 +976,8 @@ class SubAgentCoordinator:
     available_file_ids = {
       str(getattr(msg, "context_msg_id", "") or "")
       for msg in history
-      if getattr(msg, "media", None)
+      if (getattr(msg, "media", None) or str(getattr(msg, "text", "") or "").strip())
+
     }
     available_file_ids.update(
       str(cid) for cid, entries in media_paths_by_chat.get(chat_id, {}).items()
