@@ -102,17 +102,37 @@ async function addStickerExif(webpPath: string, { packName, emoji }: { packName:
 // ---------------------------------------------------------------------------
 
 /**
- * Compute font size so the text fits within `maxWidth`.
- * Uses Impact's approximate char width ratio (0.55 × fontSize).
- * Clamped between minSize and maxSize (both relative to sticker size).
+ * Compute a conservative font size for a single line of meme text.
+ * The SVG also applies an exact textLength below, so the minimum size can
+ * remain readable without allowing very long text to escape the canvas.
  */
 function fitFontSize(text: string, maxWidth: number, size: number): number {
-  const MIN = Math.round(size * 0.05);  // ≈ 26px at 512
-  const MAX = Math.round(size * 0.14);  // ≈ 72px at 512
+  const MIN = Math.round(size * 0.035); // ≈ 18px at 512
+  const MAX = Math.round(size * 0.10);  // ≈ 51px at 512
   if (!text.length) return MAX;
-  // charWidth ≈ 0.55 * fontSize  →  fontSize = maxWidth / (chars * 0.55)
-  const ideal = Math.floor(maxWidth / (text.length * 0.55));
+  // Impact/Arial Black capitals average roughly 0.62em wide. Leave a little
+  // extra room for the 1px letter spacing used by the overlay.
+  const ideal = Math.floor((maxWidth - Math.max(0, text.length - 1)) / (text.length * 0.62));
   return Math.min(MAX, Math.max(MIN, ideal));
+}
+
+type ImageBounds = { left: number; top: number; width: number; height: number };
+
+/** Locate the image inside the square canvas produced by Sharp's `fit: contain`. */
+function containImageBounds(sourceWidth: number, sourceHeight: number, size: number): ImageBounds {
+  if (sourceWidth <= 0 || sourceHeight <= 0) {
+    return { left: 0, top: 0, width: size, height: size };
+  }
+
+  const scale = Math.min(size / sourceWidth, size / sourceHeight);
+  const width = Math.max(1, Math.min(size, Math.round(sourceWidth * scale)));
+  const height = Math.max(1, Math.min(size, Math.round(sourceHeight * scale)));
+  return {
+    left: Math.floor((size - width) / 2),
+    top: Math.floor((size - height) / 2),
+    width,
+    height,
+  };
 }
 
 /**
@@ -124,25 +144,34 @@ function buildTextOverlaySvg(
   size: number,
   upperText: string | null,
   lowerText: string | null,
+  imageBounds: ImageBounds = { left: 0, top: 0, width: size, height: size },
 ): Buffer | null {
   if (!upperText && !lowerText) return null;
 
-  const padding = Math.round(size * 0.04);
+  const padding = Math.max(2, Math.round(Math.min(imageBounds.width, imageBounds.height) * 0.04));
   const escapeXml = (s: string) =>
     s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-  const maxWidth = size - padding * 2;
+  const maxWidth = Math.max(1, imageBounds.width - padding * 2);
+  const lineCount = Number(Boolean(upperText)) + Number(Boolean(lowerText));
+  const availableHeight = Math.max(1, imageBounds.height - padding * 2);
+  const maxFontByHeight = Math.max(6, Math.floor(availableHeight / (lineCount > 1 ? 2.25 : 1.15)));
   const textElements: string[] = [];
 
   function addText(text: string, position: 'top' | 'bottom') {
     const upper = text.toUpperCase();
-    const fontSize = fitFontSize(upper, maxWidth, size);
+    const fontSize = Math.min(fitFontSize(upper, maxWidth, size), maxFontByHeight);
     const strokeWidth = Math.max(2, Math.round(fontSize * 0.08));
-    const attrs = `font-family="Impact, Arial Black, sans-serif" font-size="${fontSize}" font-weight="bold" text-anchor="middle" fill="white" stroke="black" stroke-width="${strokeWidth}" paint-order="stroke" letter-spacing="1"`;
+    const estimatedWidth = upper.length * fontSize * 0.62 + Math.max(0, upper.length - 1);
+    // textLength is enforced by the SVG renderer. It prevents font-metric
+    // differences (or the minimum font size) from pushing text past the image.
+    const textLength = Math.max(1, Math.min(Math.floor(estimatedWidth), maxWidth - strokeWidth * 2));
+    const attrs = `font-family="Impact, Arial Black, sans-serif" font-size="${fontSize}" font-weight="bold" text-anchor="middle" fill="white" stroke="black" stroke-width="${strokeWidth}" paint-order="stroke" letter-spacing="1" textLength="${textLength}" lengthAdjust="spacingAndGlyphs"`;
     const y = position === 'top'
-      ? padding + fontSize
-      : size - padding;
-    textElements.push(`<text x="${size / 2}" y="${y}" ${attrs}>${escapeXml(upper)}</text>`);
+      ? imageBounds.top + padding + fontSize
+      : imageBounds.top + imageBounds.height - padding;
+    const x = imageBounds.left + imageBounds.width / 2;
+    textElements.push(`<text x="${x}" y="${y}" ${attrs}>${escapeXml(upper)}</text>`);
   }
 
   if (upperText) addText(upperText, 'top');
@@ -163,13 +192,18 @@ async function createStickerFile(mediaPath: string, upperText: string | null = n
   const shortId = randomUUID().slice(0, 8);
   const outPath = path.join(mediaDir, `sticker_${shortId}.webp`);
 
+  const metadata = await sharp(mediaPath).metadata();
+  const imageBounds = metadata.width && metadata.height
+    ? containImageBounds(metadata.width, metadata.height, STICKER_SIZE)
+    : { left: 0, top: 0, width: STICKER_SIZE, height: STICKER_SIZE };
+
   let img = sharp(mediaPath).resize(STICKER_SIZE, STICKER_SIZE, {
     fit: 'contain',
     withoutEnlargement: false,
     background: { r: 0, g: 0, b: 0, alpha: 0 },
   });
 
-  const overlaysvg = buildTextOverlaySvg(STICKER_SIZE, upperText, lowerText);
+  const overlaysvg = buildTextOverlaySvg(STICKER_SIZE, upperText, lowerText, imageBounds);
   if (overlaysvg) {
     img = img.composite([{ input: overlaysvg, blend: 'over' }]);
   }
@@ -387,6 +421,14 @@ async function handleSticker({ chatId, chatType: _chatType, senderIsAdmin: _send
 }
 
 export { handleSticker };
+
+// Exported for focused regression tests; not part of the command interface.
+export const stickerTextInternals = {
+  fitFontSize,
+  containImageBounds,
+  buildTextOverlaySvg,
+  createStickerFile,
+};
 
 export const stickerCommand: CommandHandler = {
   commands: ["sticker", "stickers"],
