@@ -50,6 +50,20 @@ class SubAgentSteerError(SubAgentSubmitError):
   """Raised when steering was not staged or consumed reliably."""
 
 
+def _remote_error_message(operation: str, status: object, body: dict) -> str:
+  """Return an actionable, secret-free description of an HTTP failure."""
+  if status == 401:
+    return (
+      f"SubAgent {operation} authentication was rejected (HTTP 401). "
+      "Set SUBAGENT_API_TOKEN to the exact same value in WazzapAgent and "
+      "WazzapSubAgents, then restart both processes"
+    )
+  report = body.get("report")
+  if isinstance(report, str) and report.strip():
+    return f"SubAgent {operation} returned status={status}: {report.strip()}"
+  return f"SubAgent {operation} returned status={status}"
+
+
 class SubAgentClient:
   def __init__(
     self,
@@ -142,7 +156,7 @@ class SubAgentClient:
       retryable = isinstance(status, int) and (status == 429 or 500 <= status < 600)
       if not retryable or attempt >= attempts:
         raise SubAgentSteerError(
-          f"SubAgent /steer returned status={status}",
+          _remote_error_message("/steer", status, body),
           status_code=status if isinstance(status, int) else None,
           body=body,
         )
@@ -233,7 +247,7 @@ class SubAgentClient:
       retryable = isinstance(status, int) and (status == 429 or 500 <= status < 600)
       if not retryable or attempt >= attempts:
         raise SubAgentSubmitError(
-          f"SubAgent /execute returned status={status}",
+          _remote_error_message("/execute", status, last_body),
           status_code=last_status,
           body=last_body,
         )

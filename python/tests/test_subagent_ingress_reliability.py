@@ -198,6 +198,33 @@ def test_client_uses_api_bearer_token_for_post_and_get(monkeypatch):
   ]
 
 
+def test_execute_401_explains_api_token_must_match(monkeypatch):
+  import bridge.subagent.client as client_module
+
+  class _Response:
+    status_code = 401
+    headers: dict = {}
+    text = ""
+
+    @staticmethod
+    def json():
+      return {"success": False, "report": "Unauthorized API request"}
+
+  monkeypatch.delenv("SUBAGENT_API_TOKEN", raising=False)
+  monkeypatch.setattr(client_module, "requests", type("Requests", (), {
+    "post": staticmethod(lambda *_args, **_kwargs: _Response()),
+  }))
+  client = SubAgentClient(base_url="http://sub", webhook_url="http://callback")
+
+  with pytest.raises(SubAgentSubmitError) as raised:
+    asyncio.run(client.submit("auth-check", "do work", []))
+
+  assert raised.value.status_code == 401
+  assert "SUBAGENT_API_TOKEN" in str(raised.value)
+  assert "exact same value" in str(raised.value)
+  assert "restart both processes" in str(raised.value)
+
+
 def test_chunk_upload_is_authenticated_and_checksum_acknowledged(
   tmp_path, monkeypatch,
 ):
