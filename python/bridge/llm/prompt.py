@@ -448,13 +448,11 @@ def _load_system_prompt() -> str:
 
 
 _DELETE_RULES = """<delete>
-DELETE is ALLOWED for this chat. Use the delete_messages tool to remove rule-violating messages.
-Only delete messages with clear justification.
+DELETE is ALLOWED for this chat.
 </delete>"""
 
 _MUTE_RULES = """<mute>
 MUTE is ALLOWED for this chat. Use the mute_member tool to auto-delete all messages from a user for a specified duration.
-Use for persistent rule violators. Muted user's messages are auto-deleted for the specified duration.
 To unmute a currently muted user, call mute_member with duration_minutes=0. The senderRefs of everyone currently muted are listed under "Currently muted users" in the message metadata — use those exact senderRefs to unmute.
 </mute>"""
 
@@ -490,7 +488,7 @@ KICK is NOT allowed in this chat — you have no kick_members tool and cannot re
 _SUBAGENT_RULES = """<subagent>
 SUB-AGENT is ALLOWED. Use `execute_subtask` for tasks needing a real compute environment: file processing, code execution, file analysis, web scraping, producing attachments, or anything you can't answer from knowledge alone. Assume full internet + system access — it can do almost anything.
 IT'S THE ONLY WAY TO ACTUALLY DO WHAT AGENTS ARE MEANT TO DO. DO NOT HALLUCINATE AND SAY YOU ALREADY DID SOMETHING WITHOUT USING THIS.
-You can't access the internet, manipulate files, or perform any actions that require system-level access. But the sub-agent can do anything you tell it to do. Use it for anything you need to do.
+You can't access the internet, manipulate files, or perform any actions that require system-level access. But the sub-agent has a shell and environment that can do anything you tell it to do.
 Do not say "Sorry, as an AI assistant, I can't do that." or any similar phrases, unless the sub-agent cannot handle the task.
 
 Do NOT use for: conversational replies, greetings, opinions, knowledge-only answers, moderation, or tasks covered by built-in commands.
