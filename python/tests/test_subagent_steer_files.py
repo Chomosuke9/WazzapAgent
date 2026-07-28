@@ -51,6 +51,14 @@ class _RecordingClient:
     return True
 
 
+async def _submit_and_drain(coord: SubAgentCoordinator, session: AgentSession, **kwargs) -> None:
+  """Run submit_subtask and let its deliberately-background work finish."""
+  await coord.submit_subtask(**kwargs)
+  await asyncio.sleep(0)
+  if session.tasks:
+    await asyncio.gather(*list(session.tasks))
+
+
 def test_steering_forwards_resolved_context_files(tmp_path, monkeypatch):
   # Redirect cross-process input staging into tmp so we don't write to the
   # repo's default data/subagent_in.
@@ -89,7 +97,7 @@ def test_steering_forwards_resolved_context_files(tmp_path, monkeypatch):
     "high_quality": False,
   }
 
-  asyncio.run(coord.submit_subtask(
+  asyncio.run(_submit_and_drain(coord, sess,
     action=action,
     chat_id=chat_id,
     history=history,
@@ -130,7 +138,7 @@ def test_steering_without_ctx_ids_forwards_no_files(tmp_path, monkeypatch):
   sess.subagent_client = recording
   coord = SubAgentCoordinator(sess)
 
-  asyncio.run(coord.submit_subtask(
+  asyncio.run(_submit_and_drain(coord, sess,
     action={"instruction": "make it blue", "contextMsgIds": [], "high_quality": False},
     chat_id=chat_id,
     history=[],
@@ -151,6 +159,118 @@ def test_steering_without_ctx_ids_forwards_no_files(tmp_path, monkeypatch):
   assert session_id == "sess-2"
   assert instruction == "make it blue"
   assert files == []
+
+
+def test_steering_wait_does_not_retain_the_chat_lock(tmp_path, monkeypatch):
+  """A long steering consume wait stays ordered in background, not in chat."""
+  monkeypatch.setenv("SUBAGENT_INPUT_STAGING_DIR", str(tmp_path / "staging"))
+
+  async def scenario():
+    sess = AgentSession(_StubSock("/a"))
+    chat_id = "c@x"
+    sess.subagent_tracker.register(
+      SubTask(session_id="sess-blocked", instruction="draw", chat_id=chat_id)
+    )
+
+    class _BlockingClient:
+      def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+      async def steer(self, _session_id, _instruction, input_files=None):
+        self.started.set()
+        await self.release.wait()
+        return {"consume_status": {"state": "consumed"}}
+
+    client = _BlockingClient()
+    sess.subagent_client = client
+    coord = SubAgentCoordinator(sess)
+    chat_lock = asyncio.Lock()
+
+    # This is how BatchProcessor calls the coordinator: while owning chat_lock.
+    async with chat_lock:
+      await asyncio.wait_for(coord.submit_subtask(
+        action={"instruction": "make it blue", "contextMsgIds": []},
+        chat_id=chat_id,
+        history=[],
+        lock=chat_lock,
+        current=None,
+        llm2_payload={},
+        group_description=None,
+        db_prompt=None,
+        chat_type="private",
+        bot_is_admin=False,
+        bot_is_super_admin=False,
+        fallback_reply_to=None,
+        allowed_context_ids=set(),
+      ), timeout=0.25)
+
+    await asyncio.wait_for(client.started.wait(), timeout=0.25)
+    assert client.release.is_set() is False
+
+    # A new message for the same chat can acquire the lock immediately even
+    # though SubAgentClient.steer is still waiting for consumption.
+    await asyncio.wait_for(chat_lock.acquire(), timeout=0.25)
+    chat_lock.release()
+
+    client.release.set()
+    if sess.tasks:
+      await asyncio.gather(*list(sess.tasks))
+
+  asyncio.run(scenario())
+
+
+def test_initial_submit_network_wait_does_not_retain_the_chat_lock(tmp_path, monkeypatch):
+  """Slow/retrying POST /tasks must not freeze later messages in the chat."""
+  monkeypatch.setenv("SUBAGENT_INPUT_STAGING_DIR", str(tmp_path / "staging"))
+
+  async def scenario():
+    sess = AgentSession(_StubSock("/a"))
+    chat_id = "c@x"
+
+    class _BlockingSubmitClient:
+      def __init__(self) -> None:
+        self.started = asyncio.Event()
+
+      async def submit(self, *_args, **_kwargs):
+        self.started.set()
+        await asyncio.Event().wait()
+
+    client = _BlockingSubmitClient()
+    sess.subagent_client = client
+    coord = SubAgentCoordinator(sess)
+    chat_lock = asyncio.Lock()
+
+    async with chat_lock:
+      await asyncio.wait_for(coord.submit_subtask(
+        action={"instruction": "research this", "contextMsgIds": []},
+        chat_id=chat_id,
+        history=[],
+        lock=chat_lock,
+        current=None,
+        llm2_payload={},
+        group_description=None,
+        db_prompt=None,
+        chat_type="private",
+        bot_is_admin=False,
+        bot_is_super_admin=False,
+        fallback_reply_to=None,
+        allowed_context_ids=set(),
+      ), timeout=0.25)
+
+    # Tracker/event registration remains synchronous, preventing duplicate
+    # initial tasks even though the actual HTTP submit is now in background.
+    assert sess.subagent_tracker.get_active_for_chat(chat_id) is not None
+    await asyncio.wait_for(client.started.wait(), timeout=0.25)
+    await asyncio.wait_for(chat_lock.acquire(), timeout=0.25)
+    chat_lock.release()
+
+    for task in list(sess.tasks):
+      task.cancel()
+    if sess.tasks:
+      await asyncio.gather(*list(sess.tasks), return_exceptions=True)
+
+  asyncio.run(scenario())
 
 
 def test_client_steer_puts_files_and_base64_on_the_wire(tmp_path, monkeypatch):

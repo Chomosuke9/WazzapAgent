@@ -458,7 +458,25 @@ def _register_handlers(session) -> None:
 
   @ws.on("action_ack")
   async def _on_action_ack(ack_evt):
-    await ack.handle(ack_evt)
+    # The WaSocket transport awaits event handlers serially from its single
+    # receive loop.  Ack hydration may need this chat's lock while a batch is
+    # still finishing, so awaiting it here creates head-of-line blocking: one
+    # busy chat prevents *every* later frame for this account from being read.
+    # Keep the hydrator's per-chat locking/ordering semantics, but never make
+    # the global frame pump wait for that lock.
+    async def _hydrate_action_ack() -> None:
+      try:
+        await ack.handle(ack_evt)
+      except asyncio.CancelledError:
+        raise
+      except Exception as exc:  # pylint: disable=broad-except
+        logger.exception(
+          "Action ACK hydration failed request_id=%s: %s",
+          getattr(ack_evt, "request_id", None),
+          exc,
+        )
+
+    session._track_task(asyncio.create_task(_hydrate_action_ack()))
 
   @ws.on("send_ack")
   async def _on_send_ack(ack_evt):

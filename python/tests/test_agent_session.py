@@ -290,6 +290,46 @@ def test_register_wires_all_expected_events():
   assert sess._queue_handler is not None
 
 
+def test_action_ack_handler_never_blocks_the_socket_frame_pump():
+  """A lock-waiting hydrator must not delay a later frame for another chat."""
+
+  async def scenario():
+    sock = StubWaSocket("/a")
+    session = AgentSession(sock)
+    hydration_started = asyncio.Event()
+    release_hydration = asyncio.Event()
+
+    class _BlockingAckHydrator:
+      async def handle(self, _ack_evt) -> None:
+        hydration_started.set()
+        await release_hydration.wait()
+
+    # _register_handlers captures the collaborator, so replace it first.
+    session._ack = _BlockingAckHydrator()
+    session.register()
+
+    later_frame_seen = asyncio.Event()
+
+    @sock.on("later_frame")
+    async def _on_later_frame(_payload):
+      later_frame_seen.set()
+
+    # The action_ack event must return even though hydration itself is stuck.
+    await asyncio.wait_for(sock.emit("action_ack", object()), timeout=0.25)
+    await asyncio.wait_for(hydration_started.wait(), timeout=0.25)
+    assert release_hydration.is_set() is False
+
+    # This models the next item in WaSocket's serialized receive loop.
+    await asyncio.wait_for(sock.emit("later_frame", object()), timeout=0.25)
+    assert later_frame_seen.is_set()
+
+    release_hydration.set()
+    if session.tasks:
+      await asyncio.gather(*list(session.tasks))
+
+  asyncio.run(scenario())
+
+
 # ---------------------------------------------------------------------------
 # run() lifecycle ordering
 # ---------------------------------------------------------------------------

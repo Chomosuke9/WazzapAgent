@@ -755,6 +755,10 @@ class SubAgentCoordinator:
   def __init__(self, session) -> None:
     self._session = session
     self._recovering_sessions: set[str] = set()
+    # Steering for one running sub-agent must stay ordered, but it must never
+    # run under the WhatsApp chat lock.  A consume acknowledgement can take as
+    # long as the sub-agent's current tool call (up to the configured timeout).
+    self._steering_locks: dict[str, asyncio.Lock] = {}
 
   async def recover_pending_completions(self) -> None:
     """Replay every durable, undelivered completion after bridge startup."""
@@ -1094,24 +1098,40 @@ class SubAgentCoordinator:
           _incoming[:120],
           extra={"chat_id": chat_id},
         )
-        try:
-          await subagent_client.steer(
-            existing_task.session_id, _incoming, input_files=_steer_files,
-          )
-        except Exception as _steer_err:  # pylint: disable=broad-except
-          logger.exception(
-            "execute_subtask: steering delivery failed chat=%s session=%s: %s",
-            chat_id,
-            existing_task.session_id,
-            _steer_err,
-            extra={"chat_id": chat_id},
-          )
-          await _send_subagent_ingress_failure(
-            ws,
-            chat_id,
-            _steer_ctx_ids[-1] if _steer_ctx_ids else fallback_reply_to,
-            steering=True,
-          )
+        _steering_session_id = existing_task.session_id
+        _steering_reply_to = (
+          _steer_ctx_ids[-1] if _steer_ctx_ids else fallback_reply_to
+        )
+        _steering_lock = self._steering_locks.setdefault(
+          _steering_session_id, asyncio.Lock(),
+        )
+
+        async def _deliver_steering() -> None:
+          # Multiple steering messages for the same sub-agent are serialized
+          # in arrival order without retaining the WhatsApp per-chat lock.
+          async with _steering_lock:
+            try:
+              await subagent_client.steer(
+                _steering_session_id, _incoming, input_files=_steer_files,
+              )
+            except asyncio.CancelledError:
+              raise
+            except Exception as _steer_err:  # pylint: disable=broad-except
+              logger.exception(
+                "execute_subtask: steering delivery failed chat=%s session=%s: %s",
+                chat_id,
+                _steering_session_id,
+                _steer_err,
+                extra={"chat_id": chat_id},
+              )
+              await _send_subagent_ingress_failure(
+                ws,
+                chat_id,
+                _steering_reply_to,
+                steering=True,
+              )
+
+        _track_task(asyncio.create_task(_deliver_steering()))
       else:
         logger.warning(
           "execute_subtask: dropped (no instruction) for chat=%s",
@@ -1179,45 +1199,6 @@ class SubAgentCoordinator:
     progress_event = asyncio.Event()
     subagent_webhook.register_progress_event(session_id, progress_event)
 
-    submit_failed = False
-    try:
-      await subagent_client.submit(session_id, instruction, input_files, high_quality=high_quality)
-    except SubAgentSubmitError as submit_err:
-      logger.error(
-        "execute_subtask: submit failed session=%s status=%s: %s",
-        session_id,
-        submit_err.status_code,
-        submit_err,
-        extra={"chat_id": chat_id, "session_id": session_id},
-      )
-      subagent_webhook.unregister_completion_event(session_id)
-      subagent_webhook.unregister_progress_event(session_id)
-      subagent_tracker.finalize(session_id, {
-        "success": False,
-        "report": f"Failed to submit task to sub-agent: {submit_err}",
-      })
-      submit_failed = True
-    except Exception as submit_err:
-      logger.exception(
-        "execute_subtask: submit failed session=%s: %s",
-        session_id,
-        submit_err,
-        extra={"chat_id": chat_id},
-      )
-      subagent_webhook.unregister_completion_event(session_id)
-      subagent_webhook.unregister_progress_event(session_id)
-      subagent_tracker.finalize(session_id, {
-        "success": False,
-        "report": f"Failed to submit task to sub-agent: {submit_err}",
-      })
-      submit_failed = True
-
-    if submit_failed:
-      # No webhook will arrive; trip the event immediately so the
-      # background task wakes up and delivers the failure report
-      # without waiting out the full SUBAGENT_WAIT_TIMEOUT_S.
-      completion_event.set()
-
     # Capture closure variables that the background task needs.
     # We capture by argument default to avoid late-binding bugs if
     # the loop processes more actions before the task is scheduled.
@@ -1254,17 +1235,56 @@ class SubAgentCoordinator:
       fallback_reply_to=_bg_fallback_reply_to,
       allowed_context_ids=_bg_allowed_context_ids,
     ) -> None:
-      """Wait for the sub-agent to finish, then re-invoke LLM2 and
-      deliver the result.
+      """Submit and wait for the sub-agent, then re-invoke LLM2 and deliver.
 
       Runs as a background ``asyncio.Task`` so the per-chat lock is
-      released as soon as the original action loop exits. New
+      released before network submission or completion waiting. New
       bursts arriving in the same chat while the sub-agent is
       running are processed normally (LLM2 sees the active-task
 context block from ``SubTaskTracker.format_context``).
       """
       try:
         try:
+          submit_failed = False
+          try:
+            await subagent_client.submit(
+              session_id, instruction, input_files, high_quality=high_quality,
+            )
+          except SubAgentSubmitError as submit_err:
+            logger.error(
+              "execute_subtask: submit failed session=%s status=%s: %s",
+              session_id,
+              submit_err.status_code,
+              submit_err,
+              extra={"chat_id": chat_id, "session_id": session_id},
+            )
+            subagent_webhook.unregister_completion_event(session_id)
+            subagent_webhook.unregister_progress_event(session_id)
+            subagent_tracker.finalize(session_id, {
+              "success": False,
+              "report": f"Failed to submit task to sub-agent: {submit_err}",
+            })
+            submit_failed = True
+          except Exception as submit_err:  # pylint: disable=broad-except
+            logger.exception(
+              "execute_subtask: submit failed session=%s: %s",
+              session_id,
+              submit_err,
+              extra={"chat_id": chat_id},
+            )
+            subagent_webhook.unregister_completion_event(session_id)
+            subagent_webhook.unregister_progress_event(session_id)
+            subagent_tracker.finalize(session_id, {
+              "success": False,
+              "report": f"Failed to submit task to sub-agent: {submit_err}",
+            })
+            submit_failed = True
+
+          if submit_failed:
+            # No webhook will arrive; deliver the finalized failure report
+            # immediately instead of waiting out the webhook timeout.
+            completion_event.set()
+
           # Wait for the sub-agent to finish. The always-on webhook
           # server sets ``completion_event`` on the ``complete``
           # callback, and ``progress_event`` on every ``progress``
@@ -1434,28 +1454,6 @@ context block from ``SubTaskTracker.format_context``).
               _new_progress_event = asyncio.Event()
               subagent_webhook.register_completion_event(_new_session_id, _new_completion_event)
               subagent_webhook.register_progress_event(_new_session_id, _new_progress_event)
-              _new_submit_failed = False
-              try:
-                await subagent_client.submit(
-                    _new_session_id, _instruction, _input_files,
-                    high_quality=_high_quality,
-                    previous_session_id=session_id,
-                )
-              except Exception as _submit_err:
-                logger.exception(
-                  "execute_subtask: correction submit failed session=%s: %s",
-                  _new_session_id, _submit_err,
-                  extra={"chat_id": chat_id},
-                )
-                subagent_webhook.unregister_completion_event(_new_session_id)
-                subagent_webhook.unregister_progress_event(_new_session_id)
-                subagent_tracker.finalize(_new_session_id, {
-                  "success": False,
-                  "report": f"Failed to submit correction task: {_submit_err}",
-                })
-                _new_submit_failed = True
-              if _new_submit_failed:
-                _new_completion_event.set()
               # Clear the now-stale finished-task history so the
               # next turn doesn't inject a "recently finished"
               # block that would confuse the model.
@@ -1477,6 +1475,10 @@ context block from ``SubTaskTracker.format_context``).
               _bg2_bot_is_super_admin = bot_is_super_admin
               _bg2_fallback_reply_to = fallback_reply_to
               _bg2_allowed_context_ids = allowed_context_ids
+              _bg2_instruction = _instruction
+              _bg2_input_files = _input_files
+              _bg2_high_quality = _high_quality
+              _bg2_previous_session_id = session_id
 
               async def _run_correction_post_processing(
                 session_id=_bg2_session_id,
@@ -1494,8 +1496,38 @@ context block from ``SubTaskTracker.format_context``).
                 bot_is_super_admin=_bg2_bot_is_super_admin,
                 fallback_reply_to=_bg2_fallback_reply_to,
                 allowed_context_ids=_bg2_allowed_context_ids,
+                instruction=_bg2_instruction,
+                input_files=_bg2_input_files,
+                high_quality=_bg2_high_quality,
+                previous_session_id=_bg2_previous_session_id,
               ):
                 try:
+                  submit_failed = False
+                  try:
+                    await subagent_client.submit(
+                      session_id,
+                      instruction,
+                      input_files,
+                      high_quality=high_quality,
+                      previous_session_id=previous_session_id,
+                    )
+                  except Exception as _submit_err:  # pylint: disable=broad-except
+                    logger.exception(
+                      "execute_subtask: correction submit failed session=%s: %s",
+                      session_id,
+                      _submit_err,
+                      extra={"chat_id": chat_id},
+                    )
+                    subagent_webhook.unregister_completion_event(session_id)
+                    subagent_webhook.unregister_progress_event(session_id)
+                    subagent_tracker.finalize(session_id, {
+                      "success": False,
+                      "report": f"Failed to submit correction task: {_submit_err}",
+                    })
+                    submit_failed = True
+                  if submit_failed:
+                    completion_event.set()
+
                   start_time = time.monotonic()
                   while True:
                     remaining = SUBAGENT_MAX_WAIT_S - (time.monotonic() - start_time)
