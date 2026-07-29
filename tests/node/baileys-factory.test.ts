@@ -36,12 +36,18 @@ class FakeSock {
   user = { id: '0@s.whatsapp.net' };
   authState = { creds: { registered: true } };
   pairingRequests: Array<{ phoneNumber: string; customCode: string | undefined }> = [];
+  sentMessages: unknown[][] = [];
 
   emit(event: string, payload: unknown): void {
     for (const handler of this.handlers.get(event) ?? []) handler(payload);
   }
 
-  async sendMessage(): Promise<Record<string, unknown>> {
+  async emitAsync(event: string, payload: unknown): Promise<void> {
+    for (const handler of this.handlers.get(event) ?? []) await handler(payload);
+  }
+
+  async sendMessage(...args: unknown[]): Promise<Record<string, unknown>> {
+    this.sentMessages.push(args);
     return {};
   }
 
@@ -189,6 +195,37 @@ test('same folderPath again returns the SAME entry (idempotent) once a socket is
   } finally {
     remove(folder);
     rmrf(folder);
+    __setSocketCreatorForTests(null);
+  }
+});
+
+test('PRIVATE_CHAT_ENABLED=false drops private commands and chatbot ingress', async () => {
+  installFakeSocketCreator();
+  const folder = tmpFolder('wazzap-private-disabled-');
+  const previous = config.privateChatEnabled;
+  config.privateChatEnabled = false;
+  try {
+    const entry = await createOrResumeAccount({ folderPath: folder, printQr: false });
+    const sock = entry.sock as unknown as FakeSock;
+    await sock.emitAsync('messages.upsert', {
+      type: 'notify',
+      messages: [{
+        key: {
+          id: 'dm-disabled-1',
+          remoteJid: '628123456789@s.whatsapp.net',
+          fromMe: false,
+        },
+        messageTimestamp: Math.floor(Date.now() / 1000),
+        message: { conversation: '/info' },
+        pushName: 'Private user',
+      }],
+    });
+
+    assert.equal(sock.sentMessages.length, 0, 'private slash command must not reply');
+    assert.equal(entry.ctx.messageCache.size, 0, 'private message must not reach chatbot normalization');
+  } finally {
+    config.privateChatEnabled = previous;
+    cleanupAccount(folder);
     __setSocketCreatorForTests(null);
   }
 });

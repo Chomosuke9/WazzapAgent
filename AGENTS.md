@@ -497,6 +497,7 @@ single-account fallback.
 
 **Node Gateway:**
 `INSTANCE_ID`, `BOT_OWNER_JIDS`, `ASSISTANT_NAME`, `REQUIRE_ACTIVATION`,
+`PRIVATE_CHAT_ENABLED` (default true; false silently ignores private inbound messages),
 `ACTIVATION_NOTICE_ENABLED` (default `true`; `false` silences the "not activated" notice),
 `CONTEXT_TIME_UTC_OFFSET_HOURS`, `LLM_WS_TOKEN`,
 `WS_BIND_HOST` (host the WS server binds to, default `127.0.0.1` (loopback); set `0.0.0.0` for cross-host + set `LLM_WS_TOKEN`),
@@ -599,6 +600,9 @@ these for exact cost calculation.
 
 ### Group chat vs DM behavior differences
 
+- **Private-chat env gate**: `PRIVATE_CHAT_ENABLED=false` drops private inbound
+  messages before Node commands/buttons and before the Python LLM pipeline;
+  group chats remain active. The default is `true` for backward compatibility.
 - **LLM1 is skipped in private chats** — all DMs get a response (confidence 100).
 - **Private chats skip debounce** — messages are processed immediately.
 - **Group chats** use prefix/hybrid/auto modes set via the `/setting` menu (mode

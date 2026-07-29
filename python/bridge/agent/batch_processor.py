@@ -121,6 +121,7 @@ from ..config import (
   INCOMING_DEBOUNCE_SECONDS,
   INCOMING_BURST_MAX_SECONDS,
   REQUIRE_ACTIVATION,
+  private_chat_enabled,
 )
 
 logger = setup_logging()
@@ -1537,6 +1538,16 @@ class BatchProcessor:
     chat_id = payload.get("chatId")
     if not chat_id:
       logger.warning("Dropping incoming_message without chatId")
+      return
+
+    # Defense in depth for frames from older/custom gateways. The Node gateway
+    # applies the same shared env gate before commands and forwarding, but the
+    # bridge must not reply if an inbound private frame still reaches it.
+    if not private_chat_enabled() and not chat_id.endswith("@g.us"):
+      logger.debug(
+        "private chat disabled: dropping incoming message",
+        extra={"chat_id": chat_id},
+      )
       return
 
     # --- Mute enforcement (before debounce, instant) ---

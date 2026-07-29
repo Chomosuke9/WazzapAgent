@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 
+import bridge.agent.batch_processor as batch_processor_module
 from bridge.session import AgentSession
 
 
@@ -97,3 +98,15 @@ def test_context_only_batch_is_isolated_per_session():
   asyncio.run(sess_a._batch.process_message_batch([_ctx_only_payload("c@x", "A")]))
   assert [m.text for m in sess_a.per_chat["c@x"]] == ["A"]
   assert "c@x" not in sess_b.per_chat
+
+
+def test_private_chat_env_gate_drops_dm_before_pipeline(monkeypatch):
+  session = AgentSession(StubWaSocket("/a"))
+  monkeypatch.setattr(batch_processor_module, "private_chat_enabled", lambda: False)
+
+  asyncio.run(session._batch.dispatch_incoming(
+    _ctx_only_payload("628123456789@s.whatsapp.net", "ignored DM")
+  ))
+
+  assert "628123456789@s.whatsapp.net" not in session.pending_by_chat
+  assert "628123456789@s.whatsapp.net" not in session.per_chat

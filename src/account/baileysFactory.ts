@@ -81,6 +81,7 @@ import {
 import { emitGroupJoinContextEvent, emitBotAddedEvent } from "../wa/events.js";
 import { currentBotAliases } from "../wa/domain/groupContext.js";
 import { compactParticipantJids } from "../wa/domain/participants.js";
+import { shouldIgnorePrivateChat } from "../wa/privateChat.js";
 
 // ---------------------------------------------------------------------------
 // Test seam: socket creator
@@ -704,6 +705,7 @@ function attachCommandListener(
       try {
         const chatId = msg?.key?.remoteJid;
         if (!chatId || chatId === "status@broadcast") continue;
+        if (shouldIgnorePrivateChat(chatId)) continue;
         if (!msg?.message) continue;
         // Ignore the offline backlog WhatsApp flushes on reconnect (see
         // isStaleMessage) so old slash commands don't re-execute in a burst.
@@ -815,7 +817,11 @@ function attachChatbotListener(
     // Drop the offline backlog WhatsApp flushes on reconnect (see
     // isStaleMessage) so the bot doesn't respond to a flood of stale messages.
     const nowMs = Date.now();
-    const liveMessages = messages.filter((msg) => !isStaleMessage(msg, nowMs));
+    const liveMessages = messages.filter((msg) => {
+      const chatId = msg?.key?.remoteJid;
+      return !isStaleMessage(msg, nowMs)
+        && (!chatId || !shouldIgnorePrivateChat(chatId));
+    });
     if (liveMessages.length === 0) return;
     const batchStartMs = Date.now();
     const isNotify = type === "notify";

@@ -42,6 +42,14 @@ function nonNegativeInt(value: string | undefined, fallback: number): number {
   return Math.max(0, Math.floor(parsed));
 }
 
+function booleanEnv(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined) return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return fallback;
+}
+
 function normalizeOwnerJid(raw: string): string[] {
   const trimmed = raw.trim().toLowerCase();
   if (!trimmed) return [];
@@ -101,6 +109,7 @@ export interface Config {
   stickerEmoji: string;
   requireActivation: boolean;
   activationNoticeEnabled: boolean;
+  privateChatEnabled: boolean;
   subagentEnabledDefault: boolean;
   // Feature-availability flags derived from the shared .env so Node can return
   // a clear "not configured yet" error from the settings UI / commands instead
@@ -176,6 +185,9 @@ function buildConfig(): Config {
   requireActivation: process.env.REQUIRE_ACTIVATION === 'true',
   // Whether to send the "not activated" notice to unactivated chats.
   activationNoticeEnabled: process.env.ACTIVATION_NOTICE_ENABLED !== 'false',
+  // Shared with the Python bridge. When disabled, the gateway drops private
+  // inbound messages before local commands/buttons or LLM forwarding can run.
+  privateChatEnabled: booleanEnv(process.env.PRIVATE_CHAT_ENABLED, true),
   // Default sub-agent enablement for chats that haven't set their own value.
   // Seeded into the per-tenant __global__ settings row on first boot (see
   // openAccountPersistence); runtime /subagent default on|off overrides it.

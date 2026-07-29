@@ -174,6 +174,23 @@ def env_flag(name: str, default: bool = False) -> bool:
   return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def private_chat_enabled() -> bool:
+  """Whether inbound private chats may reach commands and the LLM pipeline.
+
+  Read at call-time so the shared ``.env`` watcher can apply the gate without
+  reconstructing the per-account :class:`AgentSession` objects.
+  """
+  raw = os.getenv("PRIVATE_CHAT_ENABLED")
+  if raw is None:
+    return True
+  normalized = raw.strip().lower()
+  if normalized in {"1", "true", "yes", "on"}:
+    return True
+  if normalized in {"0", "false", "no", "off"}:
+    return False
+  return True
+
+
 # -- Time / formatting -------------------------------------------------------
 
 def context_time_utc_offset_raw() -> str | None:
