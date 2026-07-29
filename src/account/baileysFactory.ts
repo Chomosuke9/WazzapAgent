@@ -30,6 +30,7 @@ import fs from "fs-extra";
 import makeWASocket, {
   Browsers,
   fetchLatestBaileysVersion,
+  fetchLatestWaWebVersion,
   DisconnectReason,
 } from "baileys";
 import type { WASocket, WAMessage, AuthenticationState } from "baileys";
@@ -89,7 +90,19 @@ import { compactParticipantJids } from "../wa/domain/participants.js";
 type SocketCreator = (authState: AuthenticationState) => Promise<WASocket>;
 
 const defaultSocketCreator: SocketCreator = async (authState) => {
-  const { version } = await fetchLatestBaileysVersion();
+  let version: [number, number, number];
+  try {
+    ({ version } = await fetchLatestWaWebVersion({}));
+    logger.info({ version }, "loaded live whatsapp web version");
+  } catch (err) {
+    logger.warn(
+      { err },
+      "failed to load live whatsapp web version; falling back to baileys version",
+    );
+    ({ version } = await fetchLatestBaileysVersion());
+    logger.info({ version }, "loaded fallback baileys version");
+  }
+
   logger.info({ version }, "starting whatsapp socket");
   return makeWASocket({
     version,
@@ -97,7 +110,7 @@ const defaultSocketCreator: SocketCreator = async (authState) => {
     syncFullHistory: false,
     // Pairing is sensitive to contradictory/unknown platform identities.
     // Use Baileys' canonical tuple instead of a branded browser identity.
-    browser: Browsers.ubuntu("Chrome"),
+    browser: Browsers.windows("Chrome"),
     markOnlineOnConnect: true,
     defaultQueryTimeoutMs: config.sendTimeoutMs,
     // Hand Baileys our tamed child logger so its (very chatty) internal logging
@@ -119,8 +132,8 @@ const socketBuilds = new Map<string, Promise<void>>();
 
 /**
  * TEST SEAM — override the Baileys socket creator so tests run fully offline
- * (no `fetchLatestBaileysVersion` network call, no real socket). Pass `null` to
- * restore the default creator.
+ * (no version-fetch network call, no real socket). Pass `null` to restore the
+ * default creator.
  */
 export function __setSocketCreatorForTests(fn: SocketCreator | null): void {
   socketCreator = fn ?? defaultSocketCreator;

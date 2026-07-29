@@ -17,8 +17,8 @@ import {
 } from '../../src/server/accountRegistry.ts';
 
 // Step 17: the factory must run offline. We stub the Baileys socket creator so
-// no `fetchLatestBaileysVersion` network call and no real WhatsApp socket are
-// ever made. The fake exposes just enough surface for the factory to wire its
+// no version-fetch network call and no real WhatsApp socket are ever made. The
+// fake exposes just enough surface for the factory to wire its
 // listeners (`ev.on`) and for the shared helpers to read `user`.
 type FakeEventHandler = (payload: unknown) => unknown;
 
