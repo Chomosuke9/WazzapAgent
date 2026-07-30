@@ -688,6 +688,15 @@ def _extract_actions_from_tool_calls(
       seen_ids: set[str] = set()
       invalid_ids: list[str] = []
       for raw in ctx_ids:
+        # Some OpenAI-compatible providers serialize the schema's nullable
+        # value as the string ``"None"`` (occasionally inside a one-item
+        # array) instead of JSON null.  It still means "no input files" and
+        # must not invalidate an otherwise executable subtask.  Keep genuine
+        # unknown IDs fail-closed below.
+        if raw is None or (
+          isinstance(raw, str) and _is_empty_target_token(raw)
+        ):
+          continue
         cid = _normalize_context_msg_id(raw)
         if not cid or not cid.isdigit() or len(cid) != 6:
           invalid_ids.append(str(raw))

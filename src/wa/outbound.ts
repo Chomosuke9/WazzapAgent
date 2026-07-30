@@ -30,6 +30,7 @@ import {
   resolveQuotedMessage,
 } from './domain/identifiers.js';
 import { getGroupContext } from './domain/groupContext.js';
+import { lookupParticipantName } from './domain/participants.js';
 import {
   resolveAllowedAttachmentPath,
   detectMimeFromFile,
@@ -57,6 +58,66 @@ interface RenderedMentions {
 }
 
 /**
+ * Repair the common model slip `Name (senderRef)` -> `@Name (senderRef)`.
+ *
+ * This is deliberately fail-closed: a parenthesized value is considered only
+ * when it already resolves through this chat's senderRef registry or is one
+ * of the renderer's reserved values (`all`, `admin`, `bot`). Ordinary prose
+ * such as `version (stable)` is therefore left untouched. Prefer the cached
+ * participant name for multi-word names; when it is unavailable, only a
+ * single immediately-adjacent name token is repaired.
+ */
+function repairMissingMentionPrefixes(
+  ctx: AccountContext,
+  chatId: string,
+  rawText: string,
+): string {
+  const refs = Array.from(rawText.matchAll(/\(([^)\r\n]+)\)/g));
+  if (refs.length === 0) return rawText;
+
+  let cursor = 0;
+  let repaired = '';
+  for (const match of refs) {
+    const index = Number.isInteger(match.index) ? (match.index as number) : -1;
+    if (index < 0) continue;
+    const senderRef = match[1]?.trim().toLowerCase();
+    const participantJid = senderRef
+      ? resolveMentionTargetBySenderRef(ctx, chatId, senderRef)
+      : null;
+    const reservedMention = senderRef === 'all' || senderRef === 'admin' || senderRef === 'bot';
+    if (!participantJid && !reservedMention) continue;
+
+    const before = rawText.slice(cursor, index);
+    const cachedName = participantJid
+      ? lookupParticipantName(ctx, participantJid)?.trim() || ''
+      : '';
+    let nameStart = -1;
+    if (cachedName && before.trimEnd().endsWith(cachedName)) {
+      nameStart = cursor + before.lastIndexOf(cachedName);
+    } else if (
+      (senderRef === 'all' || senderRef === 'admin') &&
+      before.trimEnd().toLowerCase().endsWith(senderRef)
+    ) {
+      nameStart = cursor + before.toLowerCase().lastIndexOf(senderRef);
+    } else {
+      const singleName = before.match(/([^\s@(),]+)\s*$/u);
+      if (singleName && typeof singleName.index === 'number') {
+        nameStart = cursor + singleName.index;
+      }
+    }
+    if (nameStart < cursor || rawText[nameStart - 1] === '@') continue;
+
+    repaired += rawText.slice(cursor, nameStart);
+    repaired += '@';
+    repaired += rawText.slice(nameStart, index + match[0].length);
+    cursor = index + match[0].length;
+  }
+  if (cursor === 0) return rawText;
+  repaired += rawText.slice(cursor);
+  return repaired;
+}
+
+/**
  * Resolve @Name (senderRef) mention tokens in outbound text to WhatsApp JIDs.
  *
  * Supports three mention types:
@@ -75,6 +136,7 @@ async function renderOutboundMentions(
   if (typeof rawText !== 'string') {
     return { text: rawText, mentions: [], nonJidMentions: 0, groupContext };
   }
+  rawText = repairMissingMentionPrefixes(ctx, chatId, rawText);
   // Match @Name (senderRef) pattern — name can contain spaces, non-greedy to handle multiple mentions
   const tokens = Array.from(rawText.matchAll(/@(.+?)\s*\(([^)\r\n]+)\)/g));
   if (tokens.length === 0) {
@@ -569,6 +631,7 @@ async function sendLottieSticker(
 }
 
 export {
+  repairMissingMentionPrefixes,
   renderOutboundMentions,
   sendOutgoing,
   sendLottieSticker,

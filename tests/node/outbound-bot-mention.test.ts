@@ -10,7 +10,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createAccountContext } from '../../src/account/accountContext.ts';
-import { renderOutboundMentions } from '../../src/wa/outbound.ts';
+import {
+  repairMissingMentionPrefixes,
+  renderOutboundMentions,
+} from '../../src/wa/outbound.ts';
+import { rememberParticipantName } from '../../src/wa/domain/participants.ts';
+import { rememberSenderRef } from '../../src/wa/domain/identifiers.ts';
 
 test('(bot) token becomes a real mention of the bot JID with an @<localpart> handle', async () => {
   const ctx = createAccountContext('/tenants/bot-mention');
@@ -50,4 +55,90 @@ test('(bot) token falls back to plain text when the bot JID cannot be resolved',
     rendered.text.includes('@Wazzap'),
     `expected plain @Wazzap fallback, got: ${rendered.text}`,
   );
+});
+
+test('known person mention missing @ is repaired before outbound rendering', async () => {
+  const ctx = createAccountContext('/tenants/person-mention-repair');
+  const chatId = '12345@g.us';
+  const participantJid = '15557654321@s.whatsapp.net';
+  const senderRef = rememberSenderRef(ctx, chatId, participantJid, participantJid);
+  assert.ok(senderRef);
+  rememberParticipantName(ctx, participantJid, 'Alice Example');
+
+  const rendered = await renderOutboundMentions(
+    ctx,
+    chatId,
+    `thanks Alice Example (${senderRef}) for helping`,
+  );
+
+  assert.deepEqual(rendered.mentions, [participantJid]);
+  assert.ok(rendered.text.includes('@15557654321'));
+  assert.ok(!rendered.text.includes(`(${senderRef})`));
+});
+
+test('unknown parenthesized text is not converted into a mention', async () => {
+  const ctx = createAccountContext('/tenants/person-mention-no-false-positive');
+  const rendered = await renderOutboundMentions(
+    ctx,
+    '12345@g.us',
+    'deploy version (stable) tomorrow',
+  );
+
+  assert.equal(rendered.text, 'deploy version (stable) tomorrow');
+  assert.deepEqual(rendered.mentions, []);
+});
+
+test('persistent command arguments repair missing @ before dispatch', () => {
+  const ctx = createAccountContext('/tenants/command-mention-repair');
+  const chatId = '12345@g.us';
+  const participantJid = '15557654321@s.whatsapp.net';
+  const senderRef = rememberSenderRef(ctx, chatId, participantJid, participantJid);
+  assert.ok(senderRef);
+  rememberParticipantName(ctx, participantJid, 'Alice Example');
+
+  for (const command of [
+    `/schedule-task 30M Remind Alice Example (${senderRef}) about lunch`,
+    `/prompt Always greet Alice Example (${senderRef}) politely`,
+    `/memory add Alice Example (${senderRef}) likes tea`,
+  ]) {
+    const repaired = repairMissingMentionPrefixes(ctx, chatId, command);
+    assert.ok(
+      repaired.includes(`@Alice Example (${senderRef})`),
+      `expected canonical mention in ${repaired}`,
+    );
+  }
+});
+
+test('reserved all, admin, and bot mentions missing @ are repaired', () => {
+  const ctx = createAccountContext('/tenants/reserved-mention-repair');
+  const chatId = '12345@g.us';
+
+  assert.equal(
+    repairMissingMentionPrefixes(ctx, chatId, 'Attention all (all)'),
+    'Attention @all (all)',
+  );
+  assert.equal(
+    repairMissingMentionPrefixes(ctx, chatId, 'Ask admin (admin)'),
+    'Ask @admin (admin)',
+  );
+  assert.equal(
+    repairMissingMentionPrefixes(ctx, chatId, 'Hello Vivy (bot)'),
+    'Hello @Vivy (bot)',
+  );
+  assert.equal(
+    repairMissingMentionPrefixes(ctx, chatId, 'deploy version (stable)'),
+    'deploy version (stable)',
+  );
+});
+
+test('missing @all reaches the real group-mention renderer', async () => {
+  const ctx = createAccountContext('/tenants/reserved-all-render');
+  const rendered = await renderOutboundMentions(
+    ctx,
+    '12345@g.us',
+    'Attention all (all)',
+  );
+
+  assert.equal(rendered.text, 'Attention @all');
+  assert.equal(rendered.nonJidMentions, 1);
 });

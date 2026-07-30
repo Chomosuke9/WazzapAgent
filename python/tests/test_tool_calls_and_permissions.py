@@ -5,6 +5,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 # Ensure the bridge package is importable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -207,6 +209,48 @@ class TestExtractActionsFromToolCalls:
       allowed_context_ids={"000123"},
     )
     assert actions == []
+
+  @pytest.mark.parametrize("empty_ids", ["None", ["None"], ["null"], [None]])
+  def test_execute_subtask_accepts_provider_null_sentinels(self, empty_ids):
+    tc = [{"name": "execute_subtask", "args": {
+      "instruction": "research this",
+      "confirmation_text": "Researching now",
+      "context_msg_ids": empty_ids,
+      "high_quality": False,
+    }}]
+    actions = _extract_actions_from_tool_calls(
+      tc,
+      fallback_reply_to="000123",
+      allowed_context_ids={"000123"},
+    )
+    assert actions == [
+      {
+        "type": "send_message",
+        "text": "Researching now",
+        "replyTo": "000123",
+      },
+      {
+        "type": "execute_subtask",
+        "instruction": "research this",
+        "contextMsgIds": [],
+        "high_quality": False,
+      },
+    ]
+
+  def test_execute_subtask_ignores_null_sentinel_beside_known_id(self):
+    tc = [{"name": "execute_subtask", "args": {
+      "instruction": "inspect this",
+      "confirmation_text": "Inspecting now",
+      "context_msg_ids": ["None", "000123"],
+      "high_quality": False,
+    }}]
+    actions = _extract_actions_from_tool_calls(
+      tc,
+      fallback_reply_to=None,
+      allowed_context_ids={"000123"},
+    )
+    delegated = [a for a in actions if a["type"] == "execute_subtask"]
+    assert delegated[0]["contextMsgIds"] == ["000123"]
 
   def test_reply_message(self):
     tc = [{"name": "reply_message", "args": {"context_msg_id": "000123", "text": "Hello!"}}]

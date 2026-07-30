@@ -21,6 +21,7 @@
 import logger from '../logger.js';
 import { parseSlashCommand } from './commands/index.js';
 import { dispatchCommand } from './command/CommandRegistry.js';
+import { repairMissingMentionPrefixes } from './outbound.js';
 import { roleFlagsForJid } from './domain/participants.js';
 import {
   getCachedGroupMetadata,
@@ -159,9 +160,18 @@ async function dispatchRunCommand(
   // to the programmatic run_command action only — human-typed messages keep
   // requiring an explicit '/' via the inbound parser.
   const trimmedCommand = rawCommand.trim();
-  const normalizedCommand = trimmedCommand.startsWith('/')
+  const normalizedCommandWithSlash = trimmedCommand.startsWith('/')
     ? trimmedCommand
     : `/${trimmedCommand}`;
+  // Persisting commands (/schedule-task, /prompt, /memory) must receive the
+  // same canonical mention form as ordinary outbound replies. Repair a
+  // provider-produced `Name (senderRef)` before parsing/dispatch so handlers
+  // store `@Name (senderRef)` and can capture durable mention bindings.
+  const normalizedCommand = repairMissingMentionPrefixes(
+    ctx,
+    chatId,
+    normalizedCommandWithSlash,
+  );
 
   const slashCommand = parseSlashCommand(normalizedCommand);
   if (!slashCommand) {
