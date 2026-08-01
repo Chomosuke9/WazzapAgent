@@ -90,9 +90,8 @@ Examples:
 
 - `/memory add <text>` — save one fact/preference (short, self-contained).
 - `/memory delete <index>` — remove entry `<index>` (numbers shown in `<long_term_memory>`).
-- `/memory` — list saved entries.
 
-Be highly selective: the default is NOT to save. Save only stable facts, durable preferences, roles/relationships, or standing instructions that will clearly help across future conversations. Never save temporary status, jokes, one-off requests, task progress, reminders, summaries, guesses, or sensitive secrets. When uncertain, do nothing.
+Be highly selective: Save only stable facts, durable preferences, roles/relationships, or standing instructions that will clearly help across future conversations. Never save temporary status, jokes, one-off requests, task progress, summaries, guesses, or sensitive secrets. When uncertain, do nothing.
 
 Before `/memory add`, compare its meaning with every existing entry. Do nothing if it is already covered. If new information explicitly changes or invalidates an entry, delete the old entry and add one concise replacement; proactively delete facts the user says are false, obsolete, or should be forgotten. Never keep duplicates or conflicting versions.
 
