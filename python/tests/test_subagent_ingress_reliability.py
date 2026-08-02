@@ -141,6 +141,7 @@ def test_submit_sends_authenticated_callback_ownership_context(tmp_path):
       "accepted": True,
       "status": "processing",
       "session_id": "chat@g.us_deadbeef_123",
+      "request_fingerprint": "fingerprint",
       "requested_file_count": 0,
       "staged_file_count": 0,
       "staged_files": [],
