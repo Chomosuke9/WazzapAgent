@@ -180,9 +180,14 @@ def test_connect_handshake_and_frame_delivery():
             # Server received our hello first.
             await asyncio.wait_for(got_hello.wait(), timeout=OP_TIMEOUT)
             assert server_hello["frame"]["type"] == "hello"
-            # The pushed frame is delivered to on_frame (decoded).
+            # The authoritative handshake status is delivered first, followed
+            # by the separately pushed reliable status frame.
             await asyncio.wait_for(frame_seen.wait(), timeout=OP_TIMEOUT)
-            assert frames[0][0] == "whatsapp_status"
+            assert frames[0][0] == "hello_ack"
+            assert frames[0][1].wa_status == "open"
+            while len(frames) < 2:
+                await asyncio.sleep(0)
+            assert frames[1][0] == "whatsapp_status"
             assert "open" in statuses
             return True
         finally:

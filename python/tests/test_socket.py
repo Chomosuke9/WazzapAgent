@@ -76,10 +76,15 @@ def test_connect_fires_ready():
         sock = _make_socket()
 
         ready_hits = []
+        status_hits = []
 
         @sock.on("ready")
         async def _on_ready(_payload):
             ready_hits.append(True)
+
+        @sock.on("status")
+        async def _on_status(payload):
+            status_hits.append(payload)
 
         try:
             await asyncio.wait_for(
@@ -87,6 +92,7 @@ def test_connect_fires_ready():
             )
             # "ready" fires during connect (after hello_ack), before it returns.
             assert ready_hits == [True], ready_hits
+            assert status_hits[0]["status"] == "open"
             assert sock.is_connected is True
             assert sock.folder_path == FOLDER
             return True

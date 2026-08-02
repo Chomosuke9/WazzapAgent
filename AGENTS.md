@@ -383,6 +383,12 @@ Node→Python frame carries `folderPath` for tenant routing.
 | `hello` | Python → Node | reliable | `{folderPath, protocolVersion: "2.0"}` |
 | `hello_ack` | Node → Python | reliable | `{folderPath, waStatus}` (sent once the account's Baileys socket is created/resumed + client bound) |
 
+The SDK emits `hello_ack.waStatus` as the initial `status` event. Keep Node
+transport readiness (`ready`) distinct from WhatsApp readiness (`status=open`):
+cold sub-agent recovery, scheduled tasks, and direct invoke must not begin while
+the account is unpaired or reconnecting. Node rejects such actions before
+claiming a durable receipt so the same request ID remains retryable after open.
+
 ### Node → Python (events & control events)
 
 | Type | Guarantee | Description |

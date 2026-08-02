@@ -169,6 +169,10 @@ class AgentSession:
     self.pending_run_command_chat: OrderedDict[str, tuple[str, str]] = OrderedDict()
     self.idle_msg_count: Dict[str, int] = defaultdict(int)
     self.tasks: Set[asyncio.Task] = set()
+    # A healthy Node WebSocket does not imply that the WhatsApp account is
+    # paired/open. Cold outbound work remains parked until hello_ack or a
+    # reliable whatsapp_status event explicitly reports ``open``.
+    self._whatsapp_open_event = asyncio.Event()
     # --- per-session dashboard stats (was: module-level singletons) ---
     # Own stat buffers + flush loop, written only to this tenant's stats DB.
     self._dashboard = DashboardStats()
@@ -282,6 +286,33 @@ class AgentSession:
     self.tasks.add(task)
     task.add_done_callback(self.tasks.discard)
 
+  async def _wait_for_whatsapp_open_or_stop(self, stop_event) -> bool:
+    """Wait for a paired/open account without delaying graceful shutdown."""
+    if self._whatsapp_open_event.is_set():
+      return True
+    logger.info(
+      "WhatsApp account is not open; cold outbound work is waiting for pairing"
+    )
+    while not stop_event.is_set():
+      open_task = asyncio.create_task(self._whatsapp_open_event.wait())
+      stop_task = asyncio.create_task(stop_event.wait())
+      try:
+        await asyncio.wait(
+          {open_task, stop_task},
+          return_when=asyncio.FIRST_COMPLETED,
+        )
+      finally:
+        for task in (open_task, stop_task):
+          if not task.done():
+            task.cancel()
+        await asyncio.gather(open_task, stop_task, return_exceptions=True)
+      if stop_event.is_set():
+        return False
+      if self._whatsapp_open_event.is_set():
+        logger.info("WhatsApp account is open; activating cold outbound work")
+        return True
+    return False
+
   def _submit_direct_invoke(self, chat_id: str, prompt: str) -> None:
     """Schedule a direct-invoke re-invoke as a tracked background task.
 
@@ -363,6 +394,8 @@ class AgentSession:
           / "db"
           / "subagent_tracker.json"
         )
+      if not await self._wait_for_whatsapp_open_or_stop(stop_event):
+        return
       self.subagent_webhook.set_completion_recovery_handler(recovery_handler)
       # Persistence can contain results accepted just before an earlier bridge
       # process died.  Replay them only after the gateway handshake and recovery
@@ -448,8 +481,16 @@ def _register_handlers(session) -> None:
 
   @ws.on("status")
   async def _on_status(status):
-    # The old loop ignored whatsapp_status; preserve that no-op. Status values
-    # are normalized to open|connecting|close.
+    # hello_ack supplies the initial WhatsApp status and reliable status events
+    # keep it current after reconnects. Node transport readiness is separate.
+    status_value = (
+      status.get("status") if isinstance(status, dict)
+      else getattr(status, "status", None)
+    )
+    if status_value == "open":
+      session._whatsapp_open_event.set()
+    else:
+      session._whatsapp_open_event.clear()
     logger.debug("whatsapp_status: %s", status)
 
   @ws.on("error")

@@ -17,12 +17,19 @@ import config from '../../src/config.ts';
 
 // ---------------------------------------------------------------------------
 // Offline Baileys fake. The factory's socket creator is stubbed so `hello` ->
-// createOrResumeAccount never opens a real WhatsApp socket. `user.id` +
-// `sendMessage` are the only surfaces sendOutgoing reads for a plain text reply.
+// createOrResumeAccount never opens a real WhatsApp socket. The authenticated
+// identity mirrors the Baileys fields required by the action-readiness guard;
+// individual tests still opt into `waStatus = open` explicitly.
 // ---------------------------------------------------------------------------
 class FakeSock {
   ev = { on: (_event: string, _handler: unknown) => {} };
   user = { id: '0@s.whatsapp.net' };
+  authState = {
+    creds: {
+      registered: true,
+      me: { id: '0@s.whatsapp.net' },
+    },
+  };
   async sendMessage(): Promise<Record<string, unknown>> {
     return { key: { id: `wamid-${Math.random().toString(36).slice(2, 8)}` } };
   }
@@ -136,6 +143,10 @@ test('send_message action -> action_ack(ok) + send_ack', { timeout: 15000 }, asy
     send(client, { type: 'hello', payload: { folderPath, protocolVersion: '2.0' } });
     const ack = await nextFrame(client);
     assert.equal(ack.type, 'hello_ack');
+
+    const entry = get(folderPath);
+    assert.ok(entry, 'account entry exists after handshake');
+    entry!.waStatus = 'open';
 
     send(client, {
       type: 'send_message',

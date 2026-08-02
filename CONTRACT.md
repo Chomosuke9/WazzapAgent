@@ -63,6 +63,11 @@ is bound in the registry.
 connection lifecycle. Node maps Baileys `connection.update`:
 `"open"→"open"`, `"connecting"/undefined→"connecting"`, `"close"/"closed"→"close"`.
 
+The Python SDK emits `hello_ack.payload.waStatus` as the initial `"status"`
+event before its separate `"ready"` event. `"ready"` means the Node WebSocket
+handshake is complete; only `status == "open"` means WhatsApp may accept
+outbound actions. Cold recovery/scheduled work must wait for that open status.
+
 ### 1.2 Actions (Python → Node)
 
 All actions are **best-effort** at the transport layer. Every action **except

@@ -21,18 +21,15 @@
 #   - frame router (the transport's `on_frame`):
 #       incoming_message      -> emit "message" (WhatsAppMessage.from_payload)
 #       whatsapp_status       -> emit "status"  ({status, reason, folderPath})
-#       hello_ack             -> emit "ready"   (None)        [defensive; see below]
+#       hello_ack             -> emit "status"  (current WhatsApp status)
 #       error                 -> reject pending future AND emit "error"
 #       action_ack / send_ack -> resolve pending future AND re-emit (D3 dual)
 #       control events (§1.5) -> emit by their type name
 #
-# NOTE on "ready": the transport consumes the handshake `hello_ack` internally
-# (CONTRACT §1.1) and never forwards it through `on_frame`; instead it invokes
-# its `on_status("open")` callback once the handshake completes. WaSocket wires
-# that callback to fire the "ready" event (and to flip the handshake-done flag),
-# so `await connect()` fires "ready" after `hello_ack` on every (re)connect. The
-# `hello_ack` branch in the router is kept purely defensively in case a future
-# transport ever forwards it.
+# NOTE on "ready": the transport forwards the handshake payload first so the
+# authoritative WhatsApp status is retained, then invokes its distinct
+# `on_status("open")` transport callback. WaSocket uses that callback to fire
+# "ready" (Node WebSocket ready) and flip the handshake-done flag.
 #
 # Scope guard (per Step 27): NO agent/LLM/DB logic, and NO `bridge.*` import —
 # this SDK is agent-agnostic.
@@ -637,9 +634,15 @@ class WaSocket:
                 return
 
             if type_str == "hello_ack":
-                # Defensive: the transport normally consumes hello_ack during the
-                # handshake and signals via on_status("open") instead.
-                await self._emit(events.READY, None)
+                ev = parsed  # protocol.HelloAck
+                await self._emit(
+                    events.STATUS,
+                    {
+                        "status": ev.wa_status,
+                        "reason": None,
+                        "folderPath": ev.folder_path,
+                    },
+                )
                 return
 
             if type_str == "error":

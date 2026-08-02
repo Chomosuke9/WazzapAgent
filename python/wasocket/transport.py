@@ -456,6 +456,12 @@ class WSClientTransport:
                 logger.warning("expected hello_ack, got %r; closing", type_str)
                 return
 
+            # Preserve the authoritative WhatsApp status carried by the
+            # handshake. Previously this payload was consumed and discarded,
+            # so callers could mistake a healthy Node WebSocket for a paired
+            # and open WhatsApp account.
+            await self._emit_frame((type_str, _parsed))
+
             # Handshake complete — mirror wsClient 'open' handler ordering.
             opened = True
             logger.info("LLM websocket connected")

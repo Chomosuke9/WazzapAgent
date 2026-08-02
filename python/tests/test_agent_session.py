@@ -60,16 +60,28 @@ class StubWaSocket:
 class _LifecycleWaSocket(StubWaSocket):
   """Run-loop fake that exposes exactly when the gateway handshake completes."""
 
-  def __init__(self, folder_path: str, events: list[str]) -> None:
+  def __init__(
+    self,
+    folder_path: str,
+    events: list[str],
+    *,
+    whatsapp_open_on_connect: bool = True,
+  ) -> None:
     super().__init__(folder_path)
     self.events = events
     self.connected = False
+    self.whatsapp_open_on_connect = whatsapp_open_on_connect
 
   async def connect(self, _node_url: str) -> None:
     self.events.append("connect:start")
     await asyncio.sleep(0)
     self.connected = True
     self.events.append("connect:done")
+    if self.whatsapp_open_on_connect:
+      await self.emit(
+        "status",
+        {"status": "open", "reason": None, "folderPath": self.folder_path},
+      )
 
   async def disconnect(self) -> None:
     self.connected = False
@@ -92,10 +104,12 @@ class _LifecycleDirectInvoke:
     self.sock = sock
     self.events = events
     self.connected_when_started = False
+    self.started = asyncio.Event()
 
   async def start(self) -> None:
     self.connected_when_started = self.sock.connected
     self.events.append("direct:start")
+    self.started.set()
 
   async def stop(self) -> None:
     self.events.append("direct:stop")
@@ -355,10 +369,12 @@ def test_run_connects_before_rearm_and_direct_invoke_start(tmp_path, monkeypatch
     monkeypatch.setattr(session_module, "db_close_all_connections", lambda: None)
 
     stop_event = asyncio.Event()
-    stop_event.set()
-    await asyncio.wait_for(
-      session.run("ws://node.invalid:3000", stop_event), timeout=5.0,
+    run_task = asyncio.create_task(
+      session.run("ws://node.invalid:3000", stop_event)
     )
+    await asyncio.wait_for(direct.started.wait(), timeout=5.0)
+    stop_event.set()
+    await asyncio.wait_for(run_task, timeout=5.0)
 
     assert scheduled.connected_when_rearmed is True
     assert direct.connected_when_started is True
@@ -366,5 +382,55 @@ def test_run_connects_before_rearm_and_direct_invoke_start(tmp_path, monkeypatch
     assert events.index("connect:done") < events.index("direct:start")
     # The reorder remains inside run()'s existing cleanup boundary.
     assert events.index("direct:stop") < events.index("disconnect")
+
+  asyncio.run(scenario())
+
+
+def test_run_waits_for_whatsapp_open_before_cold_outbound_work(tmp_path, monkeypatch):
+  """A Node handshake alone must not trigger sends from an unpaired account."""
+
+  async def scenario():
+    events: list[str] = []
+    sock = _LifecycleWaSocket(
+      str(tmp_path),
+      events,
+      whatsapp_open_on_connect=False,
+    )
+    session = AgentSession(sock)
+    session.register()
+    scheduled = _LifecycleScheduledTasks(sock, events)
+    direct = _LifecycleDirectInvoke(sock, events)
+    session._scheduled = scheduled
+    session._direct_invoke = direct
+    session._dashboard = _LifecycleDashboard(events)
+
+    async def recover_pending() -> None:
+      events.append("recovery")
+
+    session._subagent.recover_pending_completions = recover_pending
+    monkeypatch.setattr(session_module, "db_checkpoint_all_dbs", lambda: None)
+    monkeypatch.setattr(session_module, "db_close_all_connections", lambda: None)
+
+    stop_event = asyncio.Event()
+    run_task = asyncio.create_task(
+      session.run("ws://node.invalid:3000", stop_event)
+    )
+    while "connect:done" not in events:
+      await asyncio.sleep(0)
+    await asyncio.sleep(0.02)
+    assert "recovery" not in events
+    assert "scheduled:rearm" not in events
+    assert "direct:start" not in events
+
+    await sock.emit(
+      "status",
+      {"status": "open", "reason": None, "folderPath": sock.folder_path},
+    )
+    await asyncio.wait_for(direct.started.wait(), timeout=1.0)
+    assert events.index("connect:done") < events.index("recovery")
+    assert events.index("recovery") < events.index("scheduled:rearm")
+
+    stop_event.set()
+    await asyncio.wait_for(run_task, timeout=5.0)
 
   asyncio.run(scenario())

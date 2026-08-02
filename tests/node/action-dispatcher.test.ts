@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -49,10 +50,36 @@ class FakeWebSocket {
 function makeAccount(folderPath: string): { entry: AccountEntry; client: FakeWebSocket } {
   const entry = getOrCreate(folderPath);
   entry.ctx = createAccountContext(folderPath);
-  entry.sock = { user: { id: 'bot@s.whatsapp.net' } } as unknown as NonNullable<AccountEntry['sock']>;
+  entry.waStatus = 'open';
+  entry.sock = {
+    user: { id: 'bot@s.whatsapp.net' },
+    authState: {
+      creds: {
+        registered: true,
+        me: { id: 'bot@s.whatsapp.net' },
+      },
+    },
+  } as unknown as NonNullable<AccountEntry['sock']>;
   const client = new FakeWebSocket();
   bindClient(folderPath, client as unknown as WebSocket);
   return { entry, client };
+}
+
+function receiptFingerprint(frame: unknown): string {
+  const canonical = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(canonical);
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, item]) => [key, canonical(item)]),
+      );
+    }
+    return value;
+  };
+  return createHash('sha256')
+    .update(JSON.stringify(canonical(frame)))
+    .digest('hex');
 }
 
 test('send_message routes to account A and emits action_ack(ok, result.sent) + send_ack to A', async () => {
@@ -126,6 +153,99 @@ test('send_message routes to account A and emits action_ack(ok, result.sent) + s
   remove(folderB);
   await rm(folderA, { recursive: true, force: true });
   await rm(folderB, { recursive: true, force: true });
+});
+
+test('an action rejected before pairing can reuse its requestId after WhatsApp opens', async () => {
+  const folder = path.join(TEST_ROOT, 'dispatch-pre-pair');
+  const { entry, client } = makeAccount(folder);
+  entry.waStatus = 'connecting';
+  (entry.sock!.authState.creds as { me?: unknown }).me = undefined;
+  let sendCount = 0;
+  const sentResult = {
+    sent: [{ kind: 'text', contextMsgId: '000126', messageId: 'wamid-ready' }],
+    replyTo: null,
+  };
+  const deps: Partial<DispatchDeps> = {
+    sendOutgoing: (async () => {
+      sendCount += 1;
+      return sentResult;
+    }) as DispatchDeps['sendOutgoing'],
+  };
+  const frame = {
+    type: 'send_message' as const,
+    payload: { requestId: 'send-after-pair', chatId: '123@g.us', text: 'hi' },
+  };
+
+  await dispatchAction(entry, frame, deps);
+  assert.equal(sendCount, 0);
+  const unavailable = client.frames().find((item) => item.type === 'action_ack');
+  assert.equal(unavailable?.payload.ok, false);
+  assert.equal(unavailable?.payload.code, 'send_failed');
+  assert.match(String(unavailable?.payload.detail), /pair or reconnect/i);
+
+  entry.waStatus = 'open';
+  (entry.sock!.authState.creds as { me?: { id: string } }).me = {
+    id: 'bot@s.whatsapp.net',
+  };
+  await dispatchAction(entry, frame, deps);
+  assert.equal(sendCount, 1, 'pre-pair rejection must not reserve the requestId');
+  const finalAck = client.frames().filter((item) => item.type === 'action_ack').at(-1);
+  assert.equal(finalAck?.payload.ok, true);
+
+  remove(folder);
+  await rm(folder, { recursive: true, force: true });
+});
+
+test('legacy sub-agent receipts for the pre-auth Baileys TypeError are retried', async () => {
+  const folder = path.join(TEST_ROOT, 'dispatch-legacy-pre-auth');
+  const requestId = 'subrec-legacy-pre-auth';
+  const frame = {
+    type: 'send_message' as const,
+    payload: { requestId, chatId: '123@g.us', text: 'recovered report' },
+  };
+  await mkdir(path.join(folder, 'db'), { recursive: true });
+  await writeFile(
+    path.join(folder, 'db', 'action-receipts.json'),
+    JSON.stringify({
+      version: 1,
+      receipts: [{
+        requestId,
+        fingerprint: receiptFingerprint(frame),
+        completedAt: Date.now(),
+        state: 'complete',
+        frames: [{
+          type: 'action_ack',
+          payload: {
+            requestId,
+            action: 'send_message',
+            ok: false,
+            detail: "Cannot read properties of undefined (reading 'id')",
+            code: 'send_failed',
+          },
+        }],
+      }],
+    }),
+    'utf8',
+  );
+  const { entry, client } = makeAccount(folder);
+  let sendCount = 0;
+  const deps: Partial<DispatchDeps> = {
+    sendOutgoing: (async () => {
+      sendCount += 1;
+      return {
+        sent: [{ kind: 'text', contextMsgId: '000127', messageId: 'wamid-recovered' }],
+        replyTo: null,
+      };
+    }) as DispatchDeps['sendOutgoing'],
+  };
+
+  await dispatchAction(entry, frame, deps);
+  assert.equal(sendCount, 1, 'definitively unsent legacy recovery must be retried');
+  const ack = client.frames().find((item) => item.type === 'action_ack');
+  assert.equal(ack?.payload.ok, true);
+
+  remove(folder);
+  await rm(folder, { recursive: true, force: true });
 });
 
 test('corrupt durable action receipts fail closed without executing the action', async () => {

@@ -138,6 +138,11 @@ long-running logs are not flooded by Baileys' ~20-second QR refresh. Request a
 fresh native code from the panel or explicitly reconnect the account when the
 first QR expires.
 
+While an account is unpaired or reconnecting, the bridge remains connected to
+Node but parks cold sub-agent recovery, scheduled tasks, and direct-invoke
+delivery. They resume only after WhatsApp reports `open`; pre-pair actions are
+rejected before execution and remain safe to retry after pairing.
+
 `package.json` carries an application `version` and a separate
 `compatibilityVersion`. The latter must be incremented when an update may need
 manual environment, dependency, database, or deployment changes. The panel

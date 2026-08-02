@@ -188,6 +188,23 @@ function receiptPath(folderPath: string): string {
   return path.join(folderPath, 'db', 'action-receipts.json');
 }
 
+function isLegacyUnsentRecoveryFailure(
+  requestId: string,
+  frames: OutboundFrame[],
+): boolean {
+  if (!requestId.startsWith('subrec-')) return false;
+  return frames.some((frame) => {
+    if (frame.type !== 'action_ack') return false;
+    const payload = frame.payload as ActionAckPayload;
+    return payload.action === 'send_message'
+      && payload.ok === false
+      && payload.code === 'send_failed'
+      && payload.detail.includes(
+        "Cannot read properties of undefined (reading 'id')",
+      );
+  });
+}
+
 async function loadReceiptCache(folderPath: string): Promise<Map<string, ActionReceipt>> {
   const cached = receiptCaches.get(folderPath);
   if (cached) return cached;
@@ -195,6 +212,7 @@ async function loadReceiptCache(folderPath: string): Promise<Map<string, ActionR
   if (pending) return pending;
   const load = (async () => {
     const result = new Map<string, ActionReceipt>();
+    let prunedLegacyFailures = 0;
     try {
       const raw = JSON.parse(await readFile(receiptPath(folderPath), 'utf8')) as { receipts?: unknown[] };
       if (!Array.isArray(raw?.receipts)) throw new Error('action receipt file has no receipts array');
@@ -211,12 +229,24 @@ async function loadReceiptCache(folderPath: string): Promise<Map<string, ActionR
         if (receiptState !== 'running' && receiptState !== 'complete') {
           throw new Error('action receipt entry has an invalid state');
         }
-        result.set(record.requestId, {
+        const receipt: ActionReceipt = {
           fingerprint: record.fingerprint,
           frames: record.frames as OutboundFrame[],
           completedAt: Number(record.completedAt) || 0,
           state: receiptState,
-        });
+        };
+        // Builds before the readiness gate could ask Baileys to send while
+        // creds.me was absent. That exception happens before a message can be
+        // created, so its deterministic sub-agent recovery receipt is safe to
+        // discard and retry after pairing. Keep every other receipt intact.
+        if (
+          receipt.state === 'complete'
+          && isLegacyUnsentRecoveryFailure(record.requestId, receipt.frames)
+        ) {
+          prunedLegacyFailures += 1;
+          continue;
+        }
+        result.set(record.requestId, receipt);
       }
     } catch (err) {
       const code = (err as NodeJS.ErrnoException)?.code;
@@ -224,6 +254,13 @@ async function loadReceiptCache(folderPath: string): Promise<Map<string, ActionR
         logger.error({ err, folderPath }, 'failed loading durable action receipts');
         throw err;
       }
+    }
+    if (prunedLegacyFailures > 0) {
+      await persistReceiptCache(folderPath, result);
+      logger.info(
+        { folderPath, count: prunedLegacyFailures },
+        'discarded retryable pre-pair recovery receipts',
+      );
     }
     receiptCaches.set(folderPath, result);
     return result;
@@ -844,6 +881,31 @@ export async function dispatchAction(
     ? payload.requestId
     : undefined;
   const action = frame?.type;
+
+  // The Node WebSocket can be healthy while this WhatsApp account is still
+  // unpaired or reconnecting. Baileys' sendMessage reads creds.me.id before it
+  // performs its own guard, which used to surface as an opaque TypeError. Fail
+  // before claiming a durable receipt: this is definitively pre-send, so the
+  // same requestId may be retried safely after pairing.
+  const knownAction = action && Object.hasOwn(ACTION_HANDLERS, action);
+  const whatsappReady = entry.waStatus === 'open'
+    && Boolean(entry.sock?.authState?.creds?.me?.id);
+  if (knownAction && String(action) !== 'download_media' && !whatsappReady) {
+    if (requestId) {
+      const detail = 'WhatsApp account is not connected; pair or reconnect it before sending actions.';
+      const err = Object.assign(new Error(detail), {
+        code: 'send_failed',
+        detail,
+      });
+      emitActionError(entry, { requestId, action, err });
+    } else {
+      logger.debug(
+        { action, folderPath: entry.folderPath },
+        'ignored fire-and-forget action while WhatsApp is not open',
+      );
+    }
+    return;
+  }
 
   const execute = async (): Promise<void> => {
     try {
