@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 
+import bridge.agent.batch_processor as batch_processor_module
 import bridge.session as session_module
 from bridge.session import AgentSession
 from wasocket.events import WhatsAppMessage
@@ -171,7 +172,11 @@ async def _teardown(*sessions: AgentSession) -> None:
 # (a) message delivered to A is never visible to B
 # ---------------------------------------------------------------------------
 
-def test_message_to_session_a_never_appears_in_session_b():
+def test_message_to_session_a_never_appears_in_session_b(monkeypatch):
+  # This test exercises tenant isolation, not the production DM gate. Keep it
+  # hermetic when pytest is run from a deployment whose .env disables DMs.
+  monkeypatch.setattr(batch_processor_module, "private_chat_enabled", lambda: True)
+
   async def scenario():
     sess_a = AgentSession(StubWaSocket("/tenant-a"))
     sess_b = AgentSession(StubWaSocket("/tenant-b"))
@@ -200,7 +205,9 @@ def test_message_to_session_a_never_appears_in_session_b():
   asyncio.run(scenario())
 
 
-def test_each_session_only_sees_its_own_traffic():
+def test_each_session_only_sees_its_own_traffic(monkeypatch):
+  monkeypatch.setattr(batch_processor_module, "private_chat_enabled", lambda: True)
+
   async def scenario():
     sess_a = AgentSession(StubWaSocket("/tenant-a"))
     sess_b = AgentSession(StubWaSocket("/tenant-b"))
