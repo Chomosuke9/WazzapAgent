@@ -8,12 +8,16 @@ const state = {
   chatModels: [],
   currentChatId: '',
   chatDetail: null,
+  pendingScopeName: '',
   models: [],
   activation: null,
   stickers: [],
   envFields: [],
   logs: [],
   pairingResults: new Map(),
+  knownScopes: [],
+  systemSection: sessionStorage.getItem('wazzap_system_section') || 'runtime',
+  updateStatus: null,
 };
 
 const loginShell = document.getElementById('login-shell');
@@ -57,12 +61,33 @@ function relativeTime(value) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+function scopeName(scope, fallbackId = '') {
+  if (fallbackId === '__global__' || scope?.chatId === '__global__') return 'Default settings';
+  return scope?.displayName || (fallbackId.endsWith('@g.us') ? 'Unnamed group' : fallbackId.split('@')[0]) || 'Unknown scope';
+}
+
+function scopeCell(scope, fallbackId = '') {
+  const chatId = scope?.chatId || fallbackId;
+  const label = chatId === '__global__' ? 'Global' : scopeName(scope, chatId);
+  return `<span class="cell-title">${escapeHtml(label)}</span>${chatId && chatId !== '__global__' ? `<span class="cell-subtitle mono">${escapeHtml(chatId)}</span>` : ''}`;
+}
+
 function toast(message, type = 'success') {
   const element = document.createElement('div');
   element.className = `toast ${type}`;
   element.textContent = message;
   toastRegion.append(element);
   setTimeout(() => element.remove(), 4200);
+}
+
+async function copyText(value) {
+  if (!navigator.clipboard?.writeText) return false;
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function statusMarkup(account) {
@@ -159,6 +184,7 @@ function bindAccountSelector(id = 'page-account-select', callback = renderPage) 
     sessionStorage.setItem('wazzap_account_id', select.value);
     state.currentChatId = '';
     state.chatDetail = null;
+    state.pendingScopeName = '';
     await callback();
   });
 }
@@ -257,8 +283,8 @@ function bindPairForm(onDone = renderPage) {
     const accountId = accountInput.value;
     const result = state.pairingResults.get(accountId);
     if (!result) return;
-    await navigator.clipboard.writeText(result.code.replace('-', ''));
-    toast('Pairing code copied.');
+    const copied = await copyText(result.code.replace('-', ''));
+    toast(copied ? 'Pairing code copied.' : 'Clipboard is unavailable on this connection.', copied ? 'success' : 'error');
   });
 }
 
@@ -456,11 +482,19 @@ async function loadChats() {
   const data = await api(`/api/accounts/${encodeURIComponent(state.selectedAccountId)}/chat-settings`);
   state.chatList = data.chats || [];
   state.chatModels = data.models || [];
+  state.knownScopes = data.knownScopes || [];
   if (!state.currentChatId && state.chatList.length) {
     state.currentChatId = state.chatList[0].chatId;
   }
   if (state.currentChatId) {
     state.chatDetail = await api(`/api/accounts/${encodeURIComponent(state.selectedAccountId)}/chat-settings/detail?chatId=${encodeURIComponent(state.currentChatId)}`);
+    if (state.pendingScopeName && state.currentChatId !== '__global__') {
+      state.chatDetail.scope = {
+        ...(state.chatDetail.scope || {}),
+        chatId: state.currentChatId,
+        displayName: state.pendingScopeName,
+      };
+    }
   }
 }
 
@@ -475,10 +509,11 @@ function renderChatEditor() {
     ? memories.map((memory, index) => `<li class="memory-row"><span class="memory-index">${index + 1}</span><span>${escapeHtml(memory.text)}</span><button class="button danger small delete-memory" data-index="${index + 1}" type="button">Delete</button></li>`).join('')
     : '<li class="empty-state">No long-term memories in this scope.</li>';
   return `
-    <header class="panel-header"><div><h2>${settings.chatId === '__global__' ? 'Default settings' : escapeHtml(settings.chatId)}</h2><p>${detail.exists ? 'Explicit settings row' : 'Using tenant defaults until saved'}</p></div><span class="badge ${detail.exists ? 'success' : 'warning'}">${detail.source}</span></header>
+    <header class="panel-header"><div><h2>${escapeHtml(scopeName(detail.scope, settings.chatId))}</h2><p>${settings.chatId === '__global__' ? 'Tenant-wide fallback settings' : `<span class="mono">${escapeHtml(settings.chatId)}</span> · ${detail.exists ? 'Explicit settings row' : 'Using tenant defaults until saved'}`}</p></div><span class="badge ${detail.exists ? 'success' : 'warning'}">${detail.source}</span></header>
     <div class="panel-body">
       <form id="chat-settings-form">
         <div class="form-grid">
+          ${settings.chatId === '__global__' ? '' : `<label class="form-field full"><span class="field-label">Scope name</span><input id="chat-display-name" maxlength="160" value="${escapeHtml(detail.scope?.stored || state.pendingScopeName ? detail.scope?.displayName || state.pendingScopeName : '')}" placeholder="Group or contact name" required><p class="field-help">Stored locally and reused by the panel; saving does not fetch WhatsApp metadata.</p></label>`}
           <label class="form-field"><span class="field-label">Mode</span><select id="chat-mode"><option value="auto" ${settings.mode === 'auto' ? 'selected' : ''}>Auto</option><option value="prefix" ${settings.mode === 'prefix' ? 'selected' : ''}>Prefix</option><option value="hybrid" ${settings.mode === 'hybrid' ? 'selected' : ''}>Hybrid</option></select><p class="field-help">Auto and hybrid require LLM1.</p></label>
           <label class="form-field"><span class="field-label">Permission level</span><select id="chat-permission">${[0, 1, 2, 3].map((level) => `<option value="${level}" ${settings.permission === level ? 'selected' : ''}>Level ${level}</option>`).join('')}</select></label>
           <label class="form-field"><span class="field-label">LLM2 model</span><select id="chat-model"><option value="">Tenant default</option>${state.chatModels.map((model) => `<option value="${escapeHtml(model.modelId)}" ${settings.llm2Model === model.modelId ? 'selected' : ''}>${escapeHtml(model.displayName)}</option>`).join('')}</select></label>
@@ -502,31 +537,43 @@ function renderChatEditor() {
 async function renderChats() {
   await loadChats();
   const list = state.chatList.length
-    ? state.chatList.map((chat) => `<button class="select-row ${chat.chatId === state.currentChatId ? 'active' : ''}" data-chat-id="${escapeHtml(chat.chatId)}" type="button"><strong>${chat.chatId === '__global__' ? 'Default settings' : escapeHtml(chat.chatId)}</strong><small>${escapeHtml(chat.mode)} · permission ${chat.permission} · ${escapeHtml(chat.updatedAt)}</small></button>`).join('')
+    ? state.chatList.map((chat) => `<button class="select-row ${chat.chatId === state.currentChatId ? 'active' : ''}" data-chat-id="${escapeHtml(chat.chatId)}" type="button"><strong>${escapeHtml(scopeName(chat, chat.chatId))}</strong><small>${chat.chatId === '__global__' ? '' : `${escapeHtml(chat.chatId)} · `}${escapeHtml(chat.mode)} · permission ${chat.permission}</small></button>`).join('')
     : '<div class="empty-state">No chat settings rows yet.</div>';
   content.innerHTML = `
-    ${pageHeader('Chats', 'Edit default and per-chat behavior without slash commands.', `${accountSelector()}<button id="new-chat" class="button primary" type="button">Add chat ID</button>`)}
+    ${pageHeader('Chats', 'Edit default and per-chat behavior without slash commands.', `${accountSelector()}<button id="new-chat" class="button primary" type="button">Add scope</button>`)}
     <div class="split-layout"><aside class="panel list-panel"><header class="panel-header"><h2>Configured scopes</h2></header><div class="select-list">${list}</div></aside><section class="panel">${renderChatEditor()}</section></div>
   `;
   bindAccountSelector();
   document.getElementById('new-chat').addEventListener('click', showNewChatModal);
   document.querySelectorAll('.select-row[data-chat-id]').forEach((button) => button.addEventListener('click', async () => {
     state.currentChatId = button.dataset.chatId;
+    state.pendingScopeName = '';
     await renderChats();
   }));
   bindChatEditor();
 }
 
 function showNewChatModal() {
-  openModal('Add chat settings', 'Paste a WhatsApp chat JID. Saving creates an isolated settings row.', '<label class="form-field"><span class="field-label">Chat ID</span><input id="new-chat-id" placeholder="120363…@g.us or 628…@s.whatsapp.net"></label>', {
+  const configured = new Set(state.chatList.map((chat) => chat.chatId));
+  const known = state.knownScopes.filter((scope) => !configured.has(scope.chatId));
+  openModal('Add chat scope', 'Choose a locally remembered chat or enter one manually.', `<div class="form-grid"><label class="form-field full"><span class="field-label">Remembered chat</span><select id="known-chat"><option value="">Enter manually</option>${known.map((scope) => `<option value="${escapeHtml(scope.chatId)}" data-name="${escapeHtml(scope.displayName)}">${escapeHtml(scope.displayName)} · ${escapeHtml(scope.chatType)}</option>`).join('')}</select></label><label class="form-field full"><span class="field-label">Scope name</span><input id="new-chat-name" maxlength="160" placeholder="Community team" required></label><label class="form-field full"><span class="field-label">Chat ID</span><input id="new-chat-id" placeholder="120363…@g.us or 628…@s.whatsapp.net" required></label></div>`, {
     confirmText: 'Open editor',
     onConfirm: async (root) => {
       const chatId = root.querySelector('#new-chat-id').value.trim();
+      const displayName = root.querySelector('#new-chat-name').value.trim();
       if (!chatId) throw new Error('Chat ID is required.');
+      if (!displayName) throw new Error('Scope name is required.');
       state.currentChatId = chatId;
+      state.pendingScopeName = displayName;
       state.chatDetail = null;
       await renderChats();
     },
+  });
+  document.getElementById('known-chat')?.addEventListener('change', (event) => {
+    const option = event.target.selectedOptions[0];
+    if (!option?.value) return;
+    document.getElementById('new-chat-id').value = option.value;
+    document.getElementById('new-chat-name').value = option.dataset.name || option.textContent.split(' · ')[0];
   });
 }
 
@@ -537,6 +584,7 @@ function bindChatEditor() {
     event.preventDefault();
     const body = {
       chatId: state.currentChatId,
+      ...(state.currentChatId === '__global__' ? {} : { displayName: document.getElementById('chat-display-name').value.trim() }),
       mode: document.getElementById('chat-mode').value,
       permission: Number(document.getElementById('chat-permission').value),
       llm2Model: document.getElementById('chat-model').value || null,
@@ -550,6 +598,7 @@ function bindChatEditor() {
     };
     try {
       state.chatDetail = await api(`/api/accounts/${encodeURIComponent(state.selectedAccountId)}/chat-settings/detail`, { method: 'PUT', body });
+      state.pendingScopeName = '';
       toast('Chat settings saved.');
       await renderChats();
     } catch (error) {
@@ -591,9 +640,8 @@ async function renderModels() {
   if (!state.selectedAccountId) return;
   const data = await api(`/api/accounts/${encodeURIComponent(state.selectedAccountId)}/models`);
   state.models = data.models || [];
-  const defaultModel = state.models.find((model) => model.isActive);
   const rows = state.models.length
-    ? state.models.map((model) => `<tr><td><span class="cell-title">${escapeHtml(model.displayName)}</span><span class="cell-subtitle mono">${escapeHtml(model.modelId)}</span></td><td>${model.isActive ? '<span class="badge success">Active</span>' : '<span class="badge">Disabled</span>'}</td><td>${model.visionSupport ? 'Yes' : 'No'}</td><td>${model.sortOrder}</td><td>${escapeHtml(model.description || '—')}</td><td><div class="row-actions"><button class="button secondary small edit-model" data-id="${encodeURIComponent(model.modelId)}" type="button">Edit</button>${defaultModel?.modelId === model.modelId ? '<span class="badge success">Default</span>' : `<button class="button secondary small default-model" data-id="${encodeURIComponent(model.modelId)}" type="button">Set default</button>`}<button class="button danger small delete-model" data-id="${encodeURIComponent(model.modelId)}" type="button">Delete</button></div></td></tr>`).join('')
+    ? state.models.map((model) => `<tr><td><span class="cell-title">${escapeHtml(model.displayName)}</span><span class="cell-subtitle mono">${escapeHtml(model.modelId)}</span></td><td>${model.isActive ? '<span class="badge success">Active</span>' : '<span class="badge">Disabled</span>'}</td><td>${model.visionSupport ? 'Yes' : 'No'}</td><td>${model.sortOrder}</td><td>${escapeHtml(model.description || '—')}</td><td><div class="row-actions"><button class="icon-button default-model ${model.isDefault ? 'selected' : ''}" data-id="${encodeURIComponent(model.modelId)}" type="button" aria-label="${model.isDefault ? 'Current default model' : `Set ${escapeHtml(model.displayName)} as default`}" title="${model.isDefault ? 'Default model' : 'Set as default'}" ${model.isDefault ? 'disabled' : ''}>${model.isDefault ? '★' : '☆'}</button><button class="button secondary small edit-model" data-id="${encodeURIComponent(model.modelId)}" type="button">Edit</button><button class="button danger small delete-model" data-id="${encodeURIComponent(model.modelId)}" type="button">Delete</button></div></td></tr>`).join('')
     : '<tr><td colspan="6"><div class="empty-state">No model catalog entries. LLM2 falls back to environment configuration.</div></td></tr>';
   content.innerHTML = `
     ${pageHeader('Models', 'Manage the per-tenant LLM2 model catalog.', `${accountSelector()}<button id="add-model" class="button primary" type="button">Add model</button>`)}
@@ -624,7 +672,7 @@ function showModelModal(modelId = '') {
     `<div class="form-grid">
       <label class="form-field full"><span class="field-label">Model ID</span><input id="model-id" value="${escapeHtml(model?.modelId || '')}" ${model ? 'disabled' : ''} placeholder="provider/model"></label>
       <label class="form-field"><span class="field-label">Display name</span><input id="model-name" value="${escapeHtml(model?.displayName || '')}"></label>
-      <label class="form-field"><span class="field-label">Sort order</span><input id="model-order" type="number" value="${model?.sortOrder ?? ''}"></label>
+      <label class="form-field"><span class="field-label">Sort order</span><input id="model-order" type="number" min="0" step="1" value="${model?.sortOrder ?? ''}"><p class="field-help">Uses non-negative values; choosing a default never changes this order.</p></label>
       <label class="form-field full"><span class="field-label">Description</span><textarea id="model-description">${escapeHtml(model?.description || '')}</textarea></label>
       <div class="form-field full"><div class="toggle-row"><strong>Active</strong><label class="toggle"><input id="model-active" type="checkbox" ${model?.isActive !== false ? 'checked' : ''}><span></span></label></div><div class="toggle-row"><strong>Vision support</strong><label class="toggle"><input id="model-vision" type="checkbox" ${model?.visionSupport ? 'checked' : ''}><span></span></label></div></div>
     </div>`,
@@ -665,7 +713,7 @@ async function renderActivation() {
     ? codes.slice().reverse().map((code) => `<tr><td class="mono">${escapeHtml(code.code)}</td><td>${escapeHtml(code.type)}</td><td>${code.days === 0 ? 'Permanent' : `${code.days} days`}</td><td>${code.used ? `<span class="badge success">Used by ${escapeHtml(code.usedBy || '')}</span>` : '<span class="badge warning">Unused</span>'}</td><td>${formatDate(code.createdAt)}</td><td><button class="button danger small revoke-code" data-id="${code.id}" type="button">Revoke</button></td></tr>`).join('')
     : '<tr><td colspan="6"><div class="empty-state">No activation codes generated.</div></td></tr>';
   const activeRows = activations.length
-    ? activations.map((item) => `<tr><td class="mono">${escapeHtml(item.chatId)}</td><td class="mono">${escapeHtml(item.code)}</td><td>${formatDate(item.activatedAt)}</td><td>${item.expiresAt ? formatDate(item.expiresAt) : 'Permanent'}</td></tr>`).join('')
+    ? activations.map((item) => `<tr><td>${scopeCell(item.scope, item.chatId)}</td><td class="mono">${escapeHtml(item.code)}</td><td>${formatDate(item.activatedAt)}</td><td>${item.expiresAt ? formatDate(item.expiresAt) : 'Permanent'}</td></tr>`).join('')
     : '<tr><td colspan="4"><div class="empty-state">No active chats.</div></td></tr>';
   content.innerHTML = `
     ${pageHeader('Activation', 'Generate and revoke access codes for private chats and groups.', `${accountSelector()}<span class="badge ${state.activation.required ? 'success' : 'warning'}">Gate ${state.activation.required ? 'enabled' : 'disabled'}</span>`)}
@@ -685,9 +733,9 @@ async function renderActivation() {
         days: Number(document.getElementById('activation-days').value),
       },
     });
-    await navigator.clipboard.writeText(response.code.code).catch(() => undefined);
-    toast(`Generated ${response.code.code}. It was copied when clipboard access was available.`);
     await renderActivation();
+    const copied = await copyText(response.code.code);
+    toast(`Generated ${response.code.code}.${copied ? ' Copied to clipboard.' : ' Clipboard is unavailable on this connection.'}`, copied ? 'success' : 'error');
   });
   document.querySelectorAll('.revoke-code').forEach((button) => button.addEventListener('click', async () => {
     if (!window.confirm('Revoke this code? A chat using it will lose activation.')) return;
@@ -700,10 +748,14 @@ async function renderActivation() {
 async function renderStickers() {
   await refreshAccounts();
   if (!state.selectedAccountId) return;
-  const data = await api(`/api/accounts/${encodeURIComponent(state.selectedAccountId)}/stickers`);
+  const [data, scopeData] = await Promise.all([
+    api(`/api/accounts/${encodeURIComponent(state.selectedAccountId)}/stickers`),
+    api(`/api/accounts/${encodeURIComponent(state.selectedAccountId)}/chat-settings`),
+  ]);
+  state.knownScopes = scopeData.knownScopes || [];
   state.stickers = data.stickers || [];
   const rows = state.stickers.length
-    ? state.stickers.map((sticker) => `<tr><td><span class="cell-title">${escapeHtml(sticker.name)}</span></td><td class="mono">${escapeHtml(sticker.chatId)}</td><td><span class="badge">${escapeHtml(sticker.kind)}</span></td><td>${escapeHtml(sticker.addedBy || '—')}</td><td>${formatDate(sticker.addedAt)}</td><td><button class="button danger small delete-sticker" data-chat="${escapeHtml(sticker.chatId)}" data-name="${escapeHtml(sticker.name)}" type="button">Delete</button></td></tr>`).join('')
+    ? state.stickers.map((sticker) => `<tr><td><span class="cell-title">${escapeHtml(sticker.name)}</span></td><td>${scopeCell(sticker.scope, sticker.chatId)}</td><td><span class="badge">${escapeHtml(sticker.kind)}</span></td><td>${escapeHtml(sticker.addedBy || '—')}</td><td>${formatDate(sticker.addedAt)}</td><td><button class="button danger small delete-sticker" data-chat="${escapeHtml(sticker.chatId)}" data-name="${escapeHtml(sticker.name)}" type="button">Delete</button></td></tr>`).join('')
     : '<tr><td colspan="6"><div class="empty-state">No user-managed stickers in this tenant.</div></td></tr>';
   content.innerHTML = `
     ${pageHeader('Stickers', 'Manage shared and per-chat sticker catalogs.', `${accountSelector()}<button id="add-sticker" class="button primary" type="button">Upload sticker</button>`)}
@@ -732,12 +784,13 @@ function fileAsDataUrl(file) {
 }
 
 function showStickerModal() {
+  const scopeOptions = state.knownScopes.map((scope) => `<option value="${escapeHtml(scope.chatId)}">${escapeHtml(scope.displayName)} · ${escapeHtml(scope.chatType)}</option>`).join('');
   openModal(
     'Upload sticker',
     'Add a WebP file or a premium Lottie JSON payload.',
     `<div class="form-grid">
       <label class="form-field"><span class="field-label">Name</span><input id="sticker-name" placeholder="funny_cat"></label>
-      <label class="form-field"><span class="field-label">Scope</span><input id="sticker-chat" value="__global__" placeholder="__global__ or chat JID"></label>
+      <label class="form-field"><span class="field-label">Scope</span><select id="sticker-chat"><option value="__global__">Global shared catalog</option>${scopeOptions}</select><p class="field-help">Names come from the local chat directory; no live metadata fetch is performed.</p></label>
       <label class="form-field full"><span class="field-label">Kind</span><select id="sticker-kind"><option value="webp">WebP sticker</option><option value="lottie">Lottie JSON</option></select></label>
       <label id="sticker-file-field" class="form-field full"><span class="field-label">WebP file</span><input id="sticker-file" type="file" accept="image/webp,.webp"></label>
       <label id="sticker-lottie-field" class="form-field full hidden"><span class="field-label">Lottie payload</span><textarea id="sticker-lottie" placeholder="{ ... }"></textarea></label>
@@ -770,44 +823,186 @@ function showStickerModal() {
   });
 }
 
-async function renderSystem() {
-  const data = await api('/api/system/environment');
-  state.envFields = data.fields || [];
+function systemSections() {
   const categories = [...new Set(state.envFields.map((field) => field.category))];
+  return [
+    { id: 'runtime', label: 'Runtime & updates', detail: 'Version, restart, and safe update' },
+    { id: 'network', label: 'Control panel network', detail: 'Host and port binding' },
+    ...categories.map((category) => ({
+      id: `env:${category}`,
+      label: category,
+      detail: `${state.envFields.filter((field) => field.category === category).length} environment settings`,
+    })),
+  ];
+}
+
+function renderRuntimeSystemSection() {
+  const status = state.updateStatus;
+  if (!status) return '<section class="panel"><div class="empty-state">Update status is unavailable.</div></section>';
+  const current = status.current || {};
+  const available = status.available;
+  const compatibilityNotice = status.compatibilityChanged
+    ? `<div class="notice warning"><strong>Compatibility change detected.</strong> This update changes compatibility v${escapeHtml(current.compatibilityVersion)} → v${escapeHtml(available?.compatibilityVersion || 'unknown')}. Configuration, dependencies, or deployment steps may need attention. The panel will ask for explicit confirmation.</div>`
+    : '';
+  const updateBadge = status.updateAvailable
+    ? `<span class="badge ${status.compatibilityChanged ? 'warning' : 'success'}">${status.behind} commit${status.behind === 1 ? '' : 's'} available</span>`
+    : '<span class="badge success">Up to date</span>';
+  return `
+    <section class="panel spaced-panel">
+      <header class="panel-header"><div><h2>Runtime & updates</h2><p>Updates use the configured upstream branch and only allow fast-forward changes.</p></div>${updateBadge}</header>
+      <div class="panel-body">
+        <div class="runtime-version-grid">
+          <div class="version-card"><span>Installed version</span><strong>v${escapeHtml(current.version || 'unknown')}</strong><small class="mono">${escapeHtml(current.commit || 'no commit')}</small></div>
+          <div class="version-card"><span>Compatibility</span><strong>v${escapeHtml(current.compatibilityVersion || 'unknown')}</strong><small>Incremented when manual migration may be required</small></div>
+          <div class="version-card"><span>Available version</span><strong>${available ? `v${escapeHtml(available.version)}` : 'Unavailable'}</strong><small class="mono">${escapeHtml(available?.commit || status.upstream || 'no upstream')}</small></div>
+        </div>
+        <div class="notice ${status.canUpdate || !status.updateAvailable ? '' : 'warning'}">${escapeHtml(status.message)}</div>
+        ${compatibilityNotice}
+        <div class="system-actions">
+          <button id="check-update" class="button secondary" type="button">Check for updates</button>
+          <button id="run-update" class="button primary" type="button" ${status.canUpdate ? '' : 'disabled'}>Update & restart</button>
+          <button id="restart-system" class="button danger" type="button">Restart services</button>
+        </div>
+        <p class="field-help">Restart works with the bundled start.sh supervisor. Without a supervisor, the process stops and must be started externally.</p>
+      </div>
+    </section>`;
+}
+
+function renderNetworkSystemSection() {
   const hostField = state.envFields.find((field) => field.key === 'CONTROL_PANEL_HOST');
   const portField = state.envFields.find((field) => field.key === 'CONTROL_PANEL_PORT');
   const panelHost = hostField?.value || hostField?.defaultValue || '127.0.0.1';
   const panelPort = portField?.value || portField?.defaultValue || '8080';
   const hostPreset = ['127.0.0.1', '0.0.0.0'].includes(panelHost) ? panelHost : 'custom';
-  content.innerHTML = `
-    ${pageHeader('System', 'Edit the shared .env safely. Secret values are never returned to the browser.')}
+  return `
     <section class="panel spaced-panel">
       <header class="panel-header"><div><h2>Control panel network</h2><p>Choose where the admin server listens after the next restart.</p></div><span class="badge warning">Restart</span></header>
       <div class="panel-body"><div class="form-grid">
         <label class="form-field"><span class="field-label">Access scope</span><select id="panel-host-preset"><option value="127.0.0.1" ${hostPreset === '127.0.0.1' ? 'selected' : ''}>This machine only</option><option value="0.0.0.0" ${hostPreset === '0.0.0.0' ? 'selected' : ''}>All IPv4 interfaces (Tailscale/LAN)</option><option value="custom" ${hostPreset === 'custom' ? 'selected' : ''}>Specific IP or hostname</option></select></label>
         <label class="form-field"><span class="field-label">Host</span><input id="panel-host-custom" value="${escapeHtml(panelHost)}" placeholder="100.x.y.z or hostname"></label>
         <label class="form-field"><span class="field-label">Port</span><input id="panel-port" type="number" min="1" max="65535" value="${escapeHtml(panelPort)}"></label>
-        <div class="form-field full"><p class="field-help">Use 0.0.0.0 to keep localhost and make the panel reachable through Tailscale/LAN. Use a specific Tailscale IP to listen only on that interface.</p><button id="save-panel-network" class="button primary" type="button">Save network settings</button></div>
+        <div class="form-field full"><p class="field-help">Use 0.0.0.0 to retain localhost access and expose the panel through Tailscale/LAN. A specific Tailscale IP binds only that interface.</p><button id="save-panel-network" class="button primary" type="button">Save network settings</button></div>
       </div></div>
-    </section>
-    <div class="notice warning">Fields marked “Restart” are saved immediately but only take effect after restarting the relevant Node or Python process.</div>
-    <section class="panel"><div class="panel-body"><div class="env-toolbar"><input id="env-search" type="search" placeholder="Search environment keys"><select id="env-category"><option value="">All categories</option>${categories.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join('')}</select><button id="save-env" class="button primary" type="button">Save changes</button></div><div id="env-list" class="env-list"></div></div></section>
-  `;
-  const hostPresetInput = document.getElementById('panel-host-preset');
-  const customHostInput = document.getElementById('panel-host-custom');
-  const syncHostPreset = () => {
-    if (hostPresetInput.value !== 'custom') customHostInput.value = hostPresetInput.value;
-    customHostInput.disabled = hostPresetInput.value !== 'custom';
-  };
-  hostPresetInput.addEventListener('change', syncHostPreset);
-  syncHostPreset();
-  document.getElementById('save-panel-network').addEventListener('click', () => {
-    void saveControlPanelNetwork().catch((error) => toast(error.message, 'error'));
+    </section>`;
+}
+
+function renderEnvironmentSystemSection(category) {
+  return `
+    <div class="notice warning">Restart-marked values are persisted immediately and take effect after a service restart. Secret values are never returned to the browser.</div>
+    <section class="panel"><header class="panel-header"><div><h2>${escapeHtml(category)}</h2><p>Only this configuration section is shown.</p></div></header><div class="panel-body"><div class="env-toolbar"><input id="env-search" type="search" placeholder="Search ${escapeHtml(category)} settings"><button id="save-env" class="button primary" type="button">Save section</button></div><div id="env-list" class="env-list"></div></div></section>`;
+}
+
+function renderSystemShell() {
+  const sections = systemSections();
+  if (!sections.some((section) => section.id === state.systemSection)) {
+    state.systemSection = 'runtime';
+  }
+  const selected = sections.find((section) => section.id === state.systemSection) || sections[0];
+  const body = selected.id === 'runtime'
+    ? renderRuntimeSystemSection()
+    : selected.id === 'network'
+      ? renderNetworkSystemSection()
+      : renderEnvironmentSystemSection(selected.id.slice(4));
+  content.innerHTML = `
+    ${pageHeader('System', 'Settings are split into focused sections so unrelated controls stay out of the way.')}
+    <div class="system-layout">
+      <aside class="panel system-section-nav" aria-label="System sections">${sections.map((section) => `<button class="system-section-button ${section.id === selected.id ? 'active' : ''}" data-system-section="${escapeHtml(section.id)}" type="button"><strong>${escapeHtml(section.label)}</strong><small>${escapeHtml(section.detail)}</small></button>`).join('')}</aside>
+      <div class="system-section-content">${body}</div>
+    </div>`;
+
+  document.querySelectorAll('[data-system-section]').forEach((button) => button.addEventListener('click', () => {
+    state.systemSection = button.dataset.systemSection;
+    sessionStorage.setItem('wazzap_system_section', state.systemSection);
+    renderSystemShell();
+  }));
+
+  if (selected.id === 'runtime') {
+    document.getElementById('check-update')?.addEventListener('click', async () => {
+      const button = document.getElementById('check-update');
+      button.disabled = true;
+      button.textContent = 'Checking…';
+      try {
+        state.updateStatus = await api('/api/system/update-status?refresh=1');
+        renderSystemShell();
+      } catch (error) {
+        toast(error.message, 'error');
+        button.disabled = false;
+        button.textContent = 'Check for updates';
+      }
+    });
+    document.getElementById('restart-system')?.addEventListener('click', showRestartModal);
+    document.getElementById('run-update')?.addEventListener('click', showUpdateModal);
+  } else if (selected.id === 'network') {
+    const hostPresetInput = document.getElementById('panel-host-preset');
+    const customHostInput = document.getElementById('panel-host-custom');
+    const syncHostPreset = () => {
+      if (hostPresetInput.value !== 'custom') customHostInput.value = hostPresetInput.value;
+      customHostInput.disabled = hostPresetInput.value !== 'custom';
+    };
+    hostPresetInput.addEventListener('change', syncHostPreset);
+    syncHostPreset();
+    document.getElementById('save-panel-network').addEventListener('click', () => {
+      void saveControlPanelNetwork().catch((error) => toast(error.message, 'error'));
+    });
+  } else {
+    const category = selected.id.slice(4);
+    renderEnvRows(category);
+    document.getElementById('env-search').addEventListener('input', () => renderEnvRows(category));
+    document.getElementById('save-env').addEventListener('click', saveEnvironment);
+  }
+}
+
+async function renderSystem(refreshUpdate = false) {
+  const [environment, updateStatus] = await Promise.all([
+    api('/api/system/environment'),
+    refreshUpdate || !state.updateStatus
+      ? api('/api/system/update-status?refresh=1')
+      : Promise.resolve(state.updateStatus),
+  ]);
+  state.envFields = environment.fields || [];
+  state.updateStatus = updateStatus;
+  renderSystemShell();
+}
+
+function showRestartingState(message) {
+  content.innerHTML = `${pageHeader('Restarting', message)}<section class="panel"><div class="panel-body"><div class="skeleton"></div><p class="field-help">This page will reconnect automatically.</p></div></section>`;
+  setTimeout(() => window.location.reload(), 6_000);
+}
+
+function showRestartModal() {
+  openModal('Restart services', 'The Node gateway and Python bridge will briefly disconnect.', '<div class="notice warning">WhatsApp and bridge connections will reconnect after the supervisor starts both services again.</div>', {
+    danger: true,
+    confirmText: 'Restart now',
+    onConfirm: async () => {
+      await api('/api/system/restart', { method: 'POST', body: {} });
+      showRestartingState('A controlled service restart was requested.');
+    },
   });
-  renderEnvRows();
-  document.getElementById('env-search').addEventListener('input', renderEnvRows);
-  document.getElementById('env-category').addEventListener('change', renderEnvRows);
-  document.getElementById('save-env').addEventListener('click', saveEnvironment);
+}
+
+function showUpdateModal() {
+  const status = state.updateStatus;
+  if (!status?.canUpdate) return;
+  const warning = status.compatibilityChanged
+    ? `<div class="notice warning"><strong>Compatibility changes from v${escapeHtml(status.current.compatibilityVersion)} to v${escapeHtml(status.available?.compatibilityVersion || 'unknown')}.</strong><br>Review environment, dependency, and deployment requirements. Continue only if you are prepared to adjust them after restart.</div>`
+    : '<div class="notice">The repository will be fast-forwarded, then the gateway and bridge will restart.</div>';
+  openModal('Apply update', status.message, warning, {
+    danger: status.compatibilityChanged,
+    confirmText: status.compatibilityChanged ? 'I understand, update' : 'Update & restart',
+    onConfirm: async () => {
+      const result = await api('/api/system/update', {
+        method: 'POST',
+        body: { confirmCompatibilityChange: status.compatibilityChanged },
+      });
+      state.updateStatus = result.status || state.updateStatus;
+      if (result.updated) {
+        showRestartingState('The update was applied and services are restarting.');
+      } else {
+        toast(result.status?.message || 'Already up to date.');
+        renderSystemShell();
+      }
+    },
+  });
 }
 
 async function saveControlPanelNetwork() {
@@ -822,20 +1017,19 @@ async function saveControlPanelNetwork() {
     body: { values: { CONTROL_PANEL_HOST: host, CONTROL_PANEL_PORT: port } },
   });
   state.envFields = data.fields || [];
-  toast('Network settings saved. Restart the gateway to apply the new bind address.');
-  await renderSystem();
+  toast('Network settings saved. Use Restart services to apply the new address.');
+  renderSystemShell();
 }
 
-function renderEnvRows() {
+function renderEnvRows(category) {
   const search = document.getElementById('env-search')?.value.toLowerCase() || '';
-  const category = document.getElementById('env-category')?.value || '';
   const filtered = state.envFields.filter((field) => {
-    return (!category || field.category === category)
+    return field.category === category
       && (!search || field.key.toLowerCase().includes(search) || field.description.toLowerCase().includes(search));
   });
   document.getElementById('env-list').innerHTML = filtered.length
-    ? filtered.map((field) => `<label class="env-row"><div><div class="env-key"><code>${escapeHtml(field.key)}</code><span class="badge">${escapeHtml(field.category)}</span>${field.restartRequired ? '<span class="badge warning">Restart</span>' : '<span class="badge success">Hot reload</span>'}</div><p>${escapeHtml(field.description || 'No description available.')}</p></div><div class="${field.secret ? 'secret-input-wrap' : ''}"><input class="env-input" data-key="${escapeHtml(field.key)}" data-secret="${field.secret}" data-original="${escapeHtml(field.value)}" type="${field.secret ? 'password' : 'text'}" value="${escapeHtml(field.value)}" placeholder="${field.secret && field.configured ? 'Configured — leave blank to keep' : escapeHtml(field.defaultValue || 'Empty')}">${field.secret && field.configured ? '<span class="badge success">Configured</span>' : ''}</div></label>`).join('')
-    : '<div class="empty-state">No environment fields match this filter.</div>';
+    ? filtered.map((field) => `<label class="env-row"><div><div class="env-key"><code>${escapeHtml(field.key)}</code>${field.restartRequired ? '<span class="badge warning">Restart</span>' : '<span class="badge success">Hot reload</span>'}</div><p>${escapeHtml(field.description || 'No description available.')}</p></div><div class="${field.secret ? 'secret-input-wrap' : ''}"><input class="env-input" data-key="${escapeHtml(field.key)}" data-secret="${field.secret}" data-original="${escapeHtml(field.value)}" type="${field.secret ? 'password' : 'text'}" value="${escapeHtml(field.value)}" placeholder="${field.secret && field.configured ? 'Configured — leave blank to keep' : escapeHtml(field.defaultValue || 'Empty')}">${field.secret && field.configured ? '<span class="badge success">Configured</span>' : ''}</div></label>`).join('')
+    : '<div class="empty-state">No settings in this section match the search.</div>';
 }
 
 async function saveEnvironment() {
@@ -860,10 +1054,10 @@ async function saveEnvironment() {
   }
   state.envFields = data.fields || [];
   const restart = data.restartRequiredKeys || [];
-  toast(restart.length ? `Saved. Restart required for: ${restart.join(', ')}` : 'Environment saved and hot reload requested.');
+  toast(restart.length ? `Saved. Restart required for: ${restart.join(', ')}` : 'Environment section saved.');
   try {
     await new Promise((resolve) => setTimeout(resolve, values.CONTROL_PANEL_TOKEN ? 500 : 50));
-    await renderSystem();
+    renderSystemShell();
   } catch (error) {
     if (!values.CONTROL_PANEL_TOKEN) state.token = oldToken;
     toast(error.message, 'error');

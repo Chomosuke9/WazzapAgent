@@ -133,7 +133,9 @@ only pair once.
   and ffmpeg from johnvansickle. Override with `PBS_RELEASE` / `PYTHON_VERSION`
   / `FFMPEG_STATIC_URL` env vars if an asset ever 404s.
 - **Updating:** the generic egg `git pull`s on each start; the bootstrap re-uses
-  the cached Python/ffmpeg. Your `data/` and `.env` are preserved.
+  the cached Python/ffmpeg. The control panel also offers a fast-forward-only
+  **Update & restart** action and warns before crossing the project's
+  `compatibilityVersion`. Your `data/` and `.env` are preserved.
 - **Ports.** The primary allocation remains the internal WS port (loopback
   only). The control panel also binds `127.0.0.1:8080` by default. To expose it
   through Pterodactyl, assign a separate allocation, set

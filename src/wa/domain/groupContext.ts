@@ -151,6 +151,12 @@ function rememberGroupMetadata(ctx: AccountContext, jid: string, value: GroupCon
     fetchedAt: Date.now(),
     value,
   }, 2000);
+  // Reuse metadata already fetched for message processing. Persisting the
+  // subject here lets the control panel show group names after restarts without
+  // launching a separate metadata sweep (which is both expensive and ban-risky).
+  if (value.name && value.name !== jid) {
+    ctx.repos?.settings.upsertChatDirectory(jid, value.name, "group");
+  }
 }
 
 function invalidateGroupMetadata(ctx: AccountContext, jid: string | null | undefined): void {

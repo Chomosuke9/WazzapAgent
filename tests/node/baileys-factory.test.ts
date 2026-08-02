@@ -10,6 +10,7 @@ import {
   ensureFolderLayout,
   isStaleMessage,
   requestAccountPairingCode,
+  __setQrPrinterForTests,
   __setSocketCreatorForTests,
 } from '../../src/account/baileysFactory.ts';
 import {
@@ -223,6 +224,28 @@ test('control-panel pairing waits for socket readiness and reuses one native cod
     assert.equal(fake.pairingRequests.length, 1, 'no second native code is minted');
   } finally {
     cleanupAccount(folder);
+    __setSocketCreatorForTests(null);
+  }
+});
+
+test('an unregistered socket prints only its first terminal QR refresh', async () => {
+  const folder = tmpFolder('wazzap-qr-once-');
+  const fake = new FakeSock();
+  fake.authState.creds.registered = false;
+  const previousNumber = config.pairingNumber;
+  const printed: string[] = [];
+  config.pairingNumber = null;
+  __setSocketCreatorForTests(async () => fake as unknown as never);
+  __setQrPrinterForTests((qr) => printed.push(qr));
+  try {
+    await createOrResumeAccount({ folderPath: folder, printQr: true });
+    fake.emit('connection.update', { qr: 'first-qr' });
+    fake.emit('connection.update', { qr: 'second-qr' });
+    assert.deepEqual(printed, ['first-qr']);
+  } finally {
+    config.pairingNumber = previousNumber;
+    cleanupAccount(folder);
+    __setQrPrinterForTests(null);
     __setSocketCreatorForTests(null);
   }
 });
