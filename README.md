@@ -64,8 +64,10 @@ LLM2_ENDPOINT=                    # empty = OpenAI default; or e.g. OpenRouter
 LLM2_MODEL=gpt-4o
 LLM2_API_KEY=sk-...
 
-# Unlock the integrated control panel at http://127.0.0.1:8080.
-CONTROL_PANEL_TOKEN=replace-with-at-least-16-random-characters
+# Control panel network and login.
+CONTROL_PANEL_HOST=127.0.0.1
+CONTROL_PANEL_PORT=8080
+CONTROL_PANEL_TOKEN=choose-a-private-token
 ```
 
 That's the minimal set. `.env.minimal.example` documents the optional **LLM1**
@@ -112,8 +114,8 @@ so you only link once.
 
 The Node gateway also serves a multi-tenant control panel at
 `http://127.0.0.1:8080` by default. Enter `CONTROL_PANEL_TOKEN` on its login
-screen. The API stays locked when the token is absent or shorter than 16
-characters.
+screen. The API stays locked only when the token is empty; any non-empty token
+is accepted.
 
 From the panel you can:
 
@@ -127,10 +129,14 @@ From the panel you can:
   marked; and
 - review the persistent control-panel audit trail.
 
-The server binds loopback by default. For a remote deployment, explicitly set
-`CONTROL_PANEL_HOST=0.0.0.0`, expose the port only through a firewall or reverse
-proxy, use HTTPS at that boundary, and keep a strong admin token. Pairing and
-session-reset endpoints must never be exposed without access control.
+The server binds loopback by default. Set `CONTROL_PANEL_HOST=0.0.0.0` to keep
+localhost access and also listen on Tailscale/LAN, then open
+`http://<tailscale-ip>:8080` from the other device. Set it to the server's exact
+Tailscale IP to restrict the listener to that interface. Host and port can also
+be changed from **System → Control panel network**; restart the gateway after
+saving. When reachable from another device, keep the token private and use
+Tailscale ACLs, a firewall, or an HTTPS reverse proxy. Pairing and session-reset
+endpoints must never be exposed without access control.
 
 ---
 

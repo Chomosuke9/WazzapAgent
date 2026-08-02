@@ -212,10 +212,10 @@ function buildConfig(): Config {
   // The control panel is served by the Node gateway so it can operate on the
   // exact same per-tenant registry, repositories, and Baileys sockets. Static
   // assets and the setup-status probe remain reachable when no token is
-  // configured, but every management API stays fail-closed until a
-  // sufficiently long CONTROL_PANEL_TOKEN is supplied.
+  // configured, but every management API stays fail-closed until a non-empty
+  // CONTROL_PANEL_TOKEN is supplied.
   controlPanelEnabled: booleanEnv(process.env.CONTROL_PANEL_ENABLED, true),
-  controlPanelHost: process.env.CONTROL_PANEL_HOST || '127.0.0.1',
+  controlPanelHost: (process.env.CONTROL_PANEL_HOST || '').trim() || '127.0.0.1',
   controlPanelPort: positiveInt(process.env.CONTROL_PANEL_PORT, 8080),
   controlPanelToken: (process.env.CONTROL_PANEL_TOKEN || '').trim() || null,
   controlPanelMaxBodyBytes: positiveInt(

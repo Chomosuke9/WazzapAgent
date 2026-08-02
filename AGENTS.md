@@ -556,7 +556,7 @@ true = interactive card via sendRichMessage, mobile only),
 **Control panel:**
 `CONTROL_PANEL_ENABLED` (default true), `CONTROL_PANEL_HOST` (default
 `127.0.0.1`), `CONTROL_PANEL_PORT` (default 8080), `CONTROL_PANEL_TOKEN`
-(required for every API call; minimum 16 characters),
+(required and non-empty for every management API call; no length minimum),
 `CONTROL_PANEL_MAX_BODY_BYTES` (default 2097152). Without a valid token, only
 the static setup screen and non-sensitive setup-status probe are served; every
 management API fails closed.

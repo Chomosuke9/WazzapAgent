@@ -43,7 +43,6 @@ import { ControlPanelAuditLog } from './auditLog.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const MIN_TOKEN_LENGTH = 16;
 const AUTH_WINDOW_MS = 60_000;
 const AUTH_MAX_FAILURES = 10;
 
@@ -103,7 +102,7 @@ function json(
 }
 
 function tokenIsConfigured(token: string | null): token is string {
-  return Boolean(token && token.length >= MIN_TOKEN_LENGTH);
+  return Boolean(token?.trim());
 }
 
 function publicStickers(folderPath: string): Array<Record<string, unknown>> {
@@ -446,7 +445,9 @@ export function createControlPanelServer(
         const token = tokenProvider();
         json(res, 200, {
           configured: tokenIsConfigured(token),
-          minimumTokenLength: MIN_TOKEN_LENGTH,
+          tokenRequired: true,
+          host: config.controlPanelHost,
+          port: config.controlPanelPort,
         });
         return;
       }
@@ -457,7 +458,7 @@ export function createControlPanelServer(
       if (!tokenIsConfigured(token)) {
         throw new HttpError(
           503,
-          `Set CONTROL_PANEL_TOKEN to at least ${MIN_TOKEN_LENGTH} characters before using the API.`,
+          'Set CONTROL_PANEL_TOKEN to a non-empty value before using the API.',
           { code: 'setup_required' },
         );
       }
@@ -1041,16 +1042,23 @@ export function createControlPanelServer(
             values?: Record<string, string>;
             clearSecrets?: string[];
           }>(req, maxBodyBytes);
-          const requestedToken = body.values?.CONTROL_PANEL_TOKEN;
+          const requestedHost = body.values?.CONTROL_PANEL_HOST;
           if (
-            typeof requestedToken === 'string'
-            && requestedToken.trim().length > 0
-            && requestedToken.trim().length < MIN_TOKEN_LENGTH
+            typeof requestedHost === 'string'
+            && requestedHost.trim()
+            && (
+              requestedHost.trim().length > 255
+              || !/^[A-Za-z0-9._:%-]+$/.test(requestedHost.trim())
+            )
           ) {
-            throw new HttpError(
-              400,
-              `CONTROL_PANEL_TOKEN must contain at least ${MIN_TOKEN_LENGTH} characters.`,
-            );
+            throw new HttpError(400, 'CONTROL_PANEL_HOST must be an IP address or hostname.');
+          }
+          const requestedPort = body.values?.CONTROL_PANEL_PORT;
+          if (typeof requestedPort === 'string' && requestedPort.trim()) {
+            const port = Number(requestedPort);
+            if (!/^\d+$/.test(requestedPort.trim()) || port < 1 || port > 65535) {
+              throw new HttpError(400, 'CONTROL_PANEL_PORT must be between 1 and 65535.');
+            }
           }
           const result = await updateEnvironmentSettings(
             {
@@ -1087,7 +1095,7 @@ export function createControlPanelServer(
       const httpError = error instanceof HttpError
         ? error
         : new HttpError(500, errorMessage(error));
-      if (httpError.status >= 500) {
+      if (httpError.status >= 500 && httpError.detail?.code !== 'setup_required') {
         logger.error({ err: error, method, pathname }, 'control panel request failed');
       }
       json(res, httpError.status, {
@@ -1120,7 +1128,7 @@ export function startControlPanel(): Server {
     );
     if (!tokenIsConfigured(config.controlPanelToken)) {
       logger.warn(
-        `Control panel is in setup-only mode. Set CONTROL_PANEL_TOKEN to at least ${MIN_TOKEN_LENGTH} characters.`,
+        'Control panel is in setup-only mode. Set CONTROL_PANEL_TOKEN to a non-empty value.',
       );
     }
   });

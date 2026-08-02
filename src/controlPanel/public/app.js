@@ -774,15 +774,56 @@ async function renderSystem() {
   const data = await api('/api/system/environment');
   state.envFields = data.fields || [];
   const categories = [...new Set(state.envFields.map((field) => field.category))];
+  const hostField = state.envFields.find((field) => field.key === 'CONTROL_PANEL_HOST');
+  const portField = state.envFields.find((field) => field.key === 'CONTROL_PANEL_PORT');
+  const panelHost = hostField?.value || hostField?.defaultValue || '127.0.0.1';
+  const panelPort = portField?.value || portField?.defaultValue || '8080';
+  const hostPreset = ['127.0.0.1', '0.0.0.0'].includes(panelHost) ? panelHost : 'custom';
   content.innerHTML = `
     ${pageHeader('System', 'Edit the shared .env safely. Secret values are never returned to the browser.')}
+    <section class="panel spaced-panel">
+      <header class="panel-header"><div><h2>Control panel network</h2><p>Choose where the admin server listens after the next restart.</p></div><span class="badge warning">Restart</span></header>
+      <div class="panel-body"><div class="form-grid">
+        <label class="form-field"><span class="field-label">Access scope</span><select id="panel-host-preset"><option value="127.0.0.1" ${hostPreset === '127.0.0.1' ? 'selected' : ''}>This machine only</option><option value="0.0.0.0" ${hostPreset === '0.0.0.0' ? 'selected' : ''}>All IPv4 interfaces (Tailscale/LAN)</option><option value="custom" ${hostPreset === 'custom' ? 'selected' : ''}>Specific IP or hostname</option></select></label>
+        <label class="form-field"><span class="field-label">Host</span><input id="panel-host-custom" value="${escapeHtml(panelHost)}" placeholder="100.x.y.z or hostname"></label>
+        <label class="form-field"><span class="field-label">Port</span><input id="panel-port" type="number" min="1" max="65535" value="${escapeHtml(panelPort)}"></label>
+        <div class="form-field full"><p class="field-help">Use 0.0.0.0 to keep localhost and make the panel reachable through Tailscale/LAN. Use a specific Tailscale IP to listen only on that interface.</p><button id="save-panel-network" class="button primary" type="button">Save network settings</button></div>
+      </div></div>
+    </section>
     <div class="notice warning">Fields marked “Restart” are saved immediately but only take effect after restarting the relevant Node or Python process.</div>
     <section class="panel"><div class="panel-body"><div class="env-toolbar"><input id="env-search" type="search" placeholder="Search environment keys"><select id="env-category"><option value="">All categories</option>${categories.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join('')}</select><button id="save-env" class="button primary" type="button">Save changes</button></div><div id="env-list" class="env-list"></div></div></section>
   `;
+  const hostPresetInput = document.getElementById('panel-host-preset');
+  const customHostInput = document.getElementById('panel-host-custom');
+  const syncHostPreset = () => {
+    if (hostPresetInput.value !== 'custom') customHostInput.value = hostPresetInput.value;
+    customHostInput.disabled = hostPresetInput.value !== 'custom';
+  };
+  hostPresetInput.addEventListener('change', syncHostPreset);
+  syncHostPreset();
+  document.getElementById('save-panel-network').addEventListener('click', () => {
+    void saveControlPanelNetwork().catch((error) => toast(error.message, 'error'));
+  });
   renderEnvRows();
   document.getElementById('env-search').addEventListener('input', renderEnvRows);
   document.getElementById('env-category').addEventListener('change', renderEnvRows);
   document.getElementById('save-env').addEventListener('click', saveEnvironment);
+}
+
+async function saveControlPanelNetwork() {
+  const preset = document.getElementById('panel-host-preset').value;
+  const host = (preset === 'custom'
+    ? document.getElementById('panel-host-custom').value
+    : preset).trim();
+  const port = document.getElementById('panel-port').value.trim();
+  if (!host) throw new Error('Host is required.');
+  const data = await api('/api/system/environment', {
+    method: 'PUT',
+    body: { values: { CONTROL_PANEL_HOST: host, CONTROL_PANEL_PORT: port } },
+  });
+  state.envFields = data.fields || [];
+  toast('Network settings saved. Restart the gateway to apply the new bind address.');
+  await renderSystem();
 }
 
 function renderEnvRows() {

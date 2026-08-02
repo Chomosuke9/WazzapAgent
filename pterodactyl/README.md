@@ -74,7 +74,9 @@ heavy provisioning is cached (it re-runs only when `requirements.txt` changes).
    touch it (it's git-ignored), so it survives updates. The minimal set is:
    ```dotenv
    WA_PAIRING_NUMBER=6281234567890
-   CONTROL_PANEL_TOKEN=replace-with-at-least-16-random-characters
+   CONTROL_PANEL_HOST=127.0.0.1
+   CONTROL_PANEL_PORT=8080
+   CONTROL_PANEL_TOKEN=choose-a-private-token
    ASSISTANT_NAME=LLM
    BOT_OWNER_JIDS=628123456789
    LLM2_ENDPOINT=

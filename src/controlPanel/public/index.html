@@ -18,12 +18,12 @@
         <p id="login-copy" class="muted">Enter the admin token configured on this gateway.</p>
         <form id="login-form" class="stack">
           <label class="field-label" for="admin-token">Admin token</label>
-          <input id="admin-token" name="token" type="password" autocomplete="current-password" minlength="16" required>
+          <input id="admin-token" name="token" type="password" autocomplete="current-password" required>
           <button class="button primary full" type="submit">Unlock control panel</button>
         </form>
         <p id="login-error" class="form-error" role="alert"></p>
         <div id="setup-help" class="setup-help hidden">
-          Add <code>CONTROL_PANEL_TOKEN</code> with at least 16 characters to <code>.env</code>. The API remains locked until then.
+          Add a non-empty <code>CONTROL_PANEL_TOKEN</code> to <code>.env</code>. The API remains locked until then.
         </div>
       </div>
     </section>

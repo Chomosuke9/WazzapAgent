@@ -7,9 +7,12 @@ import os from 'node:os';
 
 import { createControlPanelServer } from '../../src/controlPanel/server.ts';
 
-const TOKEN = 'test-admin-token-1234';
+const TOKEN = 'x';
 
-async function startFixture(): Promise<{
+async function startFixture(
+  token: string | null = TOKEN,
+  listenHost = '127.0.0.1',
+): Promise<{
   baseUrl: string;
   envPath: string;
   close: () => Promise<void>;
@@ -29,17 +32,19 @@ async function startFixture(): Promise<{
       'LLM2_API_KEY=',
       '# Private chat switch',
       'PRIVATE_CHAT_ENABLED=true',
+      'CONTROL_PANEL_HOST=127.0.0.1',
+      'CONTROL_PANEL_PORT=8080',
       'CONTROL_PANEL_TOKEN=',
     ].join('\n'),
     'utf8',
   );
   const server = createControlPanelServer({
-    tokenProvider: () => TOKEN,
+    tokenProvider: () => token,
     envPath,
     examplePath,
     auditPath: path.join(folder, 'audit.jsonl'),
   });
-  server.listen(0, '127.0.0.1');
+  server.listen(0, listenHost);
   await once(server, 'listening');
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('HTTP server did not bind');
@@ -53,7 +58,7 @@ async function startFixture(): Promise<{
   };
 }
 
-test('control panel serves setup assets and keeps API bearer-protected', async () => {
+test('control panel accepts any non-empty token and keeps API bearer-protected', async () => {
   const fixture = await startFixture();
   try {
     const page = await fetch(`${fixture.baseUrl}/`);
@@ -63,7 +68,9 @@ test('control panel serves setup assets and keeps API bearer-protected', async (
     const status = await fetch(`${fixture.baseUrl}/api/auth/status`);
     assert.deepEqual(await status.json(), {
       configured: true,
-      minimumTokenLength: 16,
+      tokenRequired: true,
+      host: '127.0.0.1',
+      port: 8080,
     });
 
     const unauthorized = await fetch(`${fixture.baseUrl}/api/overview`);
@@ -75,6 +82,34 @@ test('control panel serves setup assets and keeps API bearer-protected', async (
     assert.equal(authorized.status, 200);
     const body = await authorized.json() as { health: { nodeGateway: string } };
     assert.equal(body.health.nodeGateway, 'online');
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('control panel remains setup-only when the token is empty', async () => {
+  const fixture = await startFixture('');
+  try {
+    const status = await fetch(`${fixture.baseUrl}/api/auth/status`);
+    assert.equal(status.status, 200);
+    assert.equal((await status.json() as { configured: boolean }).configured, false);
+
+    const management = await fetch(`${fixture.baseUrl}/api/overview`, {
+      headers: { Authorization: 'Bearer x' },
+    });
+    assert.equal(management.status, 503);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('control panel can bind all IPv4 interfaces for Tailscale or LAN access', async () => {
+  const fixture = await startFixture(TOKEN, '0.0.0.0');
+  try {
+    const response = await fetch(`${fixture.baseUrl}/api/overview`, {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    assert.equal(response.status, 200);
   } finally {
     await fixture.close();
   }
@@ -105,12 +140,28 @@ test('environment API masks secrets and updates only authenticated values', asyn
       restartRequired: true,
     });
 
-    const weakToken = await fetch(`${fixture.baseUrl}/api/system/environment`, {
+    const shortToken = await fetch(`${fixture.baseUrl}/api/system/environment`, {
       method: 'PUT',
       headers,
       body: JSON.stringify({ values: { CONTROL_PANEL_TOKEN: 'too-short' } }),
     });
-    assert.equal(weakToken.status, 400);
+    assert.equal(shortToken.status, 200);
+
+    const network = await fetch(`${fixture.baseUrl}/api/system/environment`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        values: { CONTROL_PANEL_HOST: '0.0.0.0', CONTROL_PANEL_PORT: '8088' },
+      }),
+    });
+    assert.equal(network.status, 200);
+
+    const invalidHost = await fetch(`${fixture.baseUrl}/api/system/environment`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ values: { CONTROL_PANEL_HOST: 'http://invalid' } }),
+    });
+    assert.equal(invalidHost.status, 400);
 
     const update = await fetch(`${fixture.baseUrl}/api/system/environment`, {
       method: 'PUT',
@@ -121,7 +172,10 @@ test('environment API masks secrets and updates only authenticated values', asyn
     const saved = await readFile(fixture.envPath, 'utf8');
     assert.match(saved, /PRIVATE_CHAT_ENABLED=false/);
     assert.match(saved, /LLM2_API_KEY=super-secret-value/);
-    assert.doesNotMatch(saved, /CONTROL_PANEL_TOKEN=too-short/);
+    assert.match(saved, /CONTROL_PANEL_TOKEN=too-short/);
+    assert.match(saved, /CONTROL_PANEL_HOST=0\.0\.0\.0/);
+    assert.match(saved, /CONTROL_PANEL_PORT=8088/);
+    assert.doesNotMatch(saved, /http:\/\/invalid/);
     assert.doesNotMatch(JSON.stringify(await update.json()), /super-secret-value/);
   } finally {
     await fixture.close();
