@@ -307,6 +307,28 @@ def _format_size(size_bytes: int) -> str:
     return f"{size_bytes / 1024:.1f} KB"
   return f"{size_bytes / (1024 * 1024):.1f} MB"
 
+def _file_digest(path: Path) -> bytes | None:
+  digest = hashlib.sha256()
+  try:
+    with path.open("rb") as handle:
+      for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+        digest.update(chunk)
+  except OSError:
+    return None
+  return digest.digest()
+
+def _existing_file_matches(path: Path, size_bytes: int, digest: bytes | None) -> bool:
+  if digest is None or path.is_symlink():
+    return False
+  try:
+    return (
+      path.is_file()
+      and path.stat().st_size == size_bytes
+      and _file_digest(path) == digest
+    )
+  except OSError:
+    return False
+
 def _stage_single_file(
   used_names: set[str],
   target_root: Path,
@@ -326,21 +348,38 @@ def _stage_single_file(
 
   Returns ``StagedFile`` on success; ``None`` on write/copy/traversal error.
   """
+  expected_digest = (
+    hashlib.sha256(data).digest()
+    if data is not None
+    else _file_digest(Path(source_path)) if source_path is not None else None
+  )
   final_name = safe_name
-  counter = 1
-  while final_name in used_names or (target_root / final_name).exists():
+  counter = 0
+  reuse_existing = False
+  while True:
+    dest = target_root / final_name
+    if final_name not in used_names:
+      if not dest.exists():
+        break
+      if _existing_file_matches(dest, size_bytes, expected_digest):
+        # Recovery and callback retries must resolve to the same path/name so
+        # their durable delivery-part key stays stable. Different files with
+        # the same name still take the normal _1, _2, ... collision path.
+        reuse_existing = True
+        break
+    counter += 1
     stem, ext = os.path.splitext(safe_name)
     final_name = f"{stem}_{counter}{ext}"
-    counter += 1
   used_names.add(final_name)
 
-  dest = target_root / final_name
   try:
     dest.resolve().relative_to(target_root.resolve())
   except ValueError:
     return None
 
-  if data is not None:
+  if reuse_existing:
+    pass
+  elif data is not None:
     try:
       dest.write_bytes(data)
     except OSError:

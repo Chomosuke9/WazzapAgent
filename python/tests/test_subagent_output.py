@@ -798,6 +798,42 @@ class TestStageOutputFilesFromContent:
     assert result.skipped[0].name == "video.mp4"
     assert result.skipped[0].reason == "file too large (607540207 bytes > 200 MB)"
 
+  def test_repeated_staging_reuses_identical_file_and_delivery_name(self, tmp_path):
+    encoded = base64.b64encode(b"same durable output").decode("ascii")
+    content = [{"name": "result.png", "content_base64": encoded}]
+
+    first = stage_output_files(
+      "sess_retry",
+      [],
+      files_content=content,
+      base_dir=tmp_path,
+    )
+    second = stage_output_files(
+      "sess_retry",
+      [],
+      files_content=content,
+      base_dir=tmp_path,
+    )
+
+    assert len(first.staged) == len(second.staged) == 1
+    assert first.staged[0].name == second.staged[0].name == "result.png"
+    assert first.staged[0].path == second.staged[0].path
+    assert sorted(path.name for path in (tmp_path / "sess_retry").iterdir()) == [
+      "result.png",
+    ]
+
+    changed = stage_output_files(
+      "sess_retry",
+      [],
+      files_content=[{
+        "name": "result.png",
+        "content_base64": base64.b64encode(b"different output").decode("ascii"),
+      }],
+      base_dir=tmp_path,
+    )
+    assert changed.staged[0].name == "result_1.png"
+    assert Path(first.staged[0].path).read_bytes() == b"same durable output"
+
   def test_collision_handling_in_files_content(self, tmp_path):
     data1 = base64.b64encode(b"content-one").decode("ascii")
     data2 = base64.b64encode(b"content-two").decode("ascii")
