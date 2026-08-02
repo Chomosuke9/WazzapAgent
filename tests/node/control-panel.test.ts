@@ -7,8 +7,10 @@ import os from 'node:os';
 
 import {
   createControlPanelServer,
+  type ControlPanelAccountRuntimeActions,
   type ControlPanelSystemActions,
 } from '../../src/controlPanel/server.ts';
+import { stopAccount } from '../../src/account/baileysFactory.ts';
 import type { ControlPanelSubagentActions } from '../../src/controlPanel/subagentOutboxClient.ts';
 import {
   ProjectUpdateError,
@@ -22,6 +24,7 @@ async function startFixture(
   listenHost = '127.0.0.1',
   systemActions?: ControlPanelSystemActions,
   subagentActions?: ControlPanelSubagentActions,
+  accountRuntimeActions?: ControlPanelAccountRuntimeActions,
 ): Promise<{
   baseUrl: string;
   envPath: string;
@@ -55,6 +58,7 @@ async function startFixture(
     auditPath: path.join(folder, 'audit.jsonl'),
     systemActions,
     subagentActions,
+    accountRuntimeActions,
   });
   server.listen(0, listenHost);
   await once(server, 'listening');
@@ -355,6 +359,80 @@ test('sub-agent outbox proxy lists, retries, discards, and audits callbacks', as
       .entries.map((item) => item.action);
     assert.ok(logActions.includes('subagent_callback_retried'));
     assert.ok(logActions.includes('subagent_callback_discarded'));
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('account API creates, pairs, persists, and removes an isolated tenant', async () => {
+  const pairCalls: Array<{ folderPath: string; phoneNumber: string }> = [];
+  const runtime: ControlPanelAccountRuntimeActions = {
+    pair: async (folderPath, phoneNumber) => {
+      pairCalls.push({ folderPath, phoneNumber });
+      return { code: 'ABCD-1234', generatedAtMs: 1_785_600_000_000 };
+    },
+    stop: (folderPath) => stopAccount(folderPath),
+  };
+  const fixture = await startFixture(
+    TOKEN,
+    '127.0.0.1',
+    undefined,
+    undefined,
+    runtime,
+  );
+  const headers = {
+    Authorization: `Bearer ${TOKEN}`,
+    'Content-Type': 'application/json',
+  };
+  try {
+    const created = await fetch(`${fixture.baseUrl}/api/accounts`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        name: 'Support Bot',
+        accountKey: 'support',
+        phoneNumber: '+62 812-3456-7890',
+      }),
+    });
+    assert.equal(created.status, 201);
+    const payload = await created.json() as {
+      account: { id: string; name: string; folderPath: string };
+      pairing: { code: string };
+    };
+    assert.equal(payload.account.name, 'Support Bot');
+    assert.match(payload.account.folderPath, /tenants[\\/]support$/);
+    assert.equal(payload.pairing.code, 'ABCD-1234');
+    assert.equal(pairCalls.length, 1);
+    assert.equal(pairCalls[0].phoneNumber, '6281234567890');
+
+    const listed = await fetch(`${fixture.baseUrl}/api/accounts`, { headers });
+    assert.equal(listed.status, 200);
+    const listPayload = await listed.json() as {
+      accounts: Array<{ id: string; name: string }>;
+      catalog: { managed: boolean; configuredCount: number };
+    };
+    assert.equal(listPayload.catalog.managed, true);
+    assert.equal(listPayload.catalog.configuredCount, 2);
+    assert.ok(listPayload.accounts.some((account) => account.name === 'Support Bot'));
+
+    const removed = await fetch(
+      `${fixture.baseUrl}/api/accounts/${encodeURIComponent(payload.account.id)}`,
+      {
+        method: 'DELETE',
+        headers,
+        body: JSON.stringify({ confirm: 'REMOVE' }),
+      },
+    );
+    assert.equal(removed.status, 200);
+    assert.equal((await removed.json() as { dataPreserved: boolean }).dataPreserved, true);
+
+    const after = await fetch(`${fixture.baseUrl}/api/accounts`, { headers });
+    const afterPayload = await after.json() as {
+      accounts: Array<{ id: string }>;
+      catalog: { configuredCount: number };
+    };
+    assert.equal(afterPayload.catalog.configuredCount, 1);
+    assert.equal(afterPayload.accounts.some((account) => account.id === payload.account.id), false);
   } finally {
     await fixture.close();
   }

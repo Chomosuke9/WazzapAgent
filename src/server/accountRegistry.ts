@@ -36,6 +36,18 @@ export const MAX_RELIABLE_QUEUE = 1000;
 const registry: Map<string, AccountEntry> = new Map();
 
 /**
+ * Accounts removed from the managed catalog during this process lifetime.
+ * Their bridge may race one final reconnect before its hot-reload poll sees
+ * the catalog change; the tombstone prevents that reconnect from recreating
+ * the tenant after the operator removed it.
+ */
+const blockedAccounts: Set<string> = new Set();
+
+function accountKey(folderPath: string): string {
+  return process.platform === 'win32' ? folderPath.toLowerCase() : folderPath;
+}
+
+/**
  * Return the existing entry for `folderPath`, creating a fresh one if absent.
  * Idempotent: repeated calls for the same `folderPath` return the same object.
  */
@@ -103,6 +115,21 @@ export function list(): AccountEntry[] {
 /** Remove the account entry entirely (dropping any queued reliable frames). */
 export function remove(folderPath: string): void {
   registry.delete(folderPath);
+}
+
+/** Temporarily reject a removed account's late bridge reconnects. */
+export function block(folderPath: string): void {
+  blockedAccounts.add(accountKey(folderPath));
+}
+
+/** Allow a newly-created/re-added account to bind again. */
+export function unblock(folderPath: string): void {
+  blockedAccounts.delete(accountKey(folderPath));
+}
+
+/** Return whether the account was removed during this process lifetime. */
+export function isBlocked(folderPath: string): boolean {
+  return blockedAccounts.has(accountKey(folderPath));
 }
 
 /** True when `client` is bound and its socket is OPEN. */

@@ -1,6 +1,6 @@
 {
   "name": "wazzapagents",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "compatibilityVersion": 1,
   "description": "WhatsApp → LLM gateway using Baileys v7 and outbound WebSocket to LLM service.",
   "main": "src/index.ts",

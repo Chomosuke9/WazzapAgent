@@ -11,6 +11,9 @@ import {
   sendReliableToClient,
   flushReliableQueue,
   remove,
+  block,
+  unblock,
+  isBlocked,
   MAX_RELIABLE_QUEUE,
 } from '../../src/server/accountRegistry.ts';
 
@@ -100,4 +103,13 @@ test('sendToClient with no client is a no-op (no throw, no enqueue)', () => {
     assert.equal(entry, undefined);
   }
   remove(folder);
+});
+
+test('removed-account tombstones block late reconnects until the tenant is re-added', () => {
+  const folder = '/tenants/readdable';
+  assert.equal(isBlocked(folder), false);
+  block(folder);
+  assert.equal(isBlocked(folder), true);
+  unblock(folder);
+  assert.equal(isBlocked(folder), false);
 });

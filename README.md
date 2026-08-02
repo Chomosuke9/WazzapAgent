@@ -196,10 +196,17 @@ PYTHONPATH=python python -m pytest python/tests -q   # Python tests
 
 ## Multiple accounts (optional)
 
-Run several WhatsApp accounts from one bridge process by pointing it at multiple
-tenant folders (`FOLDER_PATHS` or `ACCOUNTS_JSON`); each tenant is fully
-isolated under `<folder_path>/{auth,db,media,stickers}`. See
-[`.env.example`](./.env.example) and [AGENTS.md](./AGENTS.md) for details.
+Open **Accounts → Add account** in the control panel, enter a tenant name/ID and
+the WhatsApp phone number, then enter the generated pairing code in WhatsApp.
+The account becomes live without restarting Node or the Python bridge.
+
+The panel stores its catalog in the git-ignored `accounts.json`. Each account is
+fully isolated under `tenants/<id>/{auth,db,media,stickers}` and owns a stable
+callback port slot. Removing an account stops its runtime but deliberately keeps
+that tenant directory, so an accidental removal does not destroy auth or data.
+
+Manual `FOLDER_PATHS` and `ACCOUNTS_JSON` configuration remains supported for
+custom deployments; see [`.env.example`](./.env.example).
 
 ---
 

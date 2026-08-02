@@ -60,6 +60,8 @@ from .db import (
   clear_llm2_model_cache as db_clear_llm2_model_cache,
   reset_settings_connection as db_reset_settings_connection,
   invalidate_chat_caches as db_invalidate_chat_caches,
+  close_tenant_connections as db_close_tenant_connections,
+  checkpoint_tenant_dbs as db_checkpoint_tenant_dbs,
   close_all_connections as db_close_all_connections,
   checkpoint_all_dbs as db_checkpoint_all_dbs,
   clear_subagent_enabled_cache as db_clear_subagent_enabled_cache,
@@ -427,8 +429,12 @@ class AgentSession:
         logger.debug("Direct-invoke endpoint stop failed: %s", exc)
       # Flush dashboard stats and checkpoint DBs before shutting down
       self._dashboard.flush_to_db()
-      db_checkpoint_all_dbs()
-      db_close_all_connections()
+      if self.folder_path:
+        db_checkpoint_tenant_dbs(self.folder_path)
+        db_close_tenant_connections(self.folder_path)
+      else:
+        db_checkpoint_all_dbs()
+        db_close_all_connections()
       # Detach the queue handler so the webhook server doesn't write to a
       # closed socket between gateway connections.
       self.subagent_webhook.clear_queue_handler_if(self._queue_handler)

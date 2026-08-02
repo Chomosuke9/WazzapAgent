@@ -15,7 +15,12 @@ import {
   PairingCodeError,
   reconnectAccount,
   requestAccountPairingCode,
+  stopAccount,
 } from '../account/baileysFactory.js';
+import {
+  AccountCatalog,
+  AccountCatalogError,
+} from '../account/accountCatalog.js';
 import {
   BOT_CONFIG_KEYS,
   DEFAULT_ACTIVATION_MESSAGE,
@@ -74,12 +79,19 @@ export interface ControlPanelServerOptions extends EnvironmentStoreOptions {
   maxBodyBytes?: number;
   systemActions?: ControlPanelSystemActions;
   subagentActions?: ControlPanelSubagentActions;
+  accountCatalog?: AccountCatalog;
+  accountRuntimeActions?: ControlPanelAccountRuntimeActions;
 }
 
 export interface ControlPanelSystemActions {
   getUpdateStatus: (refresh?: boolean) => Promise<UpdateStatus>;
   update: (confirmCompatibilityChange?: boolean) => Promise<UpdateResult>;
   restart: () => void;
+}
+
+export interface ControlPanelAccountRuntimeActions {
+  pair: (folderPath: string, phoneNumber: string) => Promise<Record<string, unknown>>;
+  stop: (folderPath: string) => Promise<void>;
 }
 
 interface ErrorDetail {
@@ -278,6 +290,18 @@ function nullableString(value: unknown, maxLength: number, field: string): strin
 function booleanValue(value: unknown, field: string): boolean {
   if (typeof value !== 'boolean') throw new HttpError(400, `${field} must be boolean.`);
   return value;
+}
+
+function accountCatalogHttpError(error: unknown): HttpError {
+  if (!(error instanceof AccountCatalogError)) {
+    return new HttpError(500, errorMessage(error));
+  }
+  const status = error.code === 'account_not_found'
+    ? 404
+    : error.code === 'duplicate_account' || error.code === 'last_account'
+      ? 409
+      : 400;
+  return new HttpError(status, error.message, { code: error.code });
 }
 
 function integerValue(
@@ -496,6 +520,18 @@ export function createControlPanelServer(
     restart: () => scheduleProcessRestart(),
   };
   const subagentActions = options.subagentActions || createSubagentOutboxActions();
+  const accountCatalog = options.accountCatalog || new AccountCatalog({
+    envPath: options.envPath,
+    rootDir: options.envPath ? path.dirname(options.envPath) : process.cwd(),
+    environment: options.envPath ? {} : process.env,
+  });
+  const accountRuntimeActions = options.accountRuntimeActions || {
+    pair: (folderPath: string, phoneNumber: string) =>
+      requestAccountPairingCode(folderPath, phoneNumber) as unknown as Promise<
+        Record<string, unknown>
+      >,
+    stop: (folderPath: string) => stopAccount(folderPath),
+  };
   const authFailures = new Map<string, AuthFailureState>();
 
   const server = http.createServer(async (req, res) => {
@@ -596,8 +632,87 @@ export function createControlPanelServer(
         return;
       }
 
-      if (method === 'GET' && pathname === '/api/accounts') {
-        json(res, 200, { accounts: registry.list().map(accountSummary) });
+      if (pathname === '/api/accounts' && method === 'GET') {
+        const catalog = await accountCatalog.read();
+        json(res, 200, {
+          accounts: registry.list().map(accountSummary),
+          catalog: {
+            source: catalog.source,
+            managed: catalog.managed,
+            configuredCount: catalog.accounts.length,
+          },
+        });
+        return;
+      }
+
+      if (pathname === '/api/accounts' && method === 'POST') {
+        const body = await readJsonBody<{
+          accountKey?: unknown;
+          name?: unknown;
+          phoneNumber?: unknown;
+        }>(req, maxBodyBytes);
+        if (typeof body.accountKey !== 'string') {
+          throw new HttpError(400, 'accountKey is required.');
+        }
+        const name = nullableString(body.name, 80, 'name')?.trim();
+        if (!name) throw new HttpError(400, 'name is required.');
+        if (typeof body.phoneNumber !== 'string') {
+          throw new HttpError(400, 'phoneNumber is required.');
+        }
+        const phoneNumber = body.phoneNumber.replace(/\D/g, '');
+        if (phoneNumber.length < 8 || phoneNumber.length > 15) {
+          throw new HttpError(400, 'Use 8-15 phone digits including the country code.');
+        }
+
+        let added;
+        try {
+          added = await accountCatalog.add({ accountKey: body.accountKey });
+        } catch (error) {
+          throw accountCatalogHttpError(error);
+        }
+        const entry = registry.getOrCreate(added.account.folderPath);
+        registry.unblock(entry.folderPath);
+        ensureAccountPersistence(entry);
+        entry.repos!.settings.setBotConfig('control_panel_account_name', name);
+
+        let pairing: Record<string, unknown> | null = null;
+        let pairingError: ErrorDetail & { message: string } | null = null;
+        let restored = false;
+        try {
+          pairing = await accountRuntimeActions.pair(
+            entry.folderPath,
+            phoneNumber,
+          );
+        } catch (error) {
+          if (error instanceof PairingCodeError && error.code === 'already_linked') {
+            restored = true;
+          } else {
+            pairingError = error instanceof PairingCodeError
+            ? {
+                message: error.message,
+                code: error.code,
+                ...(error.retryAfterMs ? { retryAfterMs: error.retryAfterMs } : {}),
+              }
+            : { message: errorMessage(error), code: 'request_failed' };
+          }
+        }
+        const accountId = accountControlPanelId(entry.folderPath);
+        audit.record(
+          'account_created',
+          pairing || restored
+            ? restored
+              ? `Restored ${name} with its existing WhatsApp session.`
+              : `Created ${name} and generated its pairing code.`
+            : `Created ${name}; pairing still needs attention.`,
+          { accountId, outcome: pairing || restored ? 'success' : 'failure' },
+        );
+        json(res, 201, {
+          account: accountSummary(entry),
+          pairing,
+          pairingError,
+          restored,
+          dataPath: displayFolderPath(entry.folderPath),
+        });
         return;
       }
 
@@ -670,6 +785,28 @@ export function createControlPanelServer(
           accountId,
         });
         json(res, 200, accountSummary(entry));
+        return;
+      }
+      if (accountRoot && method === 'DELETE') {
+        const accountId = accountRoot[1];
+        const entry = accountFromId(accountId);
+        const body = await readJsonBody<{ confirm?: unknown }>(req, maxBodyBytes);
+        if (body.confirm !== 'REMOVE') {
+          throw new HttpError(400, 'Type REMOVE to confirm account removal.');
+        }
+        try {
+          await accountCatalog.remove(entry.folderPath);
+        } catch (error) {
+          throw accountCatalogHttpError(error);
+        }
+        registry.block(entry.folderPath);
+        await accountRuntimeActions.stop(entry.folderPath);
+        audit.record(
+          'account_removed',
+          'Removed account from runtime; tenant data was preserved.',
+          { accountId },
+        );
+        json(res, 200, { ok: true, dataPreserved: true });
         return;
       }
 

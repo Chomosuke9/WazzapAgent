@@ -836,6 +836,46 @@ export async function disconnectAccount(folderPath: string): Promise<void> {
 }
 
 /**
+ * Stop one tenant without deleting its auth, databases, media, or stickers.
+ * Used when an operator removes the account from the managed catalog. The
+ * bridge client is closed and the in-memory registry entry is released; a
+ * catalog tombstone in accountRegistry guards the brief hot-reload race.
+ */
+export async function stopAccount(folderPath: string): Promise<void> {
+  const entry = registry.get(folderPath);
+  if (!entry) return;
+
+  const previous = detachSocket(entry);
+  if (previous) {
+    try {
+      previous.end(new Error("Account removed from managed catalog"));
+    } catch (err) {
+      logger.debug({ err, folderPath }, "removed account socket was already closed");
+    }
+  }
+
+  const client = entry.client;
+  if (client) {
+    registry.unbindClient(folderPath, client);
+    try {
+      client.close(1000, "account removed");
+    } catch (err) {
+      logger.debug({ err, folderPath }, "removed account bridge was already closed");
+    }
+  }
+
+  try {
+    entry.database?.close();
+  } catch (err) {
+    logger.warn({ err, folderPath }, "failed closing removed account database");
+  }
+  entry.database = undefined;
+  entry.repos = undefined;
+  registry.remove(folderPath);
+  logger.info({ folderPath }, "account runtime stopped; tenant data preserved");
+}
+
+/**
  * Resolve every configured owner *phone number* to its WhatsApp LID and register
  * it for owner detection. WhatsApp addresses group senders by an opaque LID, so
  * a phone-number-only BOT_OWNER_JIDS would otherwise never match in groups.

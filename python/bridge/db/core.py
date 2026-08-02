@@ -1009,6 +1009,55 @@ def close_all_connections() -> None:
   logger.info('All SQLite connections closed')
 
 
+def _connection_belongs_to_tenant(db_path: str, folder_path: str) -> bool:
+  try:
+    return Path(db_path).resolve().parent == (Path(folder_path).resolve() / 'db')
+  except (OSError, ValueError):
+    return False
+
+
+def _clear_tenant_caches(folder_path: str) -> None:
+  tenant = str(Path(folder_path).resolve())
+  with _cache_lock:
+    for cache in (
+      _prompt_cache,
+      _permission_cache,
+      _mode_cache,
+      _triggers_cache,
+      _subagent_enabled_cache,
+      _memory_cache,
+      _mute_cache,
+      _llm2_model_cache,
+    ):
+      for key in list(cache):
+        if isinstance(key, tuple) and key and key[0] == tenant:
+          cache.pop(key, None)
+    _default_llm2_model_cache.pop(tenant, None)
+
+
+def close_tenant_connections(folder_path: str) -> None:
+  """Close only one tenant's handles during a hot account removal."""
+  store = _conn_store()
+  closed = 0
+  for key, conn in list(store.items()):
+    _kind, db_path = key
+    if not _connection_belongs_to_tenant(db_path, folder_path):
+      continue
+    if conn is not None:
+      try:
+        conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+        conn.close()
+      except Exception:
+        try:
+          conn.close()
+        except Exception:
+          pass
+    store.pop(key, None)
+    closed += 1
+  _clear_tenant_caches(folder_path)
+  logger.info('Tenant SQLite connections closed folder_path=%s count=%s', folder_path, closed)
+
+
 def checkpoint_all_dbs() -> None:
   """Checkpoint WAL files for all open databases (every tenant) to keep them
   small and reduce the risk of corruption after unclean shutdowns.
@@ -1022,6 +1071,19 @@ def checkpoint_all_dbs() -> None:
       logger.debug('WAL checkpoint completed for %s (%s)', kind, path)
     except Exception as exc:
       logger.warning('WAL checkpoint failed for %s (%s): %s', kind, path, exc)
+
+
+def checkpoint_tenant_dbs(folder_path: str) -> None:
+  """Checkpoint only the tenant being stopped; other accounts stay live."""
+  store = _conn_store()
+  for (kind, db_path), conn in list(store.items()):
+    if conn is None or not _connection_belongs_to_tenant(db_path, folder_path):
+      continue
+    try:
+      conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+      logger.debug('Tenant WAL checkpoint completed for %s (%s)', kind, db_path)
+    except Exception as exc:
+      logger.warning('Tenant WAL checkpoint failed for %s (%s): %s', kind, db_path, exc)
 
 
 # ---------------------------------------------------------------------------

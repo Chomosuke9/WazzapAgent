@@ -237,6 +237,16 @@ async function handleHello(ws: ServerClient, frame: InboundFrame): Promise<void>
     return;
   }
 
+  if (registry.isBlocked(folderPath)) {
+    logger.info({ folderPath }, 'rejecting bridge hello for a removed account');
+    try {
+      ws.close(1008, 'account removed');
+    } catch {
+      /* socket may already be closing */
+    }
+    return;
+  }
+
   try {
     // Delegated: account/socket creation + tenant folder layout (CONTRACT.md §8).
     const entry = await createOrResumeAccount({ folderPath });

@@ -55,6 +55,8 @@ from .core import (
     invalidate_chat_caches as invalidate_chat_caches,
     close_all_connections as close_all_connections,
     checkpoint_all_dbs as checkpoint_all_dbs,
+    close_tenant_connections as close_tenant_connections,
+    checkpoint_tenant_dbs as checkpoint_tenant_dbs,
     _tenant_key as _tenant_key,
     _tenant_cache_key as _tenant_cache_key,
     _db_resilient as _db_resilient,

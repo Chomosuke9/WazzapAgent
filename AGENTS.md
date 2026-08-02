@@ -100,6 +100,7 @@ src/                          Node.js gateway runtime (WS SERVER, TypeScript)
     auditLog.ts               Persistent bounded JSONL control-panel audit trail
     public/                   Framework-free responsive dashboard (HTML/CSS/JS)
   account/                    Per-tenant aggregate (one AccountEntry per folder_path)
+    accountCatalog.ts         Persistent managed catalog + stable runtime slots
     baileysFactory.ts         Create/resume the per-tenant Baileys socket + dirs; owns Database + repos
     accountContext.ts         Per-account caches / identifiers / sendQueue / forwarder / repos
     actionDispatcher.ts       Dispatch Python→Node actions for one account (per-action handlers)
@@ -188,8 +189,9 @@ python/                       Python bridge + WaSocket SDK (WS CLIENTS)
     protocol.py / events.py   Frame dataclasses (§6) + WhatsAppMessage model (§7)
     correlation.py / errors.py requestId correlation + WaSocketError hierarchy (§2/§3)
   bridge/
-    main.py                   Boot: load accounts, gather one AgentSession per account
-    accounts.py               Multi-account config loader (ACCOUNTS_JSON/FOLDER_PATHS)
+    main.py                   Boot: run the hot-reload account supervisor
+    account_supervisor.py     Add/remove AgentSessions as the catalog changes
+    accounts.py               Multi-account config loader (managed/JSON/env)
     config.py                 Single config source (env reads, debounce/burst constants)
     session.py                AgentSession: thin composition root — builds & wires agent/ collaborators
     log.py                    Structured logging setup
@@ -498,12 +500,15 @@ See `.env.example` for the complete reference.
 | `WS_LISTEN_PORT` | Node server listen port (the gateway binds a ws server here). Default `3000`. |
 | `NODE_URL` | URL each Python `WaSocket` client dials. Default `ws://localhost:3000`. |
 
-**Accounts / multi-tenant (Python side):**
+**Accounts / multi-tenant:**
 `ACCOUNTS_JSON` (path to a JSON accounts file; per-account `node_url` overrides
 `NODE_URL`), `FOLDER_PATHS` (comma-separated tenant folders sharing `NODE_URL`),
 `FOLDER_PATH` (single-account fallback; or `DATA_DIR`, or repo default
 `data`). Each tenant folder is `<folder_path>/{auth,db,media,stickers}`
-(CONTRACT.md §8). Resolution order: `ACCOUNTS_JSON` → `FOLDER_PATHS` →
+(CONTRACT.md §8). The control panel can also maintain a marker-gated
+`./accounts.json`; it is hot-reloaded without a process restart and persists a
+stable `slot` for each account's webhook/direct-invoke port. Resolution order:
+explicit `ACCOUNTS_JSON` → managed `./accounts.json` → `FOLDER_PATHS` →
 single-account fallback.
 
 **Node Gateway:**

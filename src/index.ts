@@ -20,6 +20,7 @@ import {
   ensureFolderLayout,
   openAccountPersistence,
 } from './account/baileysFactory.js';
+import { loadConfiguredAccounts } from './account/accountCatalog.js';
 import { startWsServer } from './server/wsServer.js';
 import { initCommandRegistry } from './wa/command/CommandRegistry.js';
 import { initButtonRegistry } from './wa/command/ButtonRegistry.js';
@@ -42,14 +43,22 @@ function closeAllAccountDbs(): void {
 }
 
 async function bootstrap(): Promise<void> {
-  // Boot the default tenant (config.dataDir): create its AccountEntry and open
-  // its per-tenant Database under `<dataDir>/db` so the single-account default
-  // works exactly as before from the user's perspective. The Baileys socket is
-  // still created lazily on the Python client's `hello` (createOrResumeAccount
-  // reuses this already-open Database).
-  const defaultEntry = registry.getOrCreate(config.dataDir);
-  const layout = ensureFolderLayout(config.dataDir);
-  openAccountPersistence(defaultEntry, layout.dbDir);
+  // Pre-register every configured tenant so the control panel remains useful
+  // even while the Python bridge is offline. WhatsApp sockets are still built
+  // lazily by a bridge `hello` or an explicit panel pairing request.
+  const accountCatalog = await loadConfiguredAccounts();
+  for (const account of accountCatalog.accounts) {
+    const entry = registry.getOrCreate(account.folderPath);
+    const layout = ensureFolderLayout(account.folderPath);
+    openAccountPersistence(entry, layout.dbDir);
+  }
+  logger.info(
+    {
+      count: accountCatalog.accounts.length,
+      source: accountCatalog.source,
+    },
+    'configured account catalog loaded',
+  );
 
   // Auto-discover and register all slash command handlers before accepting any
   // client connection, so the registry is fully populated before dispatch.

@@ -3,6 +3,7 @@ const state = {
   page: 'overview',
   overview: null,
   accounts: [],
+  accountCatalog: null,
   selectedAccountId: sessionStorage.getItem('wazzap_account_id') || '',
   chatList: [],
   chatModels: [],
@@ -307,6 +308,7 @@ function bindPairForm(onDone = renderPage) {
 async function refreshAccounts() {
   const data = await api('/api/accounts');
   state.accounts = data.accounts || [];
+  state.accountCatalog = data.catalog || null;
   ensureSelectedAccount();
 }
 
@@ -390,17 +392,98 @@ async function renderAccounts() {
           <button class="button secondary small account-config" data-id="${escapeHtml(account.id)}" type="button">Configure</button>
           <button class="button secondary small account-reconnect" data-id="${escapeHtml(account.id)}" type="button">Reconnect</button>
           ${account.linked ? `<button class="button danger small account-disconnect" data-id="${escapeHtml(account.id)}" type="button">Disconnect</button>` : `<button class="button primary small account-pair" data-id="${escapeHtml(account.id)}" type="button">Pair now</button>`}
+          ${state.accounts.length > 1 ? `<button class="button danger small account-remove" data-id="${escapeHtml(account.id)}" type="button">Remove account</button>` : ''}
         </div></td>
       </tr>`).join('')
     : '<tr><td colspan="6"><div class="empty-state">No accounts available.</div></td></tr>';
   content.innerHTML = `
-    ${pageHeader('Accounts', 'Manage tenant identity, sockets, and WhatsApp sessions.')}
+    ${pageHeader('Accounts', 'Manage tenant identity, sockets, and WhatsApp sessions.', '<button id="add-account" class="button primary" type="button">Add account</button>')}
     <section class="panel"><header class="panel-header"><div><h2>Tenant accounts</h2><p>Each account keeps isolated auth, databases, media, and stickers.</p></div></header><div class="table-wrap"><table><thead><tr><th>Account</th><th>WhatsApp</th><th>Phone</th><th>Python</th><th>Queue</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table></div></section>
   `;
+  document.getElementById('add-account').addEventListener('click', showAddAccountModal);
   document.querySelectorAll('.account-pair').forEach((button) => button.addEventListener('click', () => showPairModal(button.dataset.id)));
   document.querySelectorAll('.account-reconnect').forEach((button) => button.addEventListener('click', () => reconnectFromUi(button.dataset.id, button)));
   document.querySelectorAll('.account-disconnect').forEach((button) => button.addEventListener('click', () => showDisconnectModal(button.dataset.id)));
   document.querySelectorAll('.account-config').forEach((button) => button.addEventListener('click', () => showAccountConfig(button.dataset.id)));
+  document.querySelectorAll('.account-remove').forEach((button) => button.addEventListener('click', () => showRemoveAccountModal(button.dataset.id)));
+}
+
+function accountKeyFromName(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+}
+
+function showAddAccountModal() {
+  openModal(
+    'Add WhatsApp account',
+    'A separate tenant folder, databases, session, and bridge runtime will be created.',
+    `<div class="form-grid">
+      <label class="form-field"><span class="field-label">Account name</span><input id="new-account-name" maxlength="80" placeholder="Customer support" autocomplete="off" required></label>
+      <label class="form-field"><span class="field-label">Account ID</span><input id="new-account-key" maxlength="48" placeholder="customer-support" autocomplete="off" required><span class="field-help">Lowercase letters, numbers, _ or -. Stored under tenants/&lt;id&gt;.</span></label>
+      <label class="form-field full"><span class="field-label">WhatsApp number</span><input id="new-account-phone" inputmode="tel" autocomplete="tel" placeholder="6281234567890" required><span class="field-help">The pairing code is generated immediately after creation.</span></label>
+      <div class="notice full">Removing an account later does not delete its auth, databases, media, or stickers.</div>
+    </div>`,
+    {
+      confirmText: 'Create and pair',
+      onConfirm: async (root) => {
+        const name = root.querySelector('#new-account-name').value.trim();
+        const accountKey = root.querySelector('#new-account-key').value.trim();
+        const phoneNumber = root.querySelector('#new-account-phone').value.trim();
+        const response = await api('/api/accounts', {
+          method: 'POST',
+          body: { name, accountKey, phoneNumber },
+        });
+        const accountId = response.account.id;
+        if (response.pairing) state.pairingResults.set(accountId, response.pairing);
+        state.selectedAccountId = accountId;
+        sessionStorage.setItem('wazzap_account_id', accountId);
+        await renderAccounts();
+        if (response.restored) {
+          toast('Account restored with its existing WhatsApp session.');
+        } else if (response.pairingError) {
+          toast(`Account created, but pairing needs retry: ${response.pairingError.message}`, 'error');
+        } else {
+          toast('Account created and pairing code generated.');
+        }
+        if (!response.restored) setTimeout(() => showPairModal(accountId), 0);
+      },
+    },
+  );
+  const nameInput = document.getElementById('new-account-name');
+  const keyInput = document.getElementById('new-account-key');
+  let keyEdited = false;
+  keyInput.addEventListener('input', () => { keyEdited = true; });
+  nameInput.addEventListener('input', () => {
+    if (!keyEdited) keyInput.value = accountKeyFromName(nameInput.value);
+  });
+}
+
+function showRemoveAccountModal(accountId) {
+  const account = state.accounts.find((item) => item.id === accountId);
+  openModal(
+    'Remove account',
+    'The runtime stops, but every tenant file is retained on disk.',
+    `<div class="notice warning">Remove ${escapeHtml(account?.name || 'this account')} from the managed account catalog?</div><label class="field-label" for="remove-account-confirm">Type REMOVE to continue</label><input id="remove-account-confirm" autocomplete="off">`,
+    {
+      danger: true,
+      confirmText: 'Remove account',
+      onConfirm: async (root) => {
+        const confirm = root.querySelector('#remove-account-confirm').value;
+        await api(`/api/accounts/${encodeURIComponent(accountId)}`, {
+          method: 'DELETE',
+          body: { confirm },
+        });
+        state.pairingResults.delete(accountId);
+        if (state.selectedAccountId === accountId) state.selectedAccountId = '';
+        toast('Account removed. Its tenant data is still on disk.');
+        await renderAccounts();
+      },
+    },
+  );
 }
 
 function showPairModal(accountId) {
