@@ -799,10 +799,25 @@ Messages from muted users are completely invisible to LLM1/LLM2.
   stickers, masked environment configuration, and its audit log. Repository
   changes emit the same reliable invalidation frames used by slash commands so
   the Python bridge observes them without a restart where supported.
+- Chat scope labels come from the tenant's `chat_directory` table in
+  `settings.db`. The gateway updates it from normal inbound traffic and group
+  metadata already fetched for message processing; control-panel list requests
+  must not trigger a WhatsApp-wide metadata fetch.
+- `llm_models.is_default` is the default-model source of truth. Never implement
+  default selection by changing `sort_order`; order is a non-negative visual
+  sequence and is normalized during schema initialization.
+- System settings are grouped into clickable sections. Restart sends SIGTERM to
+  the Node process so `start.sh` restarts Node and Python together. Updates use
+  fetch plus a fast-forward-only merge and refuse dirty/diverged worktrees.
+  `package.json.compatibilityVersion` must be incremented whenever an update may
+  require manual environment, dependency, database, or deployment changes;
+  cross-version updates require explicit control-panel confirmation.
 - Pairing uses Baileys' native `requestPairingCode(phoneNumber)` only after the
   socket emits a QR-ready state. Requests are serialized, cooldown-limited,
   and recent codes are reused to avoid accidental retry loops. The code itself
   is returned only to the authenticated request and is never written to logs.
+  The terminal QR is rendered once per socket generation rather than on every
+  Baileys QR refresh.
 - **Security / fail-closed:** every management/data API uses a constant-time
   bearer token comparison and per-IP failed-auth throttling. The public
   `/api/auth/status` probe returns only whether setup is complete. The server binds loopback

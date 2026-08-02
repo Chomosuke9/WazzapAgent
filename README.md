@@ -125,15 +125,30 @@ From the panel you can:
 - reconnect or explicitly disconnect a WhatsApp session;
 - edit chat/default settings, prompts, memories, models, activation codes,
   tenant-wide bot config, and sticker catalogs;
-- edit the shared `.env` with secret values masked and restart-only fields
-  marked; and
+- use locally persisted chat/group names for scopes without a live metadata
+  sweep;
+- edit the shared `.env` through focused System sections with secret values
+  masked and restart-only fields marked;
+- check the installed/upstream application and compatibility versions, then
+  safely fast-forward update or restart both supervised services; and
 - review the persistent control-panel audit trail.
+
+The terminal renders only the first QR emitted by each unregistered socket, so
+long-running logs are not flooded by Baileys' ~20-second QR refresh. Request a
+fresh native code from the panel or explicitly reconnect the account when the
+first QR expires.
+
+`package.json` carries an application `version` and a separate
+`compatibilityVersion`. The latter must be incremented when an update may need
+manual environment, dependency, database, or deployment changes. The panel
+blocks silent cross-compatibility updates and presents an explicit warning.
 
 The server binds loopback by default. Set `CONTROL_PANEL_HOST=0.0.0.0` to keep
 localhost access and also listen on Tailscale/LAN, then open
 `http://<tailscale-ip>:8080` from the other device. Set it to the server's exact
 Tailscale IP to restrict the listener to that interface. Host and port can also
-be changed from **System → Control panel network**; restart the gateway after
+be changed from **System → Control panel network**; use **System → Runtime &
+updates → Restart services** after
 saving. When reachable from another device, keep the token private and use
 Tailscale ACLs, a firewall, or an HTTPS reverse proxy. Pairing and session-reset
 endpoints must never be exposed without access control.

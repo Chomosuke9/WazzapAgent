@@ -608,10 +608,14 @@ class Database {
       ) {
         const legacyLlmColumns = getColumns(legacy!, "llm_models");
         const hasVisionSupport = legacyLlmColumns.has("vision_support");
+        const hasDefaultFlag = legacyLlmColumns.has("is_default");
         const llmRows = queryRows(
           legacy!,
           `
-          SELECT model_id, display_name, description, COALESCE(is_active, 1) AS is_active, COALESCE(sort_order, 0) AS sort_order${hasVisionSupport ? ", COALESCE(vision_support, 0) AS vision_support" : ", 0 AS vision_support"}
+          SELECT model_id, display_name, description,
+                 COALESCE(is_active, 1) AS is_active,
+                 ${hasDefaultFlag ? "COALESCE(is_default, 0)" : "0"} AS is_default,
+                 COALESCE(sort_order, 0) AS sort_order${hasVisionSupport ? ", COALESCE(vision_support, 0) AS vision_support" : ", 0 AS vision_support"}
           FROM llm_models
         `,
         );
@@ -619,17 +623,31 @@ class Database {
           for (const row of llmRows) {
             this.settingsState.db!.run(
               `
-              INSERT OR REPLACE INTO llm_models (model_id, display_name, description, is_active, sort_order, vision_support)
-              VALUES (?, ?, ?, ?, ?, ?)
+              INSERT OR REPLACE INTO llm_models (model_id, display_name, description, is_active, is_default, sort_order, vision_support)
+              VALUES (?, ?, ?, ?, ?, ?, ?)
             `,
               [
                 row.model_id,
                 row.display_name,
                 row.description,
                 row.is_active,
+                row.is_default,
                 row.sort_order,
                 row.vision_support,
               ],
+            );
+          }
+          const firstActive = queryRows<{ model_id: string }>(
+            this.settingsState.db!,
+            `SELECT model_id FROM llm_models
+             WHERE is_active = 1
+             ORDER BY is_default DESC, sort_order ASC, model_id COLLATE NOCASE ASC
+             LIMIT 1`,
+          )[0];
+          if (firstActive) {
+            this.settingsState.db!.run(
+              "UPDATE llm_models SET is_default = CASE WHEN model_id = ? THEN 1 ELSE 0 END",
+              [firstActive.model_id],
             );
           }
         });

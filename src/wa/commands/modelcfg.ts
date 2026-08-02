@@ -195,10 +195,7 @@ async function handleModelcfg({ chatId, senderId: _senderId, args, folderPath = 
         } catch (err) { /* ignore */ }
         return;
       }
-      // Default = the model with the smallest sort_order; nudge this one below
-      // the current minimum (mirrors setDefaultModel used by the button menu).
-      const minOrder = Math.min(...models.map((m) => m.sortOrder));
-      repos!.model.updateModel(modelId, { sortOrder: minOrder - 1 });
+      repos!.model.setDefaultModel(modelId);
       registry.sendReliableToClient(folderPath, { type: 'invalidate_default_model', folderPath });
       try {
         await sock.sendMessage(chatId, { text: `Model "${model.displayName}" set as default.` });
@@ -584,7 +581,7 @@ async function showModelSelectionForDefault(sock: WASocket, ctx: AccountContext,
         buttonParamsJson: JSON.stringify({ title: "Select Default", sections }),
       },
     ],
-    { footer: "Model with smallest order will be used as default" },
+    { footer: "Default selection does not change model order" },
   );
 }
 
@@ -595,9 +592,7 @@ async function setDefaultModel(sock: WASocket, ctx: AccountContext, folderPath: 
     await sock.sendMessage(chatId, { text: `Model "${modelId}" not found.` });
     return;
   }
-  const allModels = ctx.repos!.model.getAllModels();
-  const minOrder = Math.min(...allModels.map((m) => m.sortOrder));
-  ctx.repos!.model.updateModel(modelId, { sortOrder: minOrder - 1 });
+  ctx.repos!.model.setDefaultModel(modelId);
   registry.sendReliableToClient(folderPath, { type: "invalidate_default_model", folderPath });
   await sock.sendMessage(chatId, {
     text: `Model "${model.displayName}" set as default.`,

@@ -118,6 +118,7 @@ from .models_repository import (
     add_model as add_model,
     update_model as update_model,
     delete_model as delete_model,
+    set_default_model as set_default_model,
 )
 from .moderation_repository import (
     add_mute as add_mute,

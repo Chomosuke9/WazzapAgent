@@ -5,13 +5,21 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 
-import { createControlPanelServer } from '../../src/controlPanel/server.ts';
+import {
+  createControlPanelServer,
+  type ControlPanelSystemActions,
+} from '../../src/controlPanel/server.ts';
+import {
+  ProjectUpdateError,
+  type UpdateStatus,
+} from '../../src/system/updateManager.ts';
 
 const TOKEN = 'x';
 
 async function startFixture(
   token: string | null = TOKEN,
   listenHost = '127.0.0.1',
+  systemActions?: ControlPanelSystemActions,
 ): Promise<{
   baseUrl: string;
   envPath: string;
@@ -43,6 +51,7 @@ async function startFixture(
     envPath,
     examplePath,
     auditPath: path.join(folder, 'audit.jsonl'),
+    systemActions,
   });
   server.listen(0, listenHost);
   await once(server, 'listening');
@@ -53,8 +62,31 @@ async function startFixture(
     envPath,
     close: async () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
-      await rm(folder, { recursive: true, force: true });
+      await rm(folder, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 25,
+      });
     },
+  };
+}
+
+function updateStatus(overrides: Partial<UpdateStatus> = {}): UpdateStatus {
+  return {
+    checkedAt: '2026-08-02T00:00:00.000Z',
+    repositoryAvailable: true,
+    upstream: 'origin/main',
+    dirty: false,
+    ahead: 0,
+    behind: 1,
+    updateAvailable: true,
+    canUpdate: true,
+    compatibilityChanged: false,
+    current: { version: '1.1.0', compatibilityVersion: '1', commit: 'abc' },
+    available: { version: '1.2.0', compatibilityVersion: '1', commit: 'def' },
+    message: '1 update commit available.',
+    ...overrides,
   };
 }
 
@@ -177,6 +209,82 @@ test('environment API masks secrets and updates only authenticated values', asyn
     assert.match(saved, /CONTROL_PANEL_PORT=8088/);
     assert.doesNotMatch(saved, /http:\/\/invalid/);
     assert.doesNotMatch(JSON.stringify(await update.json()), /super-secret-value/);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('system restart and update actions are authenticated and compatibility-gated', async () => {
+  let restartCalls = 0;
+  let confirmed = false;
+  const compatibilityStatus = updateStatus({
+    compatibilityChanged: true,
+    current: { version: '1.1.0', compatibilityVersion: '1', commit: 'abc' },
+    available: { version: '2.0.0', compatibilityVersion: '2', commit: 'def' },
+  });
+  const actions: ControlPanelSystemActions = {
+    getUpdateStatus: async () => compatibilityStatus,
+    update: async (confirmCompatibilityChange = false) => {
+      if (!confirmCompatibilityChange) {
+        throw new ProjectUpdateError(
+          'compatibility_change',
+          'Compatibility confirmation required.',
+          compatibilityStatus,
+        );
+      }
+      confirmed = true;
+      return {
+        updated: true,
+        previousCommit: 'abc',
+        currentCommit: 'def',
+        status: updateStatus({
+          behind: 0,
+          updateAvailable: false,
+          canUpdate: false,
+          compatibilityChanged: false,
+          current: { version: '2.0.0', compatibilityVersion: '2', commit: 'def' },
+          available: { version: '2.0.0', compatibilityVersion: '2', commit: 'def' },
+          message: 'Up to date.',
+        }),
+      };
+    },
+    restart: () => { restartCalls += 1; },
+  };
+  const fixture = await startFixture(TOKEN, '127.0.0.1', actions);
+  const headers = {
+    Authorization: `Bearer ${TOKEN}`,
+    'Content-Type': 'application/json',
+  };
+  try {
+    const status = await fetch(`${fixture.baseUrl}/api/system/update-status?refresh=1`, { headers });
+    assert.equal(status.status, 200);
+    assert.equal((await status.json() as UpdateStatus).compatibilityChanged, true);
+
+    const blocked = await fetch(`${fixture.baseUrl}/api/system/update`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ confirmCompatibilityChange: false }),
+    });
+    assert.equal(blocked.status, 409);
+    assert.equal((await blocked.json() as { code: string }).code, 'compatibility_change');
+    assert.equal(restartCalls, 0);
+
+    const accepted = await fetch(`${fixture.baseUrl}/api/system/update`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ confirmCompatibilityChange: true }),
+    });
+    assert.equal(accepted.status, 200);
+    assert.equal(confirmed, true);
+    assert.equal(restartCalls, 1, 'successful update schedules one restart');
+
+    const restart = await fetch(`${fixture.baseUrl}/api/system/restart`, {
+      method: 'POST',
+      headers,
+      body: '{}',
+    });
+    assert.equal(restart.status, 202);
+    assert.equal(restartCalls, 2);
   } finally {
     await fixture.close();
   }

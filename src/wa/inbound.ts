@@ -361,6 +361,15 @@ async function handleIncomingMessage(
   }
   const contextMsgId = normalizeContextMsgId(precomputedContextMsgId) || ensureContextMsgId(ctx, chatId, msg.key.id!);
   const chatName = isGroup ? (group?.name || chatId) : chatId;
+  if (
+    !isGroup
+    && !fromMe
+    && senderDisplay
+    && senderDisplay !== senderId
+    && senderDisplay !== chatId
+  ) {
+    ctx.repos?.settings.upsertChatDirectory(chatId, senderDisplay, "private");
+  }
 
   const { contentType, message: innerMessage } = unwrapMessage(msg.message);
   if (!contentType || !innerMessage) {

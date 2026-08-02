@@ -40,6 +40,15 @@ import {
 } from './envStore.js';
 import type { EnvironmentStoreOptions } from './envStore.js';
 import { ControlPanelAuditLog } from './auditLog.js';
+import {
+  ProjectUpdateError,
+  ProjectUpdateManager,
+  scheduleProcessRestart,
+} from '../system/updateManager.js';
+import type {
+  UpdateResult,
+  UpdateStatus,
+} from '../system/updateManager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -56,6 +65,13 @@ export interface ControlPanelServerOptions extends EnvironmentStoreOptions {
   publicDir?: string;
   auditPath?: string;
   maxBodyBytes?: number;
+  systemActions?: ControlPanelSystemActions;
+}
+
+export interface ControlPanelSystemActions {
+  getUpdateStatus: (refresh?: boolean) => Promise<UpdateStatus>;
+  update: (confirmCompatibilityChange?: boolean) => Promise<UpdateResult>;
+  restart: () => void;
 }
 
 interface ErrorDetail {
@@ -91,7 +107,7 @@ function sendSecurityHeaders(res: ServerResponse): void {
 function json(
   res: ServerResponse,
   status: number,
-  body: Record<string, unknown> | unknown[],
+  body: unknown,
 ): void {
   const payload = JSON.stringify(body);
   res.statusCode = status;
@@ -105,8 +121,31 @@ function tokenIsConfigured(token: string | null): token is string {
   return Boolean(token?.trim());
 }
 
-function publicStickers(folderPath: string): Array<Record<string, unknown>> {
-  return listStickers(folderPath).map(({ filePath: _filePath, ...sticker }) => sticker);
+function scopeInfo(entry: AccountEntry, chatId: string): Record<string, unknown> {
+  if (chatId === '__global__' || chatId === GLOBAL_STICKER_CHAT_ID) {
+    return {
+      chatId,
+      displayName: 'Global',
+      chatType: 'global',
+      stored: true,
+    };
+  }
+  const stored = entry.repos!.settings.getChatDirectoryEntry(chatId);
+  return {
+    chatId,
+    displayName:
+      stored?.displayName
+      || (chatId.endsWith('@g.us') ? 'Unnamed group' : chatId.split('@')[0]),
+    chatType: stored?.chatType || (chatId.endsWith('@g.us') ? 'group' : 'private'),
+    stored: Boolean(stored),
+  };
+}
+
+function publicStickers(entry: AccountEntry): Array<Record<string, unknown>> {
+  return listStickers(entry.folderPath).map(({ filePath: _filePath, ...sticker }) => ({
+    ...sticker,
+    scope: scopeInfo(entry, sticker.chatId),
+  }));
 }
 
 function secureTokenEquals(expectedToken: string, header: string | undefined): boolean {
@@ -257,6 +296,7 @@ function chatSettingsResponse(entry: AccountEntry, chatId: string): Record<strin
   const effective = repos.settings.getEffectiveChatSettings(chatId);
   return {
     chatId,
+    scope: scopeInfo(entry, chatId),
     exists: Boolean(own),
     source: own ? 'chat' : 'default',
     settings: effective,
@@ -284,6 +324,18 @@ function updateChatSettings(
   const repos = entry.repos!;
   const before = repos.settings.getEffectiveChatSettings(chatId);
   const promptLimit = Math.max(1, Number(process.env.PROMPT_MAX_CHARS) || 4000);
+
+  if ('displayName' in body && chatId !== '__global__') {
+    const displayName = nullableString(body.displayName, 160, 'displayName');
+    if (!displayName?.trim()) {
+      throw new HttpError(400, 'displayName is required for a named scope.');
+    }
+    repos.settings.upsertChatDirectory(
+      chatId,
+      displayName,
+      chatId.endsWith('@g.us') ? 'group' : 'private',
+    );
+  }
 
   if ('prompt' in body) {
     repos.settings.setPrompt(
@@ -428,6 +480,13 @@ export function createControlPanelServer(
   const audit = new ControlPanelAuditLog(
     options.auditPath || path.join(config.dataDir, 'control-panel-audit.jsonl'),
   );
+  const updateManager = new ProjectUpdateManager();
+  const systemActions = options.systemActions || {
+    getUpdateStatus: (refresh = false) => updateManager.getStatus(refresh),
+    update: (confirmCompatibilityChange = false) =>
+      updateManager.update(confirmCompatibilityChange),
+    restart: () => scheduleProcessRestart(),
+  };
   const authFailures = new Map<string, AuthFailureState>();
 
   const server = http.createServer(async (req, res) => {
@@ -613,7 +672,11 @@ export function createControlPanelServer(
         const entry = accountFromId(accountId);
         if (method === 'GET' && pathname.endsWith('/chat-settings')) {
           json(res, 200, {
-            chats: entry.repos!.settings.listChatSettings(),
+            chats: entry.repos!.settings.listChatSettings().map((chat) => ({
+              ...chat,
+              ...scopeInfo(entry, chat.chatId),
+            })),
+            knownScopes: entry.repos!.settings.listChatDirectory(),
             models: entry.repos!.model.getAllModels(),
           });
           return;
@@ -703,7 +766,7 @@ export function createControlPanelServer(
             nullableString(body.description, 500, 'description') || '',
             body.sortOrder === null || body.sortOrder === undefined
               ? null
-              : integerValue(body.sortOrder, 'sortOrder', -100_000, 100_000),
+              : integerValue(body.sortOrder, 'sortOrder', 0, 100_000),
             body.visionSupport === undefined
               ? false
               : booleanValue(body.visionSupport, 'visionSupport'),
@@ -727,16 +790,9 @@ export function createControlPanelServer(
         const entry = accountFromId(accountId);
         const modelId = safeModelId(modelAction[2]);
         if (method === 'POST' && modelAction[3] === 'default') {
-          const models = entry.repos!.model.getAllModels();
-          const model = models.find((item) => item.modelId === modelId);
-          if (!model) throw new HttpError(404, 'Model not found.');
-          const minOrder = models.length
-            ? Math.min(...models.map((item) => item.sortOrder))
-            : 0;
-          entry.repos!.model.updateModel(modelId, {
-            sortOrder: minOrder - 1,
-            isActive: true,
-          });
+          if (!entry.repos!.model.setDefaultModel(modelId)) {
+            throw new HttpError(404, 'Model not found.');
+          }
           registry.sendReliableToClient(entry.folderPath, {
             type: 'invalidate_default_model',
             folderPath: entry.folderPath,
@@ -765,7 +821,7 @@ export function createControlPanelServer(
             sortOrder:
               body.sortOrder === undefined
                 ? undefined
-                : integerValue(body.sortOrder, 'sortOrder', -100_000, 100_000),
+                : integerValue(body.sortOrder, 'sortOrder', 0, 100_000),
             visionSupport:
               body.visionSupport === undefined
                 ? undefined
@@ -813,7 +869,10 @@ export function createControlPanelServer(
         const entry = accountFromId(activationRoot[1]);
         json(res, 200, {
           codes: entry.repos!.activation.getAllActivationCodes(),
-          activations: entry.repos!.activation.getAllActivations(),
+          activations: entry.repos!.activation.getAllActivations().map((activation) => ({
+            ...activation,
+            scope: scopeInfo(entry, activation.chatId),
+          })),
           required: isActivationRequired(entry.repos),
         });
         return;
@@ -852,7 +911,10 @@ export function createControlPanelServer(
           json(res, 200, {
             result,
             codes: entry.repos!.activation.getAllActivationCodes(),
-            activations: entry.repos!.activation.getAllActivations(),
+            activations: entry.repos!.activation.getAllActivations().map((activation) => ({
+              ...activation,
+              scope: scopeInfo(entry, activation.chatId),
+            })),
           });
           return;
         }
@@ -937,7 +999,7 @@ export function createControlPanelServer(
         const entry = accountFromId(accountId);
         if (method === 'GET') {
           json(res, 200, {
-            stickers: publicStickers(entry.folderPath),
+            stickers: publicStickers(entry),
           });
           return;
         }
@@ -1001,7 +1063,7 @@ export function createControlPanelServer(
           audit.record('sticker_saved', `Saved sticker ${name} for ${chatId}.`, {
             accountId,
           });
-          json(res, 201, { stickers: publicStickers(entry.folderPath) });
+          json(res, 201, { stickers: publicStickers(entry) });
           return;
         }
         if (method === 'DELETE') {
@@ -1025,9 +1087,51 @@ export function createControlPanelServer(
           audit.record('sticker_deleted', `Deleted sticker ${name} for ${chatId}.`, {
             accountId,
           });
-          json(res, 200, { stickers: publicStickers(entry.folderPath) });
+          json(res, 200, { stickers: publicStickers(entry) });
           return;
         }
+      }
+
+      if (method === 'GET' && pathname === '/api/system/update-status') {
+        const refresh = requestUrl.searchParams.get('refresh') === '1';
+        json(res, 200, await systemActions.getUpdateStatus(refresh));
+        return;
+      }
+
+      if (method === 'POST' && pathname === '/api/system/restart') {
+        audit.record('system_restart_requested', 'Requested a gateway restart.');
+        json(res, 202, { ok: true, restarting: true });
+        systemActions.restart();
+        return;
+      }
+
+      if (method === 'POST' && pathname === '/api/system/update') {
+        const body = await readJsonBody<{
+          confirmCompatibilityChange?: unknown;
+        }>(req, maxBodyBytes);
+        const confirmCompatibilityChange = body.confirmCompatibilityChange === true;
+        try {
+          const result = await systemActions.update(confirmCompatibilityChange);
+          audit.record(
+            result.updated ? 'system_updated' : 'system_update_checked',
+            result.updated ? 'Applied a fast-forward project update.' : 'Project is already up to date.',
+          );
+          json(res, 200, { ...result, restarting: result.updated });
+          if (result.updated) systemActions.restart();
+        } catch (error) {
+          if (error instanceof ProjectUpdateError) {
+            audit.record('system_update_blocked', error.message, { outcome: 'failure' });
+            throw new HttpError(
+              error.code === 'compatibility_change' || error.code === 'update_blocked'
+                ? 409
+                : 500,
+              error.message,
+              { code: error.code, updateStatus: error.status },
+            );
+          }
+          throw error;
+        }
+        return;
       }
 
       if (pathname === '/api/system/environment') {

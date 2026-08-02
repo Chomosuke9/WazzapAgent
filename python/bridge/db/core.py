@@ -563,8 +563,16 @@ def _ensure_settings_tables(conn: sqlite3.Connection) -> None:
       display_name   TEXT NOT NULL,
       description    TEXT,
       is_active      INTEGER NOT NULL DEFAULT 1,
+      is_default     INTEGER NOT NULL DEFAULT 0,
       sort_order     INTEGER NOT NULL DEFAULT 0,
       vision_support INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS chat_directory (
+      chat_id       TEXT PRIMARY KEY,
+      display_name  TEXT NOT NULL,
+      chat_type     TEXT NOT NULL,
+      updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
     );
     """
   )
@@ -588,6 +596,38 @@ def _ensure_settings_tables(conn: sqlite3.Connection) -> None:
     conn.commit()
   except sqlite3.OperationalError:
     pass
+
+  # Default selection is independent from visual ordering. Older databases
+  # inferred the default from the smallest sort_order, which caused repeated
+  # selections to drive the order negative.
+  try:
+    conn.execute('ALTER TABLE llm_models ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0')
+    conn.commit()
+  except sqlite3.OperationalError:
+    pass
+
+  model_rows = conn.execute(
+    'SELECT model_id, is_active, is_default, sort_order '
+    'FROM llm_models ORDER BY sort_order ASC, model_id COLLATE NOCASE ASC'
+  ).fetchall()
+  for index, model_row in enumerate(model_rows):
+    if model_row['sort_order'] != index:
+      conn.execute(
+        'UPDATE llm_models SET sort_order = ? WHERE model_id = ?',
+        (index, model_row['model_id']),
+      )
+  selected_default = next(
+    (row for row in model_rows if row['is_default'] == 1 and row['is_active'] == 1),
+    None,
+  ) or next((row for row in model_rows if row['is_active'] == 1), None)
+  if selected_default:
+    conn.execute(
+      'UPDATE llm_models SET is_default = CASE WHEN model_id = ? THEN 1 ELSE 0 END',
+      (selected_default['model_id'],),
+    )
+  elif model_rows:
+    conn.execute('UPDATE llm_models SET is_default = 0')
+  conn.commit()
 
   # Check whether the __global__ row already exists before we try to create it.
   # This tells us whether we should seed the default prompt override.

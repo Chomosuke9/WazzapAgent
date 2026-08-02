@@ -11,6 +11,7 @@ interface LlmModelRow {
   display_name: string;
   description: string | null;
   is_active: number;
+  is_default: number;
   sort_order: number;
   vision_support: number;
 }
@@ -26,6 +27,7 @@ interface ActiveModelInfo {
   modelId: string;
   displayName: string;
   description: string | null;
+  isDefault: boolean;
   sortOrder: number;
   visionSupport: boolean;
 }
@@ -35,6 +37,7 @@ interface ModelInfo {
   displayName: string;
   description: string | null;
   isActive: boolean;
+  isDefault: boolean;
   sortOrder: number;
   visionSupport: boolean;
 }
@@ -53,6 +56,29 @@ interface DeleteModelResult {
 }
 
 export class ModelRepository extends BaseRepository {
+  private normalizeDefaultModel(): void {
+    const models = this.getAllFromState<
+      Pick<LlmModelRow, "model_id" | "is_active" | "is_default" | "sort_order">
+    >(
+      this.settingsState,
+      initSettingsTables,
+      `SELECT model_id, is_active, is_default, sort_order
+       FROM llm_models
+       ORDER BY sort_order ASC, model_id COLLATE NOCASE ASC`,
+    );
+    const selected = models.find(
+      (model) => model.is_default === 1 && model.is_active === 1,
+    ) || models.find((model) => model.is_active === 1);
+    if (selected) {
+      this.runSettingsQuery(
+        "UPDATE llm_models SET is_default = CASE WHEN model_id = ? THEN 1 ELSE 0 END",
+        selected.model_id,
+      );
+    } else if (models.length) {
+      this.runSettingsQuery("UPDATE llm_models SET is_default = 0");
+    }
+  }
+
   getDefaultLlm2Model(): DefaultLlm2Model | null {
     const row = this.getOneFromState<
       Pick<
@@ -62,7 +88,7 @@ export class ModelRepository extends BaseRepository {
     >(
       this.settingsState,
       initSettingsTables,
-      "SELECT model_id, display_name, description, vision_support FROM llm_models WHERE is_active = 1 ORDER BY sort_order ASC LIMIT 1",
+      "SELECT model_id, display_name, description, vision_support FROM llm_models WHERE is_active = 1 AND is_default = 1 LIMIT 1",
     );
     if (row)
       return {
@@ -93,17 +119,18 @@ export class ModelRepository extends BaseRepository {
     const rows = this.getAllFromState<
       Pick<
         LlmModelRow,
-        "model_id" | "display_name" | "description" | "sort_order" | "vision_support"
+        "model_id" | "display_name" | "description" | "is_default" | "sort_order" | "vision_support"
       >
     >(
       this.settingsState,
       initSettingsTables,
-      "SELECT model_id, display_name, description, sort_order, vision_support FROM llm_models WHERE is_active = 1 ORDER BY sort_order ASC",
+      "SELECT model_id, display_name, description, is_default, sort_order, vision_support FROM llm_models WHERE is_active = 1 ORDER BY sort_order ASC, model_id COLLATE NOCASE ASC",
     );
     return rows.map((row) => ({
       modelId: row.model_id,
       displayName: row.display_name,
       description: row.description,
+      isDefault: Boolean(row.is_default),
       sortOrder: row.sort_order,
       visionSupport: Boolean(row.vision_support),
     }));
@@ -113,13 +140,14 @@ export class ModelRepository extends BaseRepository {
     const rows = this.getAllFromState<LlmModelRow>(
       this.settingsState,
       initSettingsTables,
-      "SELECT model_id, display_name, description, is_active, sort_order, vision_support FROM llm_models ORDER BY sort_order ASC",
+      "SELECT model_id, display_name, description, is_active, is_default, sort_order, vision_support FROM llm_models ORDER BY sort_order ASC, model_id COLLATE NOCASE ASC",
     );
     return rows.map((row) => ({
       modelId: row.model_id,
       displayName: row.display_name,
       description: row.description,
       isActive: Boolean(row.is_active),
+      isDefault: Boolean(row.is_default),
       sortOrder: row.sort_order,
       visionSupport: Boolean(row.vision_support),
     }));
@@ -139,6 +167,8 @@ export class ModelRepository extends BaseRepository {
         "SELECT MAX(sort_order) as max_order FROM llm_models",
       );
       sortOrder = (maxOrder?.max_order ?? -1) + 1;
+    } else {
+      sortOrder = Math.max(0, sortOrder);
     }
     try {
       this.runSettingsQuery(
@@ -149,6 +179,7 @@ export class ModelRepository extends BaseRepository {
         sortOrder,
         visionSupport ? 1 : 0,
       );
+      this.normalizeDefaultModel();
       logger.info({ modelId, displayName, visionSupport }, "DB add_model");
       return true;
     } catch (err: unknown) {
@@ -188,7 +219,7 @@ export class ModelRepository extends BaseRepository {
     }
     if (sortOrder !== undefined) {
       updates.push("sort_order = ?");
-      values.push(sortOrder);
+      values.push(Math.max(0, sortOrder));
     }
     if (visionSupport !== undefined) {
       updates.push("vision_support = ?");
@@ -200,7 +231,28 @@ export class ModelRepository extends BaseRepository {
       `UPDATE llm_models SET ${updates.join(", ")} WHERE model_id = ?`,
       ...values,
     );
+    this.normalizeDefaultModel();
     logger.info({ modelId }, "DB update_model");
+    return true;
+  }
+
+  /** Select the tenant default without changing the catalog's visual order. */
+  setDefaultModel(modelId: string): boolean {
+    const existing = this.getOneFromState<Pick<LlmModelRow, "model_id">>(
+      this.settingsState,
+      initSettingsTables,
+      "SELECT model_id FROM llm_models WHERE model_id = ?",
+      modelId,
+    );
+    if (!existing) return false;
+    this.runSettingsQuery(
+      `UPDATE llm_models
+       SET is_default = CASE WHEN model_id = ? THEN 1 ELSE 0 END,
+           is_active = CASE WHEN model_id = ? THEN 1 ELSE is_active END`,
+      modelId,
+      modelId,
+    );
+    logger.info({ modelId }, "DB set_default_model");
     return true;
   }
 
@@ -224,6 +276,7 @@ export class ModelRepository extends BaseRepository {
       "UPDATE chat_settings SET llm2_model = NULL WHERE llm2_model = ?",
       modelId,
     );
+    this.normalizeDefaultModel();
     logger.info({ modelId, affectedChatIds }, "DB delete_model");
     return { success: true, affectedChatIds };
   }

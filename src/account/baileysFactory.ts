@@ -122,6 +122,7 @@ const defaultSocketCreator: SocketCreator = async (authState) => {
 };
 
 let socketCreator: SocketCreator = defaultSocketCreator;
+let qrPrinter: (qr: string) => void = printQrInTerminal;
 
 /**
  * Per-tenant socket builds currently in flight. Both the initial
@@ -189,6 +190,13 @@ const PAIRING_CODE_REUSE_MS = 2 * 60_000;
  */
 export function __setSocketCreatorForTests(fn: SocketCreator | null): void {
   socketCreator = fn ?? defaultSocketCreator;
+}
+
+/** TEST SEAM - count terminal QR renders without spawning qrencode. */
+export function __setQrPrinterForTests(
+  fn: ((qr: string) => void) | null,
+): void {
+  qrPrinter = fn ?? printQrInTerminal;
 }
 
 // ---------------------------------------------------------------------------
@@ -633,7 +641,7 @@ function requestConfiguredPairingCode(
         },
         "failed to request pairing code; falling back to QR if available",
       );
-      if (fallbackQr) printQrInTerminal(fallbackQr);
+      if (fallbackQr) qrPrinter(fallbackQr);
     });
 }
 
@@ -870,6 +878,11 @@ function attachConnectionListener(
   // `qr` field re-emits every ~20s while unregistered, and each request would
   // otherwise mint a NEW code, confusing the user).
   let pairingRequested = false;
+  // A Baileys socket refreshes its QR roughly every 20 seconds. Appending every
+  // refresh to tmux/Pterodactyl logs creates an endless wall of QR blocks, so
+  // show only the first one for this socket generation. Operators can request a
+  // fresh native pairing code from the control panel or reconnect explicitly.
+  let terminalQrPrinted = false;
   sock.ev.on("connection.update", (update) => {
     // A replaced socket can still deliver a queued/delayed update. Only the
     // socket currently bound to this tenant may mutate status or trigger a
@@ -911,9 +924,16 @@ function attachConnectionListener(
             printQr ? qr : null,
           );
         }
-      } else if (!pendingPairingRequests.has(folderPath) && printQr) {
-        logger.info("Scan QR to authenticate (valid for 20 seconds)");
-        printQrInTerminal(qr);
+      } else if (
+        !pendingPairingRequests.has(folderPath)
+        && printQr
+        && !terminalQrPrinted
+      ) {
+        terminalQrPrinted = true;
+        logger.info(
+          "Scan QR to authenticate (shown once); use the control panel or reconnect for a fresh pairing attempt",
+        );
+        qrPrinter(qr);
       }
     }
     if (!connection) return;

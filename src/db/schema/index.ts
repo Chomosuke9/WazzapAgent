@@ -133,18 +133,77 @@ function initSettingsTables(db: SqliteDb): void {
       display_name   TEXT NOT NULL,
       description    TEXT,
       is_active      INTEGER NOT NULL DEFAULT 1,
+      is_default     INTEGER NOT NULL DEFAULT 0,
       sort_order     INTEGER NOT NULL DEFAULT 0,
       vision_support INTEGER NOT NULL DEFAULT 0
     )
   `);
 
-  // Migration: add vision_support column if it doesn't exist
-  const columns = getColumns(db, "llm_models");
-  if (!columns.has("vision_support")) {
+  // Model-catalog migrations. `is_default` deliberately lives independently
+  // from `sort_order`: choosing a default model must not reorder the catalog or
+  // keep decrementing the order into negative numbers.
+  const modelColumns = getColumns(db, "llm_models");
+  if (!modelColumns.has("vision_support")) {
     db.run(
       "ALTER TABLE llm_models ADD COLUMN vision_support INTEGER NOT NULL DEFAULT 0",
     );
   }
+  if (!modelColumns.has("is_default")) {
+    db.run(
+      "ALTER TABLE llm_models ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0",
+    );
+  }
+
+  // Compact legacy/manual order values into a deterministic 0..N-1 sequence
+  // while retaining their relative order. This repairs catalogs whose former
+  // default-selection implementation drove sort_order below zero.
+  const orderedModels = queryRows<{
+    model_id: string;
+    is_active: number;
+    is_default: number;
+    sort_order: number;
+  }>(
+    db,
+    `SELECT model_id, is_active, is_default, sort_order
+     FROM llm_models
+     ORDER BY sort_order ASC, model_id COLLATE NOCASE ASC`,
+  );
+  orderedModels.forEach((model, index) => {
+    if (model.sort_order !== index) {
+      db.run("UPDATE llm_models SET sort_order = ? WHERE model_id = ?", [
+        index,
+        model.model_id,
+      ]);
+    }
+  });
+
+  // Preserve the legacy meaning on first migration (the first active model was
+  // the default), and repair inactive/duplicate default flags defensively.
+  const explicitDefault = orderedModels.find(
+    (model) => model.is_default === 1 && model.is_active === 1,
+  );
+  const defaultModel = explicitDefault
+    || orderedModels.find((model) => model.is_active === 1);
+  if (defaultModel) {
+    db.run(
+      "UPDATE llm_models SET is_default = CASE WHEN model_id = ? THEN 1 ELSE 0 END",
+      [defaultModel.model_id],
+    );
+  } else if (orderedModels.length) {
+    db.run("UPDATE llm_models SET is_default = 0");
+  }
+
+  // Durable chat directory used by the control panel. Names are learned from
+  // normal inbound traffic / already-fetched group metadata; the panel never
+  // performs a live WhatsApp metadata sweep just to render labels.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS chat_directory (
+      chat_id       TEXT PRIMARY KEY,
+      display_name  TEXT NOT NULL,
+      chat_type     TEXT NOT NULL,
+      updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
 
   db.run(`
     CREATE TABLE IF NOT EXISTS owner_contact (

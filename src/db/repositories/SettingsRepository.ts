@@ -56,6 +56,13 @@ export interface BotConfigInfo {
   updatedAt: string;
 }
 
+export interface ChatDirectoryInfo {
+  chatId: string;
+  displayName: string;
+  chatType: "group" | "private";
+  updatedAt: string;
+}
+
 export const VALID_MODES = new Set(["auto", "prefix", "hybrid"]);
 export const VALID_TRIGGERS = new Set(["tag", "tagall", "reply", "join", "name"]);
 export const VALID_COMPAT_MODES = new Set(["auto", "full", "semi", "safe"]);
@@ -622,6 +629,79 @@ export class SettingsRepository extends BaseRepository {
     }
     if (deleted.length) logger.info({ scopeKey, indices }, "DB delete_memory");
     return deleted;
+  }
+
+  // -------------------------------------------------------------------------
+  // Persisted chat directory. The gateway learns these labels from normal
+  // traffic / metadata it already needed, so the control panel can render
+  // friendly scope names without issuing a risky live group-metadata sweep.
+  // -------------------------------------------------------------------------
+
+  upsertChatDirectory(
+    chatId: string,
+    displayName: string,
+    chatType: "group" | "private",
+  ): void {
+    const normalizedId = chatId.trim();
+    const normalizedName = displayName.trim().slice(0, 160);
+    if (!normalizedId || !normalizedName || normalizedName === normalizedId) return;
+    this.runSettingsQuery(
+      `INSERT INTO chat_directory (chat_id, display_name, chat_type, updated_at)
+       VALUES (?, ?, ?, datetime('now'))
+       ON CONFLICT(chat_id) DO UPDATE SET
+         display_name = excluded.display_name,
+         chat_type = excluded.chat_type,
+         updated_at = excluded.updated_at
+       WHERE chat_directory.display_name <> excluded.display_name
+          OR chat_directory.chat_type <> excluded.chat_type`,
+      normalizedId,
+      normalizedName,
+      chatType,
+    );
+  }
+
+  getChatDirectoryEntry(chatId: string): ChatDirectoryInfo | null {
+    if (!chatId || chatId === GLOBAL_CHAT_ID) return null;
+    const row = this.getOneFromState<{
+      chat_id: string;
+      display_name: string;
+      chat_type: "group" | "private";
+      updated_at: string;
+    }>(
+      this.settingsState,
+      initSettingsTables,
+      `SELECT chat_id, display_name, chat_type, updated_at
+       FROM chat_directory WHERE chat_id = ?`,
+      chatId,
+    );
+    return row
+      ? {
+          chatId: row.chat_id,
+          displayName: row.display_name,
+          chatType: row.chat_type,
+          updatedAt: row.updated_at,
+        }
+      : null;
+  }
+
+  listChatDirectory(): ChatDirectoryInfo[] {
+    return this.getAllFromState<{
+      chat_id: string;
+      display_name: string;
+      chat_type: "group" | "private";
+      updated_at: string;
+    }>(
+      this.settingsState,
+      initSettingsTables,
+      `SELECT chat_id, display_name, chat_type, updated_at
+       FROM chat_directory
+       ORDER BY display_name COLLATE NOCASE ASC, chat_id ASC`,
+    ).map((row) => ({
+      chatId: row.chat_id,
+      displayName: row.display_name,
+      chatType: row.chat_type,
+      updatedAt: row.updated_at,
+    }));
   }
 
   /** Persist (UPSERT) the stable LID behind a senderRef used in memory text. */

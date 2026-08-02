@@ -28,9 +28,27 @@ from .core import (
 )
 
 
+def _normalize_default_model(conn: sqlite3.Connection) -> None:
+  rows = conn.execute(
+    'SELECT model_id, is_active, is_default FROM llm_models '
+    'ORDER BY sort_order ASC, model_id COLLATE NOCASE ASC'
+  ).fetchall()
+  selected = next(
+    (row for row in rows if row['is_default'] == 1 and row['is_active'] == 1),
+    None,
+  ) or next((row for row in rows if row['is_active'] == 1), None)
+  if selected:
+    conn.execute(
+      'UPDATE llm_models SET is_default = CASE WHEN model_id = ? THEN 1 ELSE 0 END',
+      (selected['model_id'],),
+    )
+  elif rows:
+    conn.execute('UPDATE llm_models SET is_default = 0')
+
+
 @_db_resilient('settings')
 def get_default_llm2_model() -> Optional[dict]:
-  """Return the default model (lowest sort_order, is_active=1)."""
+  """Return the explicitly selected active default model."""
   tkey = _tenant_key()
   cached = core._default_llm2_model_cache.get(tkey)
   if cached is not None:
@@ -38,7 +56,8 @@ def get_default_llm2_model() -> Optional[dict]:
   _ensure_split_ready()
   conn = _get_settings_conn()
   row = conn.execute(
-    'SELECT model_id, display_name, description, vision_support FROM llm_models WHERE is_active = 1 ORDER BY sort_order ASC LIMIT 1'
+    'SELECT model_id, display_name, description, vision_support '
+    'FROM llm_models WHERE is_active = 1 AND is_default = 1 LIMIT 1'
   ).fetchone()
   if row:
     core._default_llm2_model_cache[tkey] = {
@@ -119,13 +138,16 @@ def get_all_active_models() -> list[dict]:
   _ensure_split_ready()
   conn = _get_settings_conn()
   rows = conn.execute(
-    'SELECT model_id, display_name, description, sort_order, vision_support FROM llm_models WHERE is_active = 1 ORDER BY sort_order ASC'
+    'SELECT model_id, display_name, description, is_default, sort_order, vision_support '
+    'FROM llm_models WHERE is_active = 1 '
+    'ORDER BY sort_order ASC, model_id COLLATE NOCASE ASC'
   ).fetchall()
   return [
     {
       'model_id': row['model_id'],
       'display_name': row['display_name'],
       'description': row['description'],
+      'is_default': bool(row['is_default']),
       'sort_order': row['sort_order'],
       'vision_support': bool(row['vision_support']),
     }
@@ -138,7 +160,8 @@ def get_all_models() -> list[dict]:
   _ensure_split_ready()
   conn = _get_settings_conn()
   rows = conn.execute(
-    'SELECT model_id, display_name, description, is_active, sort_order, vision_support FROM llm_models ORDER BY sort_order ASC'
+    'SELECT model_id, display_name, description, is_active, is_default, sort_order, vision_support '
+    'FROM llm_models ORDER BY sort_order ASC, model_id COLLATE NOCASE ASC'
   ).fetchall()
   return [
     {
@@ -146,6 +169,7 @@ def get_all_models() -> list[dict]:
       'display_name': row['display_name'],
       'description': row['description'],
       'is_active': bool(row['is_active']),
+      'is_default': bool(row['is_default']),
       'sort_order': row['sort_order'],
       'vision_support': bool(row['vision_support']),
     }
@@ -161,6 +185,8 @@ def add_model(model_id: str, display_name: str, description: str = '', sort_orde
   if sort_order is None:
     max_order_row = conn.execute('SELECT MAX(sort_order) as max_order FROM llm_models').fetchone()
     sort_order = (max_order_row['max_order'] or -1) + 1
+  else:
+    sort_order = max(0, sort_order)
   try:
     conn.execute(
       """
@@ -169,6 +195,7 @@ def add_model(model_id: str, display_name: str, description: str = '', sort_orde
       """,
       (model_id, display_name, description, sort_order, 1 if vision_support else 0),
     )
+    _normalize_default_model(conn)
     conn.commit()
     logger.info('DB add_model model_id=%s display_name=%s vision_support=%s', model_id, display_name, vision_support)
     return True
@@ -197,7 +224,7 @@ def update_model(model_id: str, display_name: Optional[str] = None, description:
     values.append(1 if is_active else 0)
   if sort_order is not None:
     updates.append('sort_order = ?')
-    values.append(sort_order)
+    values.append(max(0, sort_order))
   if vision_support is not None:
     updates.append('vision_support = ?')
     values.append(1 if vision_support else 0)
@@ -205,6 +232,7 @@ def update_model(model_id: str, display_name: Optional[str] = None, description:
     return True
   values.append(model_id)
   conn.execute(f"UPDATE llm_models SET {', '.join(updates)} WHERE model_id = ?", values)
+  _normalize_default_model(conn)
   conn.commit()
   logger.info('DB update_model model_id=%s', model_id)
   return True
@@ -224,6 +252,30 @@ def delete_model(model_id: str) -> bool:
       _llm2_model_cache.pop(_tenant_cache_key(row['chat_id']), None)
   conn.execute('DELETE FROM llm_models WHERE model_id = ?', (model_id,))
   conn.execute('UPDATE chat_settings SET llm2_model = NULL WHERE llm2_model = ?', (model_id,))
+  _normalize_default_model(conn)
   conn.commit()
   logger.info('DB delete_model model_id=%s', model_id)
+  return True
+
+
+@_db_resilient('settings')
+def set_default_model(model_id: str) -> bool:
+  """Select the default model without changing its visual sort order."""
+  core._default_llm2_model_cache.pop(core._tenant_key(), None)
+  _ensure_split_ready()
+  conn = _get_settings_conn()
+  existing = conn.execute(
+    'SELECT model_id FROM llm_models WHERE model_id = ?',
+    (model_id,),
+  ).fetchone()
+  if not existing:
+    return False
+  conn.execute(
+    'UPDATE llm_models '
+    'SET is_default = CASE WHEN model_id = ? THEN 1 ELSE 0 END, '
+    '    is_active = CASE WHEN model_id = ? THEN 1 ELSE is_active END',
+    (model_id, model_id),
+  )
+  conn.commit()
+  logger.info('DB set_default_model model_id=%s', model_id)
   return True

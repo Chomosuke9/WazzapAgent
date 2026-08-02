@@ -643,7 +643,28 @@ tbody tr:hover td {
 .row-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 7px;
+}
+
+.row-actions .icon-button {
+  width: 32px;
+  height: 32px;
+  color: var(--muted-strong);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.row-actions .icon-button:hover:not(:disabled) {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.row-actions .icon-button.selected {
+  border-color: rgba(243, 182, 31, 0.45);
+  background: var(--amber-soft);
+  color: var(--amber);
+  opacity: 1;
 }
 
 .pair-card {
@@ -961,9 +982,93 @@ tbody tr:hover td {
 
 .env-toolbar {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 220px auto;
+  grid-template-columns: minmax(220px, 1fr) auto;
   gap: 10px;
   margin-bottom: 16px;
+}
+
+.system-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.system-section-nav {
+  display: grid;
+  gap: 5px;
+  padding: 8px;
+  position: sticky;
+  top: 88px;
+  max-height: calc(100vh - 110px);
+  overflow-y: auto;
+}
+
+.system-section-button {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted-strong);
+  text-align: left;
+}
+
+.system-section-button:hover,
+.system-section-button.active {
+  border-color: var(--border);
+  background: var(--panel-raised);
+  color: var(--text);
+}
+
+.system-section-button small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.system-section-content {
+  min-width: 0;
+}
+
+.runtime-version-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.version-card {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--panel-soft);
+}
+
+.version-card span,
+.version-card small {
+  color: var(--muted);
+}
+
+.version-card strong {
+  font-size: 22px;
+}
+
+.version-card small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.system-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
 }
 
 .env-list {
@@ -1214,7 +1319,17 @@ tbody tr:hover td {
   }
 
   .split-layout,
+  .system-layout,
   .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .system-section-nav {
+    position: static;
+    max-height: 300px;
+  }
+
+  .runtime-version-grid {
     grid-template-columns: 1fr;
   }
 
