@@ -549,7 +549,13 @@ def stage_output_files(
         ))
         continue
       if not b64:
-        skipped.append(SkippedFile(source_path="", name=name, reason="empty base64 content"))
+        bridge_skip_reason = item.get("bridge_skip_reason")
+        reason = (
+          str(bridge_skip_reason)[:500]
+          if isinstance(bridge_skip_reason, str) and bridge_skip_reason.strip()
+          else "empty base64 content"
+        )
+        skipped.append(SkippedFile(source_path="", name=name, reason=reason))
         continue
       # Pre-check: estimated decoded size avoids materializing a huge
       # allocation when the payload is clearly oversized.

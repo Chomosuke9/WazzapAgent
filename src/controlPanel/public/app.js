@@ -18,6 +18,7 @@ const state = {
   knownScopes: [],
   systemSection: sessionStorage.getItem('wazzap_system_section') || 'runtime',
   updateStatus: null,
+  subagentOutbox: { entries: [], count: 0, error: '', loaded: false },
 };
 
 const loginShell = document.getElementById('login-shell');
@@ -59,6 +60,21 @@ function relativeTime(value) {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
   return `${Math.floor(hours / 24)}d ago`;
+}
+
+function formatBytes(value) {
+  if (value === null || value === undefined) return 'Unknown size';
+  const size = Number(value);
+  if (!Number.isFinite(size) || size < 0) return 'Unknown size';
+  if (size < 1024) return `${size} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let amount = size / 1024;
+  let index = 0;
+  while (amount >= 1024 && index < units.length - 1) {
+    amount /= 1024;
+    index += 1;
+  }
+  return `${amount >= 10 ? amount.toFixed(1) : amount.toFixed(2)} ${units[index]}`;
 }
 
 function scopeName(scope, fallbackId = '') {
@@ -828,12 +844,46 @@ function systemSections() {
   return [
     { id: 'runtime', label: 'Runtime & updates', detail: 'Version, restart, and safe update' },
     { id: 'network', label: 'Control panel network', detail: 'Host and port binding' },
+    { id: 'subagent-outbox', label: 'Sub-agent outbox', detail: 'Pending and terminal callbacks' },
     ...categories.map((category) => ({
       id: `env:${category}`,
       label: category,
       detail: `${state.envFields.filter((field) => field.category === category).length} environment settings`,
     })),
   ];
+}
+
+function renderSubagentOutboxSection() {
+  const snapshot = state.subagentOutbox;
+  const notice = snapshot.error
+    ? `<div class="notice warning"><strong>Outbox unavailable.</strong> ${escapeHtml(snapshot.error)}</div>`
+    : '<div class="notice">Completed results remain stored while a callback is pending or in dead letter. Discard stops delivery attempts without immediately deleting the result or its output files; normal idle cleanup still applies.</div>';
+  const rows = snapshot.entries.length
+    ? snapshot.entries.map((entry) => {
+      const stateLabel = entry.state === 'dead_letter' ? 'Dead letter' : 'Pending';
+      const stateClass = entry.state === 'dead_letter' ? 'danger' : 'warning';
+      const files = (entry.output_files || []).length
+        ? entry.output_files.map((file) => `${escapeHtml(file.name)} <span class="cell-subtitle">${escapeHtml(formatBytes(file.size_bytes))}</span>`).join('<br>')
+        : '<span class="cell-subtitle">No declared output files</span>';
+      const status = entry.callback_status ? `HTTP ${entry.callback_status}` : 'No HTTP status';
+      const updated = entry.updated_at
+        ? formatDate(Number(entry.updated_at) * 1000)
+        : 'Unknown';
+      return `<tr>
+        <td><span class="cell-title mono">${escapeHtml(entry.session_id)}</span><span class="cell-subtitle">Sequence ${escapeHtml(entry.callback_sequence || 0)} · ${escapeHtml(updated)}</span></td>
+        <td><span class="badge ${stateClass}">${stateLabel}</span><span class="cell-subtitle">${escapeHtml(status)}</span></td>
+        <td>${files}</td>
+        <td><span class="cell-subtitle outbox-error">${escapeHtml(entry.callback_error || 'Waiting for the next delivery attempt.')}</span></td>
+        <td><div class="row-actions"><button class="button secondary small retry-callback" data-session="${escapeHtml(entry.session_id)}" type="button">Retry</button><button class="button danger small discard-callback" data-session="${escapeHtml(entry.session_id)}" type="button">Discard</button></div></td>
+      </tr>`;
+    }).join('')
+    : `<tr><td colspan="5"><div class="empty-state">${snapshot.loaded && !snapshot.error ? 'No pending or dead-letter callbacks.' : 'Loading sub-agent outbox…'}</div></td></tr>`;
+  return `
+    ${notice}
+    <section class="panel spaced-panel">
+      <header class="panel-header"><div><h2>Sub-agent callback outbox</h2><p>Inspect durable completion delivery without exposing server paths or file contents.</p></div><div class="row-actions"><span class="badge">${escapeHtml(snapshot.count || 0)} retained</span><button id="refresh-subagent-outbox" class="button secondary small" type="button">Refresh</button></div></header>
+      <div class="table-wrap"><table><thead><tr><th>Session</th><th>Delivery</th><th>Outputs</th><th>Last error</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table></div>
+    </section>`;
 }
 
 function renderRuntimeSystemSection() {
@@ -902,6 +952,8 @@ function renderSystemShell() {
     ? renderRuntimeSystemSection()
     : selected.id === 'network'
       ? renderNetworkSystemSection()
+      : selected.id === 'subagent-outbox'
+        ? renderSubagentOutboxSection()
       : renderEnvironmentSystemSection(selected.id.slice(4));
   content.innerHTML = `
     ${pageHeader('System', 'Settings are split into focused sections so unrelated controls stay out of the way.')}
@@ -913,7 +965,11 @@ function renderSystemShell() {
   document.querySelectorAll('[data-system-section]').forEach((button) => button.addEventListener('click', () => {
     state.systemSection = button.dataset.systemSection;
     sessionStorage.setItem('wazzap_system_section', state.systemSection);
-    renderSystemShell();
+    if (state.systemSection === 'subagent-outbox') {
+      void refreshSubagentOutbox();
+    } else {
+      renderSystemShell();
+    }
   }));
 
   if (selected.id === 'runtime') {
@@ -944,11 +1000,82 @@ function renderSystemShell() {
     document.getElementById('save-panel-network').addEventListener('click', () => {
       void saveControlPanelNetwork().catch((error) => toast(error.message, 'error'));
     });
+  } else if (selected.id === 'subagent-outbox') {
+    document.getElementById('refresh-subagent-outbox')?.addEventListener('click', () => {
+      void refreshSubagentOutbox();
+    });
+    document.querySelectorAll('.retry-callback').forEach((button) => {
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        try {
+          await api(`/api/system/subagent-outbox/${encodeURIComponent(button.dataset.session)}/retry`, {
+            method: 'POST',
+            body: {},
+          });
+          toast('Callback queued for an immediate retry.');
+          await refreshSubagentOutbox();
+        } catch (error) {
+          toast(error.message, 'error');
+          button.disabled = false;
+        }
+      });
+    });
+    document.querySelectorAll('.discard-callback').forEach((button) => {
+      button.addEventListener('click', () => {
+        const sessionId = button.dataset.session;
+        openModal(
+          'Discard callback',
+          'This permanently stops automatic callback delivery for this completion.',
+          `<div class="notice warning">The completion result and output files remain available until normal idle cleanup, but its callback envelope is removed. Session: <span class="mono">${escapeHtml(sessionId)}</span></div>`,
+          {
+            danger: true,
+            confirmText: 'Discard callback',
+            onConfirm: async () => {
+              await api(`/api/system/subagent-outbox/${encodeURIComponent(sessionId)}/discard`, {
+                method: 'POST',
+                body: {},
+              });
+              toast('Callback discarded; automatic retries are stopped.');
+              await refreshSubagentOutbox();
+            },
+          },
+        );
+      });
+    });
   } else {
     const category = selected.id.slice(4);
     renderEnvRows(category);
     document.getElementById('env-search').addEventListener('input', () => renderEnvRows(category));
     document.getElementById('save-env').addEventListener('click', saveEnvironment);
+  }
+}
+
+async function refreshSubagentOutbox() {
+  state.subagentOutbox = {
+    ...state.subagentOutbox,
+    error: '',
+  };
+  if (state.page === 'system' && state.systemSection === 'subagent-outbox') {
+    renderSystemShell();
+  }
+  try {
+    const data = await api('/api/system/subagent-outbox');
+    state.subagentOutbox = {
+      entries: data.entries || [],
+      count: data.count || 0,
+      error: '',
+      loaded: true,
+    };
+  } catch (error) {
+    state.subagentOutbox = {
+      entries: [],
+      count: 0,
+      error: error.message,
+      loaded: true,
+    };
+  }
+  if (state.page === 'system' && state.systemSection === 'subagent-outbox') {
+    renderSystemShell();
   }
 }
 
@@ -962,6 +1089,9 @@ async function renderSystem(refreshUpdate = false) {
   state.envFields = environment.fields || [];
   state.updateStatus = updateStatus;
   renderSystemShell();
+  if (state.systemSection === 'subagent-outbox') {
+    await refreshSubagentOutbox();
+  }
 }
 
 function showRestartingState(message) {

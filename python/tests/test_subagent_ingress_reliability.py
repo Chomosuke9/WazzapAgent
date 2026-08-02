@@ -130,6 +130,34 @@ def test_submit_requires_exact_receiver_checksum_manifest(tmp_path):
   assert result["accepted"] is True
 
 
+def test_submit_sends_authenticated_callback_ownership_context(tmp_path):
+  client = SubAgentClient(base_url="http://sub", webhook_url="http://callback")
+  captured = {}
+
+  def _post(_url, payload):
+    captured.update(payload)
+    return {
+      "_status_code": 202,
+      "accepted": True,
+      "status": "processing",
+      "session_id": "chat@g.us_deadbeef_123",
+      "requested_file_count": 0,
+      "staged_file_count": 0,
+      "staged_files": [],
+      "file_errors": [],
+    }
+
+  client._post_sync = _post  # type: ignore[method-assign]
+  asyncio.run(client.submit(
+    "chat@g.us_deadbeef_123",
+    "inspect",
+    [],
+    callback_context={"chat_id": "chat@g.us"},
+  ))
+
+  assert captured["callback_context"] == {"chat_id": "chat@g.us"}
+
+
 def test_submit_rejects_partial_staging_even_on_http_202(tmp_path):
   source = tmp_path / "input.bin"
   source.write_bytes(b"payload")

@@ -9,6 +9,7 @@ import {
   createControlPanelServer,
   type ControlPanelSystemActions,
 } from '../../src/controlPanel/server.ts';
+import type { ControlPanelSubagentActions } from '../../src/controlPanel/subagentOutboxClient.ts';
 import {
   ProjectUpdateError,
   type UpdateStatus,
@@ -20,6 +21,7 @@ async function startFixture(
   token: string | null = TOKEN,
   listenHost = '127.0.0.1',
   systemActions?: ControlPanelSystemActions,
+  subagentActions?: ControlPanelSubagentActions,
 ): Promise<{
   baseUrl: string;
   envPath: string;
@@ -52,6 +54,7 @@ async function startFixture(
     examplePath,
     auditPath: path.join(folder, 'audit.jsonl'),
     systemActions,
+    subagentActions,
   });
   server.listen(0, listenHost);
   await once(server, 'listening');
@@ -289,6 +292,69 @@ test('system restart and update actions are authenticated and compatibility-gate
     });
     assert.equal(restart.status, 202);
     assert.equal(restartCalls, 2);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('sub-agent outbox proxy lists, retries, discards, and audits callbacks', async () => {
+  const calls: string[] = [];
+  const entry = {
+    session_id: 'chat@g.us_deadbeef_123',
+    state: 'dead_letter' as const,
+    completion_status: 'completed',
+    callback_status: 422,
+    callback_error: 'HTTP 422: invalid_output',
+    dead_lettered_at: 1_785_600_000,
+    updated_at: 1_785_600_000,
+    callback_sequence: 9,
+    output_files: [{ name: 'video.mp4', size_bytes: 607_540_207 }],
+  };
+  const actions: ControlPanelSubagentActions = {
+    list: async () => ({ success: true, entries: [entry], count: 1 }),
+    retry: async (sessionId) => {
+      calls.push(`retry:${sessionId}`);
+      return { success: true };
+    },
+    discard: async (sessionId) => {
+      calls.push(`discard:${sessionId}`);
+      return { success: true };
+    },
+  };
+  const fixture = await startFixture(TOKEN, '127.0.0.1', undefined, actions);
+  const headers = {
+    Authorization: `Bearer ${TOKEN}`,
+    'Content-Type': 'application/json',
+  };
+  try {
+    const unauthorized = await fetch(`${fixture.baseUrl}/api/system/subagent-outbox`);
+    assert.equal(unauthorized.status, 401);
+
+    const listed = await fetch(`${fixture.baseUrl}/api/system/subagent-outbox`, { headers });
+    assert.equal(listed.status, 200);
+    assert.deepEqual((await listed.json() as { entries: unknown[] }).entries, [entry]);
+
+    const encoded = encodeURIComponent(entry.session_id);
+    const retried = await fetch(
+      `${fixture.baseUrl}/api/system/subagent-outbox/${encoded}/retry`,
+      { method: 'POST', headers, body: '{}' },
+    );
+    const discarded = await fetch(
+      `${fixture.baseUrl}/api/system/subagent-outbox/${encoded}/discard`,
+      { method: 'POST', headers, body: '{}' },
+    );
+    assert.equal(retried.status, 202);
+    assert.equal(discarded.status, 200);
+    assert.deepEqual(calls, [
+      `retry:${entry.session_id}`,
+      `discard:${entry.session_id}`,
+    ]);
+
+    const logs = await fetch(`${fixture.baseUrl}/api/logs`, { headers });
+    const logActions = (await logs.json() as { entries: Array<{ action: string }> })
+      .entries.map((item) => item.action);
+    assert.ok(logActions.includes('subagent_callback_retried'));
+    assert.ok(logActions.includes('subagent_callback_discarded'));
   } finally {
     await fixture.close();
   }

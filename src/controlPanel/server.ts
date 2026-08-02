@@ -49,6 +49,13 @@ import type {
   UpdateResult,
   UpdateStatus,
 } from '../system/updateManager.js';
+import {
+  createSubagentOutboxActions,
+  SubagentAdminError,
+} from './subagentOutboxClient.js';
+import type {
+  ControlPanelSubagentActions,
+} from './subagentOutboxClient.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -66,6 +73,7 @@ export interface ControlPanelServerOptions extends EnvironmentStoreOptions {
   auditPath?: string;
   maxBodyBytes?: number;
   systemActions?: ControlPanelSystemActions;
+  subagentActions?: ControlPanelSubagentActions;
 }
 
 export interface ControlPanelSystemActions {
@@ -487,6 +495,7 @@ export function createControlPanelServer(
       updateManager.update(confirmCompatibilityChange),
     restart: () => scheduleProcessRestart(),
   };
+  const subagentActions = options.subagentActions || createSubagentOutboxActions();
   const authFailures = new Map<string, AuthFailureState>();
 
   const server = http.createServer(async (req, res) => {
@@ -1095,6 +1104,57 @@ export function createControlPanelServer(
       if (method === 'GET' && pathname === '/api/system/update-status') {
         const refresh = requestUrl.searchParams.get('refresh') === '1';
         json(res, 200, await systemActions.getUpdateStatus(refresh));
+        return;
+      }
+
+      if (method === 'GET' && pathname === '/api/system/subagent-outbox') {
+        try {
+          json(res, 200, await subagentActions.list());
+        } catch (error) {
+          if (error instanceof SubagentAdminError) {
+            throw new HttpError(error.status, error.message);
+          }
+          throw error;
+        }
+        return;
+      }
+
+      const subagentOutboxAction = pathname.match(
+        /^\/api\/system\/subagent-outbox\/([^/]+)\/(retry|discard)$/,
+      );
+      if (method === 'POST' && subagentOutboxAction) {
+        let sessionId: string;
+        try {
+          sessionId = decodeURIComponent(subagentOutboxAction[1]);
+        } catch {
+          throw new HttpError(400, 'Invalid sub-agent callback session ID.');
+        }
+        const action = subagentOutboxAction[2];
+        if (!sessionId || sessionId.length > 512 || /[\x00-\x1f/\\]/.test(sessionId)) {
+          throw new HttpError(400, 'Invalid sub-agent callback session ID.');
+        }
+        try {
+          const result = action === 'retry'
+            ? await subagentActions.retry(sessionId)
+            : await subagentActions.discard(sessionId);
+          audit.record(
+            action === 'retry'
+              ? 'subagent_callback_retried'
+              : 'subagent_callback_discarded',
+            `${action === 'retry' ? 'Retried' : 'Discarded'} callback ${sessionId}.`,
+          );
+          json(res, action === 'retry' ? 202 : 200, result);
+        } catch (error) {
+          audit.record(
+            'subagent_callback_action_failed',
+            `${action} failed for callback ${sessionId}: ${errorMessage(error)}`,
+            { outcome: 'failure' },
+          );
+          if (error instanceof SubagentAdminError) {
+            throw new HttpError(error.status, error.message);
+          }
+          throw error;
+        }
         return;
       }
 

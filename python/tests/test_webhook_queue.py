@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import sys
 from pathlib import Path
 from typing import List, Tuple
@@ -364,7 +365,7 @@ async def test_unknown_completion_is_deferred_and_not_acknowledged_as_delivered(
 
 
 @pytest.mark.asyncio
-async def test_restart_completion_retries_until_recovery_handler_delivers():
+async def test_restart_completion_transfers_ownership_before_delivery_handler_is_ready():
   tracker = _make_tracker_with_session("recovered", "chat-recovered@g.us")
   server = SubAgentWebhookServer(tracker, port=0)
   payload = {
@@ -373,18 +374,72 @@ async def test_restart_completion_retries_until_recovery_handler_delivers():
     "result": {"success": True, "report": "done"},
   }
 
-  not_ready = await server._handle_callback(_FakeRequest(payload))
-  assert not_ready.status == 503
+  accepted = await server._handle_callback(_FakeRequest(payload))
 
-  recovery = AsyncMock()
-  server.set_completion_recovery_handler(recovery)
-  delivered = await server._handle_callback(_FakeRequest(payload))
-  duplicate = await server._handle_callback(_FakeRequest(payload))
+  assert accepted.status == 200
+  assert json.loads(accepted.text)["delivery_pending"] is True
+  assert tracker.get_finished("recovered") is not None
+  assert not tracker.is_delivered("recovered")
 
-  assert delivered.status == 200
-  assert duplicate.status == 200
-  recovery.assert_awaited_once_with("chat-recovered@g.us", "recovered")
-  assert tracker.is_delivered("recovered")
+
+@pytest.mark.asyncio
+async def test_legacy_durable_completion_recovers_chat_and_transfers_ownership(tmp_path):
+  session_id = "120363409432126565@g.us_4efb9f96_1785646592"
+  tracker = SubTaskTracker(state_path=tmp_path / "tracker.json")
+  server = SubAgentWebhookServer(tracker, port=0)
+
+  accepted = await server._handle_callback(_FakeRequest({
+    "type": "complete",
+    "session_id": session_id,
+    "result": {"success": True, "report": "recovered from durable outbox"},
+  }))
+
+  assert accepted.status == 200
+  assert json.loads(accepted.text)["delivery_pending"] is True
+  finished = tracker.get_finished(session_id)
+  assert finished is not None
+  assert finished.chat_id == "120363409432126565@g.us"
+
+
+@pytest.mark.asyncio
+async def test_oversized_downloadable_output_is_accepted_as_explicit_skip(
+  tmp_path, monkeypatch,
+):
+  import bridge.subagent.webhook_server as webhook_module
+
+  monkeypatch.setattr(webhook_module, "MAX_FILE_SIZE_BYTES", 4)
+  tracker = SubTaskTracker(state_path=tmp_path / "tracker.json")
+  tracker.register(SubTask(
+    session_id="large-policy", chat_id="chat@g.us", instruction="make video",
+  ))
+  server = SubAgentWebhookServer(tracker, port=0)
+  event = asyncio.Event()
+  server.register_completion_event("large-policy", event)
+
+  response = await server._handle_callback(_FakeRequest({
+    "type": "complete",
+    "session_id": "large-policy",
+    "result": {
+      "success": True,
+      "report": "video complete",
+      "output_files_omitted": [{
+        "file_id": "large-file",
+        "name": "video.mp4",
+        "size_bytes": 8,
+        "sha256": hashlib.sha256(b"12345678").hexdigest(),
+        "download_url": "/sessions/large-policy/outputs/large-file",
+      }],
+    },
+  }))
+
+  assert response.status == 200
+  assert event.is_set()
+  finished = tracker.get_finished("large-policy")
+  assert finished is not None
+  skipped = finished.result["output_files_content"][0]
+  assert skipped["code"] == "file_too_large"
+  assert "file too large" in skipped["bridge_skip_reason"]
+  assert "download_url" not in skipped
 
 
 @pytest.mark.asyncio

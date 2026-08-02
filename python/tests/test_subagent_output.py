@@ -781,6 +781,23 @@ class TestStageOutputFilesFromContent:
     assert len(result.skipped) == 1
     assert "too large" in result.skipped[0].reason
 
+  def test_bridge_policy_skip_reason_is_preserved(self, tmp_path):
+    result = stage_output_files(
+      "sess_bridge_skip",
+      [],
+      files_content=[{
+        "name": "video.mp4",
+        "size_bytes": 607_540_207,
+        "bridge_skip_reason": "file too large (607540207 bytes > 200 MB)",
+      }],
+      base_dir=tmp_path,
+    )
+
+    assert result.staged == []
+    assert len(result.skipped) == 1
+    assert result.skipped[0].name == "video.mp4"
+    assert result.skipped[0].reason == "file too large (607540207 bytes > 200 MB)"
+
   def test_collision_handling_in_files_content(self, tmp_path):
     data1 = base64.b64encode(b"content-one").decode("ascii")
     data2 = base64.b64encode(b"content-two").decode("ascii")

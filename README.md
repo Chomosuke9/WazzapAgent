@@ -129,6 +129,10 @@ From the panel you can:
   sweep;
 - edit the shared `.env` through focused System sections with secret values
   masked and restart-only fields marked;
+- inspect durable sub-agent completion callbacks under **System → Sub-agent
+  outbox**, retry terminal/pending deliveries, or discard only the callback
+  envelope while retaining the sub-agent result and output files until normal
+  idle cleanup;
 - check the installed/upstream application and compatibility versions, then
   safely fast-forward update or restart both supervised services; and
 - review the persistent control-panel audit trail.
@@ -142,6 +146,12 @@ While an account is unpaired or reconnecting, the bridge remains connected to
 Node but parks cold sub-agent recovery, scheduled tasks, and direct-invoke
 delivery. They resume only after WhatsApp reports `open`; pre-pair actions are
 rejected before execution and remain safe to retry after pairing.
+
+Sub-agent completion ownership transfers as soon as the bridge has durably
+stored the result. A file larger than the bridge's 200 MiB staging limit is
+reported as an explicit skipped output instead of keeping the entire callback
+in an infinite retry loop. The text report and any other valid outputs remain
+deliverable after pairing.
 
 `package.json` carries an application `version` and a separate
 `compatibilityVersion`. The latter must be incremented when an update may need

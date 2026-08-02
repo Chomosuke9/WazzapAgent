@@ -1248,7 +1248,11 @@ context block from ``SubTaskTracker.format_context``).
           submit_failed = False
           try:
             await subagent_client.submit(
-              session_id, instruction, input_files, high_quality=high_quality,
+              session_id,
+              instruction,
+              input_files,
+              high_quality=high_quality,
+              callback_context={"chat_id": chat_id},
             )
           except SubAgentSubmitError as submit_err:
             logger.error(
@@ -1510,6 +1514,7 @@ context block from ``SubTaskTracker.format_context``).
                       input_files,
                       high_quality=high_quality,
                       previous_session_id=previous_session_id,
+                      callback_context={"chat_id": chat_id},
                     )
                   except Exception as _submit_err:  # pylint: disable=broad-except
                     logger.exception(

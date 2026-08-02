@@ -171,6 +171,7 @@ class SubAgentClient:
     *,
     high_quality: bool = False,
     previous_session_id: str | None = None,
+    callback_context: dict[str, str] | None = None,
   ) -> dict:
     """Submit a task to the SubAgent (non-blocking).
 
@@ -198,6 +199,8 @@ class SubAgentClient:
     }
     if previous_session_id is not None:
       payload["previous_session_id"] = previous_session_id
+    if callback_context:
+      payload["callback_context"] = dict(callback_context)
     expected_manifest = await asyncio.to_thread(
       self._expected_input_manifest, input_files,
     )

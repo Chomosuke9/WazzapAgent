@@ -34,6 +34,7 @@ from .config import (
   subagent_webhook_token_env,
 )
 from .output import MAX_FILE_SIZE_BYTES
+from .models import SubTask
 from .tracker import (
   SubTaskOutputError,
   SubTaskPersistenceError,
@@ -390,6 +391,37 @@ class SubAgentWebhookServer:
     except OSError:
       return False
 
+  @staticmethod
+  def _completion_chat_id(session_id: str, data: dict) -> str | None:
+    """Recover the owning chat for a durable callback after bridge restart.
+
+    New senders provide an explicit authenticated context. The strict legacy
+    parser keeps already-persisted ``<chat>_<8hex>_<epoch>`` sessions
+    recoverable without accepting arbitrary unknown callback identifiers.
+    """
+    context = data.get("context")
+    explicit = context.get("chat_id") if isinstance(context, dict) else None
+    candidates: list[str] = []
+    if isinstance(explicit, str):
+      candidates.append(explicit.strip())
+    legacy = session_id.rsplit("_", 2)
+    if (
+      len(legacy) == 3
+      and len(legacy[1]) == 8
+      and all(ch in "0123456789abcdef" for ch in legacy[1].lower())
+      and legacy[2].isdigit()
+    ):
+      candidates.append(legacy[0])
+    for chat_id in candidates:
+      if (
+        0 < len(chat_id) <= 256
+        and not any(ord(ch) < 32 for ch in chat_id)
+        and chat_id.endswith(("@g.us", "@s.whatsapp.net", "@lid"))
+        and session_id.startswith(f"{chat_id}_")
+      ):
+        return chat_id
+    return None
+
   async def _materialize_downloadable_outputs(
     self, session_id: str, result: dict,
   ) -> dict:
@@ -438,10 +470,20 @@ class SubAgentWebhookServer:
         except (TypeError, ValueError):
           raise _OutputDownloadError("download manifest has invalid size_bytes") from None
         expected_sha = str(item.get("sha256") or "").strip().lower()
-        if expected_size < 0 or expected_size > MAX_FILE_SIZE_BYTES:
-          raise _OutputDownloadError(
-            f"downloaded output size {expected_size} exceeds the 200 MB limit"
+        if expected_size < 0:
+          raise _OutputDownloadError("download manifest has invalid size_bytes")
+        if expected_size > MAX_FILE_SIZE_BYTES:
+          # This is a permanent delivery-policy outcome, not a transient
+          # transport failure. Preserve the completion and report, but turn the
+          # file into an explicit skipped entry instead of returning retryable
+          # HTTP 502 forever.
+          item.pop("download_url", None)
+          item["code"] = "file_too_large"
+          item["bridge_skip_reason"] = (
+            f"file too large ({expected_size} bytes > 200 MB)"
           )
+          updated_entries.append(item)
+          continue
         if len(expected_sha) != 64 or any(ch not in "0123456789abcdef" for ch in expected_sha):
           raise _OutputDownloadError("download manifest has invalid sha256")
         file_id = str(item.get("file_id") or f"output-{index}")
@@ -579,6 +621,17 @@ class SubAgentWebhookServer:
         return web.json_response(
           {"status": "output_download_failed", "retryable": True}, status=502,
         )
+      if (
+        self._tracker.get_chat_for_session(session_id) is None
+        and not self._tracker.is_finished(session_id)
+      ):
+        recovered_chat_id = self._completion_chat_id(session_id, data)
+        if recovered_chat_id is not None:
+          self._tracker.register(SubTask(
+            session_id=session_id,
+            chat_id=recovered_chat_id,
+            instruction="Recovered durable completion callback",
+          ))
       try:
         result = await asyncio.to_thread(
           self._tracker.prepare_result, session_id, result,
@@ -620,6 +673,7 @@ class SubAgentWebhookServer:
         return web.json_response(
           {"status": "pending_registration", "retryable": True}, status=409,
         )
+      delivery_pending = False
       event = self._completion_events.pop(session_id, None)
       if event is not None:
         event.set()
@@ -633,20 +687,26 @@ class SubAgentWebhookServer:
             {"status": "pending_registration", "retryable": True}, status=409,
           )
         if handler is None:
-          logger.warning("SubAgent recovery delivery not ready: session=%s", session_id)
-          return web.json_response(
-            {"status": "recovery_not_ready", "retryable": True}, status=503,
+          # Ownership transferred once the result is durably present in the
+          # tracker. A startup recovery pass will deliver it after WhatsApp is
+          # open, so asking the sender to retain and resend the same callback
+          # only creates a restart-proof retry loop.
+          delivery_pending = True
+          logger.info(
+            "SubAgent completion accepted for deferred delivery: session=%s",
+            session_id,
           )
-        try:
-          await handler(finished.chat_id, session_id)
-        except Exception as exc:  # pylint: disable=broad-except
-          logger.exception(
-            "SubAgent recovery delivery failed session=%s: %s", session_id, exc,
-          )
-          return web.json_response(
-            {"status": "recovery_failed", "retryable": True}, status=500,
-          )
-        self._tracker.mark_delivered(session_id)
+        else:
+          try:
+            await handler(finished.chat_id, session_id)
+          except Exception as exc:  # pylint: disable=broad-except
+            logger.exception(
+              "SubAgent recovery delivery failed session=%s: %s", session_id, exc,
+            )
+            return web.json_response(
+              {"status": "recovery_failed", "retryable": True}, status=500,
+            )
+          self._tracker.mark_delivered(session_id)
       # Also clean up the keepalive event — no more progress will arrive.
       self._progress_events.pop(session_id, None)
       # Drop dedup state — once the session is finalised, any future
@@ -658,7 +718,7 @@ class SubAgentWebhookServer:
         session_id,
         result.get("success"),
       )
-      return web.json_response({"status": "ok"})
+      return web.json_response({"status": "ok", "delivery_pending": delivery_pending})
 
     if msg_type == "steering":
       # Steering acknowledgements are purely informational — the bridge
