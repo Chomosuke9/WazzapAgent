@@ -118,6 +118,11 @@ export interface Config {
   // load the same .env (see featureAvailability.ts).
   llm1Configured: boolean;
   subagentConfigured: boolean;
+  controlPanelEnabled: boolean;
+  controlPanelHost: string;
+  controlPanelPort: number;
+  controlPanelToken: string | null;
+  controlPanelMaxBodyBytes: number;
 }
 
 function buildConfig(): Config {
@@ -204,6 +209,19 @@ function buildConfig(): Config {
   // so the presence of an explicit env value is the signal that the owner
   // actually set the service up. Used to reject /subagent on when unset.
   subagentConfigured: Boolean((process.env.SUBAGENT_URL || '').trim()),
+  // The control panel is served by the Node gateway so it can operate on the
+  // exact same per-tenant registry, repositories, and Baileys sockets. Static
+  // assets and the setup-status probe remain reachable when no token is
+  // configured, but every management API stays fail-closed until a
+  // sufficiently long CONTROL_PANEL_TOKEN is supplied.
+  controlPanelEnabled: booleanEnv(process.env.CONTROL_PANEL_ENABLED, true),
+  controlPanelHost: process.env.CONTROL_PANEL_HOST || '127.0.0.1',
+  controlPanelPort: positiveInt(process.env.CONTROL_PANEL_PORT, 8080),
+  controlPanelToken: (process.env.CONTROL_PANEL_TOKEN || '').trim() || null,
+  controlPanelMaxBodyBytes: positiveInt(
+    process.env.CONTROL_PANEL_MAX_BODY_BYTES,
+    2 * 1024 * 1024,
+  ),
   };
 }
 
@@ -218,9 +236,26 @@ function validateConfig(c: Config): void {
       `Invalid WS_LISTEN_PORT (resolved=${c.wsListenPort}): must be an integer between 1 and 65535.`,
     );
   }
+  if (
+    !Number.isInteger(c.controlPanelPort)
+    || c.controlPanelPort < 1
+    || c.controlPanelPort > 65535
+  ) {
+    throw new Error(
+      `Invalid CONTROL_PANEL_PORT (resolved=${c.controlPanelPort}): must be an integer between 1 and 65535.`,
+    );
+  }
 }
 
 validateConfig(config);
+
+/** Re-read `.env` immediately and mutate the shared config object in place. */
+export function reloadConfigFromEnv(): void {
+  dotenvConfig({ path: ENV_PATH, override: true });
+  const nextConfig = buildConfig();
+  validateConfig(nextConfig);
+  Object.assign(config, nextConfig);
+}
 
 // Hot reload: re-read .env on change and mutate the shared config object in
 // place so existing importers see updates. Only fields read fresh per-use
@@ -232,8 +267,7 @@ validateConfig(config);
 try {
   fs.watch(ENV_PATH, () => {
     try {
-      dotenvConfig({ path: ENV_PATH, override: true });
-      Object.assign(config, buildConfig());
+      reloadConfigFromEnv();
     } catch {
       // keep last-good config on a malformed save mid-write
     }

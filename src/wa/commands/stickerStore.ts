@@ -132,6 +132,42 @@ export function parseStickerScope(
 // CRUD — all keyed by the tenant's folderPath (resolves the correct DB file)
 // ---------------------------------------------------------------------------
 
+export interface StickerCatalogEntry {
+  chatId: string;
+  name: string;
+  kind: "webp" | "lottie";
+  filePath: string | null;
+  addedBy: string;
+  addedAt: string;
+}
+
+/** List the authenticated tenant's catalog without returning Lottie payloads. */
+export function listStickers(
+  folderPath: string | null | undefined,
+): StickerCatalogEntry[] {
+  const rows = getStickerDb(folderPath)
+    .prepare(
+      `SELECT chat_id, name, file_path, lottie_payload, added_by, added_at
+       FROM stickers ORDER BY chat_id ASC, name ASC`,
+    )
+    .all() as Array<{
+      chat_id: string;
+      name: string;
+      file_path: string;
+      lottie_payload: string | null;
+      added_by: string;
+      added_at: string;
+    }>;
+  return rows.map((row) => ({
+    chatId: row.chat_id,
+    name: row.name,
+    kind: row.lottie_payload ? "lottie" : "webp",
+    filePath: row.file_path || null,
+    addedBy: row.added_by,
+    addedAt: row.added_at,
+  }));
+}
+
 /** Register/replace a regular (WebP) sticker. Returns "added" | "updated". */
 export function upsertWebpSticker(
   folderPath: string | null | undefined,

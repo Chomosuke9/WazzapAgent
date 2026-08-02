@@ -63,6 +63,9 @@ BOT_OWNER_JIDS=628123456789       # owner number(s), for owner-only commands
 LLM2_ENDPOINT=                    # empty = OpenAI default; or e.g. OpenRouter
 LLM2_MODEL=gpt-4o
 LLM2_API_KEY=sk-...
+
+# Unlock the integrated control panel at http://127.0.0.1:8080.
+CONTROL_PANEL_TOKEN=replace-with-at-least-16-random-characters
 ```
 
 That's the minimal set. `.env.minimal.example` documents the optional **LLM1**
@@ -104,6 +107,30 @@ PYTHONPATH=python python -m bridge.main
 Once linked you'll see `WhatsApp socket connected`. Message the bot (or add it
 to a group) and it replies. The WhatsApp session is saved under `./data/auth`,
 so you only link once.
+
+### Control panel
+
+The Node gateway also serves a multi-tenant control panel at
+`http://127.0.0.1:8080` by default. Enter `CONTROL_PANEL_TOKEN` on its login
+screen. The API stays locked when the token is absent or shorter than 16
+characters.
+
+From the panel you can:
+
+- inspect Node, Python bridge, WhatsApp, queue, and per-tenant state;
+- generate a native WhatsApp pairing code directly (leave
+  `WA_PAIRING_NUMBER` empty if you want pairing to be panel-driven);
+- reconnect or explicitly disconnect a WhatsApp session;
+- edit chat/default settings, prompts, memories, models, activation codes,
+  tenant-wide bot config, and sticker catalogs;
+- edit the shared `.env` with secret values masked and restart-only fields
+  marked; and
+- review the persistent control-panel audit trail.
+
+The server binds loopback by default. For a remote deployment, explicitly set
+`CONTROL_PANEL_HOST=0.0.0.0`, expose the port only through a firewall or reverse
+proxy, use HTTPS at that boundary, and keep a strong admin token. Pairing and
+session-reset endpoints must never be exposed without access control.
 
 ---
 

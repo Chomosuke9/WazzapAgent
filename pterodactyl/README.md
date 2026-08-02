@@ -74,6 +74,7 @@ heavy provisioning is cached (it re-runs only when `requirements.txt` changes).
    touch it (it's git-ignored), so it survives updates. The minimal set is:
    ```dotenv
    WA_PAIRING_NUMBER=6281234567890
+   CONTROL_PANEL_TOKEN=replace-with-at-least-16-random-characters
    ASSISTANT_NAME=LLM
    BOT_OWNER_JIDS=628123456789
    LLM2_ENDPOINT=
@@ -104,6 +105,10 @@ Watch the console after starting:
   fresh one.)
 - Without it, a QR is rendered in the console instead — scan it.
 
+Alternatively, leave `WA_PAIRING_NUMBER` empty and request the native pairing
+code from the web control panel. The panel waits for the socket's pairing-ready
+state, then returns the code only to the authenticated browser session.
+
 Once linked you'll see `WhatsApp socket connected`. The session is saved, so you
 only pair once.
 
@@ -127,8 +132,12 @@ only pair once.
   / `FFMPEG_STATIC_URL` env vars if an asset ever 404s.
 - **Updating:** the generic egg `git pull`s on each start; the bootstrap re-uses
   the cached Python/ffmpeg. Your `data/` and `.env` are preserved.
-- **Port.** The server's primary allocation is used as the internal WS port
-  (loopback only) — nothing needs to be reachable from outside.
+- **Ports.** The primary allocation remains the internal WS port (loopback
+  only). The control panel also binds `127.0.0.1:8080` by default. To expose it
+  through Pterodactyl, assign a separate allocation, set
+  `CONTROL_PANEL_HOST=0.0.0.0` and `CONTROL_PANEL_PORT` to that allocation, and
+  protect it with a strong `CONTROL_PANEL_TOKEN`, HTTPS reverse proxy, and
+  firewall/private-network rules. Never reuse the internal WS allocation.
 
 ---
 

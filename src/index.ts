@@ -23,9 +23,12 @@ import {
 import { startWsServer } from './server/wsServer.js';
 import { initCommandRegistry } from './wa/command/CommandRegistry.js';
 import { initButtonRegistry } from './wa/command/ButtonRegistry.js';
+import { startControlPanel } from './controlPanel/server.js';
 import type { WebSocketServer } from 'ws';
+import type { Server as HttpServer } from 'http';
 
 let wss: WebSocketServer | undefined;
+let controlPanelServer: HttpServer | undefined;
 
 /** Close every live account's Database (Step 05: persistence is per-tenant). */
 function closeAllAccountDbs(): void {
@@ -61,6 +64,13 @@ async function bootstrap(): Promise<void> {
   // is bound to its tenant account by the server's `hello` handshake; action
   // routing is delegated to `account/actionDispatcher.ts`.
   wss = startWsServer(config.wsListenPort);
+
+  // The HTTP control panel shares this process intentionally: it reads the
+  // live account registry and per-tenant repository objects directly, so its
+  // health, pairing, and settings views cannot drift from the gateway state.
+  if (config.controlPanelEnabled) {
+    controlPanelServer = startControlPanel();
+  }
 }
 
 let shuttingDown = false;
@@ -86,6 +96,14 @@ async function shutdown(signal: string): Promise<void> {
       await Promise.race([
         new Promise<void>((resolve) => {
           wss!.close(() => resolve());
+        }),
+        new Promise<void>((resolve) => setTimeout(resolve, 3000)),
+      ]);
+    }
+    if (controlPanelServer) {
+      await Promise.race([
+        new Promise<void>((resolve) => {
+          controlPanelServer!.close(() => resolve());
         }),
         new Promise<void>((resolve) => setTimeout(resolve, 3000)),
       ]);

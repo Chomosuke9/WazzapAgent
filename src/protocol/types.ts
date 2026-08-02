@@ -207,6 +207,8 @@ export interface AccountEntry {
   client?: import("ws").WebSocket;    // bound Python client, undefined when disconnected
   waStatus: WaStatus;
   pairingRetryAfterMs?: number;       // initial pairing is paused until this time after a rejection/transport close; prevents rate-limit loops
+  pairingPhoneNumber?: string;        // digits-only number for an active native pairing attempt (console or control panel)
+  pairingRequestedAtMs?: number;      // local timestamp used for operator status/audit only; not a WhatsApp expiry guarantee
   reliableQueue: OutboundFrame[];     // per-account reliable queue (bound MAX_RELIABLE_QUEUE)
   database?: Database;                // per-tenant DB connection-owner (Step 05), opened by the factory
   repos?: AccountRepositories;        // per-tenant repositories built from `database` (Step 05)

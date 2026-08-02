@@ -94,6 +94,11 @@ src/                          Node.js gateway runtime (WS SERVER, TypeScript)
   server/
     wsServer.ts               WS server: accept clients on WS_LISTEN_PORT, per-connection heartbeat
     accountRegistry.ts        Bind each client to its folder_path AccountEntry
+  controlPanel/               Authenticated HTTP control plane (one server for every tenant)
+    server.ts                 JSON API, static UI, live registry/repository orchestration
+    envStore.ts               Masked .env reads + atomic known-key updates
+    auditLog.ts               Persistent bounded JSONL control-panel audit trail
+    public/                   Framework-free responsive dashboard (HTML/CSS/JS)
   account/                    Per-tenant aggregate (one AccountEntry per folder_path)
     baileysFactory.ts         Create/resume the per-tenant Baileys socket + dirs; owns Database + repos
     accountContext.ts         Per-account caches / identifiers / sendQueue / forwarder / repos
@@ -548,6 +553,14 @@ true = interactive card via sendRichMessage, mobile only),
 **Shared Media:**
 `LLM_MEDIA_MAX_ITEMS` (default 2), `LLM_MEDIA_MAX_BYTES` (default 5242880)
 
+**Control panel:**
+`CONTROL_PANEL_ENABLED` (default true), `CONTROL_PANEL_HOST` (default
+`127.0.0.1`), `CONTROL_PANEL_PORT` (default 8080), `CONTROL_PANEL_TOKEN`
+(required for every API call; minimum 16 characters),
+`CONTROL_PANEL_MAX_BODY_BYTES` (default 2097152). Without a valid token, only
+the static setup screen and non-sensitive setup-status probe are served; every
+management API fails closed.
+
 **SQLite DB paths (defaults under DATA_DIR):**
 `SETTINGS_DB_PATH`, `STATS_DB_PATH`, `MODERATION_DB_PATH`,
 `SUBAGENT_DB_PATH`, `STICKERS_DB_PATH`,
@@ -775,6 +788,32 @@ Messages from muted users are completely invisible to LLM1/LLM2.
   `DIRECT_INVOKE_PORT` (base; account N binds `base + N`), `DIRECT_INVOKE_HOST`,
   `DIRECT_INVOKE_MAX_CHARS` (see `.env.example`).
 
+### Web control panel
+
+- `src/controlPanel/server.ts` runs one authenticated HTTP control plane in the
+  Node gateway process. It manages every registered tenant through opaque
+  account IDs and the existing per-tenant repositories; it never accepts an
+  arbitrary folder path from the browser.
+- The panel exposes live account state and controls for pairing, reconnecting,
+  session removal, chat settings/memory, models, activation codes, bot config,
+  stickers, masked environment configuration, and its audit log. Repository
+  changes emit the same reliable invalidation frames used by slash commands so
+  the Python bridge observes them without a restart where supported.
+- Pairing uses Baileys' native `requestPairingCode(phoneNumber)` only after the
+  socket emits a QR-ready state. Requests are serialized, cooldown-limited,
+  and recent codes are reused to avoid accidental retry loops. The code itself
+  is returned only to the authenticated request and is never written to logs.
+- **Security / fail-closed:** every management/data API uses a constant-time
+  bearer token comparison and per-IP failed-auth throttling. The public
+  `/api/auth/status` probe returns only whether setup is complete. The server binds loopback
+  by default, sends a strict CSP and other security headers, does not use
+  cookies, masks secret `.env` values, and records mutations in
+  `data/control-panel-audit.jsonl`. Expose it remotely only behind HTTPS plus a
+  firewall or authenticated private network.
+- Removing a WhatsApp session requires the exact confirmation `DISCONNECT`,
+  logs out Baileys, and clears only that tenant's `auth/` directory; DB, media,
+  stickers, and other tenants are preserved.
+
 ### Sub-agent integration
 
 The sub-agent system delegates complex tasks to an external service (WazzapSubAgents):
@@ -844,7 +883,8 @@ The sub-agent system delegates complex tasks to an external service (WazzapSubAg
 - **Install Node deps**: `pnpm install` (Node 18+; project is ESM + TypeScript via `tsx`)
 - **Install Python deps**: `pip install -r requirements.txt` (Python 3.10+)
 - **Run gateway**: `pnpm dev` (same as `pnpm start`, runs `tsx src/index.ts`) —
-  binds the WS server on `WS_LISTEN_PORT` and creates/resumes a Baileys socket per tenant
+  binds the WS server on `WS_LISTEN_PORT`, serves the control panel on
+  `CONTROL_PANEL_HOST:CONTROL_PANEL_PORT`, and creates/resumes a Baileys socket per tenant
 - **Run Python bridge**: `python -m bridge.main` (dials `NODE_URL` per account)
 - **Typecheck**: `pnpm typecheck` (`tsc --noEmit`) → must be 0 errors
 - **Lint**: `pnpm lint` (currently placeholder)

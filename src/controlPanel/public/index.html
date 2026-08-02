@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <title>WazzapAgents Control Center</title>
+    <meta name="description" content="Secure multi-tenant control panel for WazzapAgents.">
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <section id="login-shell" class="login-shell" aria-labelledby="login-title">
+      <div class="login-card">
+        <div class="brand-mark" aria-hidden="true">W</div>
+        <p class="eyebrow">WazzapAgents</p>
+        <h1 id="login-title">Control Center</h1>
+        <p id="login-copy" class="muted">Enter the admin token configured on this gateway.</p>
+        <form id="login-form" class="stack">
+          <label class="field-label" for="admin-token">Admin token</label>
+          <input id="admin-token" name="token" type="password" autocomplete="current-password" minlength="16" required>
+          <button class="button primary full" type="submit">Unlock control panel</button>
+        </form>
+        <p id="login-error" class="form-error" role="alert"></p>
+        <div id="setup-help" class="setup-help hidden">
+          Add <code>CONTROL_PANEL_TOKEN</code> with at least 16 characters to <code>.env</code>. The API remains locked until then.
+        </div>
+      </div>
+    </section>
+
+    <div id="app" class="app-shell hidden">
+      <aside id="sidebar" class="sidebar">
+        <div class="sidebar-brand">
+          <div class="brand-mark small" aria-hidden="true">W</div>
+          <span>WazzapAgents</span>
+        </div>
+        <nav class="navigation" aria-label="Control panel sections">
+          <button class="nav-item active" data-page="overview"><span>◉</span>Overview</button>
+          <button class="nav-item" data-page="accounts"><span>◎</span>Accounts</button>
+          <button class="nav-item" data-page="chats"><span>◇</span>Chats</button>
+          <button class="nav-item" data-page="models"><span>⌘</span>Models</button>
+          <button class="nav-item" data-page="activation"><span>⌁</span>Activation</button>
+          <button class="nav-item" data-page="stickers"><span>☺</span>Stickers</button>
+          <button class="nav-item" data-page="system"><span>▤</span>System</button>
+          <button class="nav-item" data-page="logs"><span>≡</span>Logs</button>
+        </nav>
+        <div class="sidebar-footer">
+          <span class="status-dot success"></span>
+          <span>Admin API protected</span>
+          <button id="logout-button" class="text-button" type="button">Lock</button>
+        </div>
+      </aside>
+
+      <main class="main-shell">
+        <header class="topbar">
+          <button id="menu-button" class="icon-button mobile-only" type="button" aria-label="Open navigation">☰</button>
+          <div>
+            <p class="topbar-title">Control Center</p>
+            <p id="system-summary" class="topbar-status"><span class="status-dot success"></span>Loading gateway status…</p>
+          </div>
+          <div class="topbar-actions">
+            <span class="secure-badge">⌾ Protected by admin token</span>
+            <button id="refresh-button" class="button secondary" type="button">↻ Refresh</button>
+          </div>
+        </header>
+        <section id="content" class="content" aria-live="polite"></section>
+      </main>
+    </div>
+
+    <div id="modal-root" class="modal-root hidden" role="presentation"></div>
+    <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+  </body>
+</html>

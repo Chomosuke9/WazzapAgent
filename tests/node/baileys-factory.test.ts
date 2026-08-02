@@ -9,6 +9,7 @@ import {
   createOrResumeAccount,
   ensureFolderLayout,
   isStaleMessage,
+  requestAccountPairingCode,
   __setSocketCreatorForTests,
 } from '../../src/account/baileysFactory.ts';
 import {
@@ -195,6 +196,33 @@ test('same folderPath again returns the SAME entry (idempotent) once a socket is
   } finally {
     remove(folder);
     rmrf(folder);
+    __setSocketCreatorForTests(null);
+  }
+});
+
+test('control-panel pairing waits for socket readiness and reuses one native code', async () => {
+  const folder = tmpFolder('wazzap-panel-pair-');
+  const fake = new FakeSock();
+  fake.authState.creds.registered = false;
+  __setSocketCreatorForTests(async () => fake as unknown as never);
+  try {
+    const first = requestAccountPairingCode(folder, '+62 812-3456-7890');
+    await waitFor(() => Boolean(get(folder)?.sock), 'pairing socket should be created');
+
+    fake.emit('connection.update', { qr: 'test-qr' });
+    const result = await first;
+
+    assert.equal(result.code, 'ABCD-1234');
+    assert.equal(result.phoneNumber, '6281234567890');
+    assert.deepEqual(fake.pairingRequests, [
+      { phoneNumber: '6281234567890', customCode: undefined },
+    ]);
+
+    const repeated = await requestAccountPairingCode(folder, '6281234567890');
+    assert.equal(repeated.code, result.code, 'recent UI refresh reuses the code');
+    assert.equal(fake.pairingRequests.length, 1, 'no second native code is minted');
+  } finally {
+    cleanupAccount(folder);
     __setSocketCreatorForTests(null);
   }
 });

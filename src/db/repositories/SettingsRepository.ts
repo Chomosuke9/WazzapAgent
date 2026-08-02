@@ -34,12 +34,82 @@ interface IdleTrigger {
   max: number;
 }
 
+export interface ChatSettingsInfo {
+  chatId: string;
+  prompt: string | null;
+  permission: number;
+  mode: string;
+  triggers: string[];
+  llm2Model: string | null;
+  subagentEnabled: boolean;
+  idleTriggerMin: number | null;
+  idleTriggerMax: number | null;
+  announcementEnabled: boolean;
+  compatibilityMode: string;
+  autoDevice: string | null;
+  updatedAt: string;
+}
+
+export interface BotConfigInfo {
+  key: string;
+  value: string | null;
+  updatedAt: string;
+}
+
 export const VALID_MODES = new Set(["auto", "prefix", "hybrid"]);
 export const VALID_TRIGGERS = new Set(["tag", "tagall", "reply", "join", "name"]);
 export const VALID_COMPAT_MODES = new Set(["auto", "full", "semi", "safe"]);
 export const DEFAULT_COMPAT_MODE = "auto";
 
 export class SettingsRepository extends BaseRepository {
+  private mapChatSettings(row: import("./BaseRepository.js").ChatSettingsRow): ChatSettingsInfo {
+    return {
+      chatId: row.chat_id,
+      prompt: row.prompt,
+      permission: row.permission,
+      mode: row.mode,
+      triggers: row.triggers
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean),
+      llm2Model: row.llm2_model,
+      subagentEnabled: row.subagent_enabled === 1,
+      idleTriggerMin: row.idle_trigger_min,
+      idleTriggerMax: row.idle_trigger_max,
+      announcementEnabled: row.announcement_enabled !== 0,
+      compatibilityMode: row.compatibility_mode,
+      autoDevice: row.auto_device,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  /** Return only the chat's own row (no __global__ fallback). */
+  getChatSettingsRecord(chatId: string): ChatSettingsInfo | null {
+    const row = this.getOneFromState<import("./BaseRepository.js").ChatSettingsRow>(
+      this.settingsState,
+      initSettingsTables,
+      "SELECT * FROM chat_settings WHERE chat_id = ?",
+      chatId,
+    );
+    return row ? this.mapChatSettings(row) : null;
+  }
+
+  /** List every explicitly configured chat plus the __global__ defaults row. */
+  listChatSettings(): ChatSettingsInfo[] {
+    return this.getAllFromState<import("./BaseRepository.js").ChatSettingsRow>(
+      this.settingsState,
+      initSettingsTables,
+      `SELECT * FROM chat_settings
+       ORDER BY CASE WHEN chat_id = '__global__' THEN 0 ELSE 1 END, updated_at DESC`,
+    ).map((row) => this.mapChatSettings(row));
+  }
+
+  getEffectiveChatSettings(chatId: string): ChatSettingsInfo | null {
+    const row = this.getSettingRow(chatId);
+    if (!row) return null;
+    return { ...this.mapChatSettings(row), chatId };
+  }
+
   getPrompt(chatId: string): string | null {
     const row = this.getSettingRow(chatId);
     return row?.prompt ?? null;
@@ -251,6 +321,22 @@ export class SettingsRepository extends BaseRepository {
       value,
     );
     logger.info({ key }, "DB bot_config_set");
+  }
+
+  listBotConfig(): BotConfigInfo[] {
+    return this.getAllFromState<{
+      key: string;
+      value: string | null;
+      updated_at: string;
+    }>(
+      this.settingsState,
+      initSettingsTables,
+      "SELECT key, value, updated_at FROM bot_config ORDER BY key ASC",
+    ).map((row) => ({
+      key: row.key,
+      value: row.value,
+      updatedAt: row.updated_at,
+    }));
   }
 
   getSubagentEnabled(chatId: string): boolean {

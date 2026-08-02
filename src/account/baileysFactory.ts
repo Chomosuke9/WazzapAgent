@@ -131,6 +131,57 @@ let socketCreator: SocketCreator = defaultSocketCreator;
  */
 const socketBuilds = new Map<string, Promise<void>>();
 
+export type PairingCodeErrorCode =
+  | "invalid_phone"
+  | "already_linked"
+  | "cooldown"
+  | "busy"
+  | "not_ready"
+  | "request_failed"
+  | "timeout";
+
+/** Operator-facing error with a stable API code for the control panel. */
+export class PairingCodeError extends Error {
+  readonly code: PairingCodeErrorCode;
+  readonly retryAfterMs?: number;
+
+  constructor(
+    code: PairingCodeErrorCode,
+    message: string,
+    retryAfterMs?: number,
+  ) {
+    super(message);
+    this.name = "PairingCodeError";
+    this.code = code;
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+export interface PairingCodeResult {
+  code: string;
+  phoneNumber: string;
+  generatedAtMs: number;
+}
+
+interface PendingPairingRequest {
+  phoneNumber: string;
+  promise: Promise<PairingCodeResult>;
+  resolve: (result: PairingCodeResult) => void;
+  reject: (error: Error) => void;
+  timeout: ReturnType<typeof setTimeout>;
+  started: boolean;
+}
+
+interface CachedPairingCode extends PairingCodeResult {
+  reuseUntilMs: number;
+}
+
+const pendingPairingRequests = new Map<string, PendingPairingRequest>();
+const cachedPairingCodes = new Map<string, CachedPairingCode>();
+const pairingReadySockets = new WeakSet<WASocket>();
+const PAIRING_REQUEST_TIMEOUT_MS = 45_000;
+const PAIRING_CODE_REUSE_MS = 2 * 60_000;
+
 /**
  * TEST SEAM — override the Baileys socket creator so tests run fully offline
  * (no version-fetch network call, no real socket). Pass `null` to restore the
@@ -430,54 +481,350 @@ export function installRelayMessageCache(account: AccountContext): void {
 // Event-listener wiring (Step 07 — extracted from buildSocket)
 // ---------------------------------------------------------------------------
 
-/**
- * Request an 8-char WhatsApp pairing code for `phoneNumber` (digits only, with
- * country code) and surface it prominently on stdout + the structured log, so a
- * headless deploy (e.g. Pterodactyl console) can pair WITHOUT a QR. WhatsApp
- * formats the code as `XXXX-XXXX` in the Linked Devices UI.
- *
- * Let Baileys generate the code. Its native flow binds the code to the current
- * auth state and pairing key; carrying a custom code across socket generations
- * is unsupported by the upstream example and obscures which attempt is live.
- *
- * Best-effort: on failure it logs the error and falls back to printing the QR
- * (when `fallbackQr` is provided), so a transient pairing-code failure never
- * leaves the operator with no way to authenticate.
- */
-function requestPairingCode(
+/** Format Baileys' native eight-character code for human entry. */
+function formatPairingCode(code: string): string {
+  const compact = code.replace(/[^a-zA-Z0-9]/g, "");
+  return compact.length === 8
+    ? `${compact.slice(0, 4)}-${compact.slice(4)}`
+    : code;
+}
+
+function maskPairingPhone(phoneNumber: string): string {
+  if (phoneNumber.length <= 6) return "***";
+  return `${phoneNumber.slice(0, 3)}***${phoneNumber.slice(-3)}`;
+}
+
+/** Let Baileys generate and bind a code to the current auth state. */
+async function requestNativePairingCode(
   sock: WASocket,
   phoneNumber: string,
+): Promise<PairingCodeResult> {
+  const code = await sock.requestPairingCode(phoneNumber);
+  return {
+    code: formatPairingCode(code),
+    phoneNumber,
+    generatedAtMs: Date.now(),
+  };
+}
+
+function cachePairingCode(
   folderPath: string,
+  result: PairingCodeResult,
+): void {
+  cachedPairingCodes.set(folderPath, {
+    ...result,
+    reuseUntilMs: Date.now() + PAIRING_CODE_REUSE_MS,
+  });
+}
+
+function clearPendingPairing(
+  folderPath: string,
+  request: PendingPairingRequest,
+): void {
+  if (pendingPairingRequests.get(folderPath) !== request) return;
+  clearTimeout(request.timeout);
+  pendingPairingRequests.delete(folderPath);
+}
+
+function rejectPendingPairing(folderPath: string, error: Error): void {
+  const request = pendingPairingRequests.get(folderPath);
+  if (!request) return;
+  clearPendingPairing(folderPath, request);
+  request.reject(error);
+}
+
+/** Complete a queued control-panel request once this socket has emitted QR. */
+async function fulfillPendingPairing(
+  entry: AccountEntry,
+  sock: WASocket,
+): Promise<void> {
+  const request = pendingPairingRequests.get(entry.folderPath);
+  if (!request || request.started || entry.sock !== sock) return;
+  request.started = true;
+  entry.pairingPhoneNumber = request.phoneNumber;
+  entry.pairingRequestedAtMs = Date.now();
+  try {
+    const result = await requestNativePairingCode(sock, request.phoneNumber);
+    if (
+      pendingPairingRequests.get(entry.folderPath) !== request
+      || entry.sock !== sock
+    ) {
+      return;
+    }
+    cachePairingCode(entry.folderPath, result);
+    request.resolve(result);
+    logger.info(
+      {
+        folderPath: entry.folderPath,
+        phoneNumber: maskPairingPhone(request.phoneNumber),
+      },
+      "WhatsApp pairing code generated for control panel",
+    );
+  } catch (err) {
+    entry.pairingRetryAfterMs = Date.now() + config.pairingRetryCooldownMs;
+    entry.pairingPhoneNumber = undefined;
+    entry.pairingRequestedAtMs = undefined;
+    request.reject(
+      new PairingCodeError(
+        "request_failed",
+        err instanceof Error
+          ? err.message
+          : "WhatsApp rejected the pairing request.",
+        entry.pairingRetryAfterMs,
+      ),
+    );
+    logger.error(
+      {
+        err,
+        folderPath: entry.folderPath,
+        phoneNumber: maskPairingPhone(request.phoneNumber),
+      },
+      "failed to request control-panel pairing code",
+    );
+  } finally {
+    clearPendingPairing(entry.folderPath, request);
+  }
+}
+
+/** Existing headless `.env` pairing flow, retained for console deployments. */
+function requestConfiguredPairingCode(
+  sock: WASocket,
+  entry: AccountEntry,
+  phoneNumber: string,
   fallbackQr: string | null,
 ): void {
-  sock
-    .requestPairingCode(phoneNumber)
-    .then((code) => {
-      const pretty =
-        typeof code === "string" && code.length === 8
-          ? `${code.slice(0, 4)}-${code.slice(4)}`
-          : code;
+  entry.pairingPhoneNumber = phoneNumber;
+  entry.pairingRequestedAtMs = Date.now();
+  requestNativePairingCode(sock, phoneNumber)
+    .then((result) => {
+      if (
+        entry.sock !== sock
+        || entry.pairingPhoneNumber !== phoneNumber
+        || (entry.pairingRetryAfterMs ?? 0) > Date.now()
+      ) {
+        return;
+      }
+      cachePairingCode(entry.folderPath, result);
       logger.info(
-        { folderPath, phoneNumber, code: pretty },
+        {
+          folderPath: entry.folderPath,
+          phoneNumber: maskPairingPhone(phoneNumber),
+        },
         "WhatsApp pairing code generated",
       );
-      // Loud stdout banner so it's unmissable in a deploy console.
       console.log(
         `\n================ WhatsApp Pairing Code ================\n` +
           `  Number : ${phoneNumber}\n` +
-          `  Code   : ${pretty}\n` +
+          `  Code   : ${result.code}\n` +
           `  Steps  : WhatsApp > Linked Devices > Link a Device >\n` +
           `           Link with phone number  →  enter the code above\n` +
           `======================================================\n`,
       );
     })
     .catch((err) => {
+      entry.pairingRetryAfterMs = Date.now() + config.pairingRetryCooldownMs;
+      entry.pairingPhoneNumber = undefined;
+      entry.pairingRequestedAtMs = undefined;
       logger.error(
-        { err, folderPath, phoneNumber },
+        {
+          err,
+          folderPath: entry.folderPath,
+          phoneNumber: maskPairingPhone(phoneNumber),
+        },
         "failed to request pairing code; falling back to QR if available",
       );
       if (fallbackQr) printQrInTerminal(fallbackQr);
     });
+}
+
+/**
+ * Queue a native pairing-code request for an existing tenant. Repeated clicks
+ * for the same number reuse the recent code instead of minting conflicting
+ * codes; a rejected attempt observes the console flow's cooldown.
+ */
+export async function requestAccountPairingCode(
+  folderPath: string,
+  rawPhoneNumber: string,
+): Promise<PairingCodeResult> {
+  const phoneNumber = rawPhoneNumber.replace(/\D/g, "");
+  if (phoneNumber.length < 8 || phoneNumber.length > 15) {
+    throw new PairingCodeError(
+      "invalid_phone",
+      "Use 8-15 digits including the country code.",
+    );
+  }
+
+  const entry = registry.getOrCreate(folderPath);
+  if (entry.sock?.authState?.creds?.registered || entry.waStatus === "open") {
+    throw new PairingCodeError(
+      "already_linked",
+      "This WhatsApp account is already linked.",
+    );
+  }
+
+  const now = Date.now();
+  if (entry.pairingRetryAfterMs && entry.pairingRetryAfterMs > now) {
+    throw new PairingCodeError(
+      "cooldown",
+      "Pairing is cooling down after a failed attempt.",
+      entry.pairingRetryAfterMs,
+    );
+  }
+
+  const cached = cachedPairingCodes.get(folderPath);
+  if (cached && cached.reuseUntilMs > now) {
+    if (cached.phoneNumber === phoneNumber) return cached;
+    throw new PairingCodeError(
+      "busy",
+      "A recent pairing code exists for another phone number.",
+      cached.reuseUntilMs,
+    );
+  }
+  if (cached) cachedPairingCodes.delete(folderPath);
+
+  const existing = pendingPairingRequests.get(folderPath);
+  if (existing) {
+    if (existing.phoneNumber === phoneNumber) return existing.promise;
+    throw new PairingCodeError(
+      "busy",
+      "Another pairing request is already in progress for this account.",
+    );
+  }
+
+  let resolveRequest!: (result: PairingCodeResult) => void;
+  let rejectRequest!: (error: Error) => void;
+  const promise = new Promise<PairingCodeResult>((resolve, reject) => {
+    resolveRequest = resolve;
+    rejectRequest = reject;
+  });
+  const request = {
+    phoneNumber,
+    promise,
+    resolve: resolveRequest,
+    reject: rejectRequest,
+    timeout: setTimeout(() => {}, PAIRING_REQUEST_TIMEOUT_MS),
+    started: false,
+  } satisfies PendingPairingRequest;
+  clearTimeout(request.timeout);
+  request.timeout = setTimeout(() => {
+    if (pendingPairingRequests.get(folderPath) !== request) return;
+    clearPendingPairing(folderPath, request);
+    entry.pairingPhoneNumber = undefined;
+    entry.pairingRequestedAtMs = undefined;
+    request.reject(
+      new PairingCodeError(
+        "timeout",
+        "WhatsApp did not become ready for pairing in time. Reconnect and try again.",
+      ),
+    );
+  }, PAIRING_REQUEST_TIMEOUT_MS);
+  request.timeout.unref?.();
+  pendingPairingRequests.set(folderPath, request);
+  entry.pairingPhoneNumber = phoneNumber;
+  entry.pairingRequestedAtMs = now;
+
+  void (async () => {
+    try {
+      await createOrResumeAccount({ folderPath, printQr: false });
+      const sock = entry.sock;
+      if (!sock) {
+        throw new PairingCodeError(
+          "not_ready",
+          "The WhatsApp socket could not be started.",
+        );
+      }
+      if (sock.authState?.creds?.registered) {
+        throw new PairingCodeError(
+          "already_linked",
+          "This WhatsApp account is already linked.",
+        );
+      }
+      if (pairingReadySockets.has(sock)) {
+        await fulfillPendingPairing(entry, sock);
+      }
+    } catch (err) {
+      if (pendingPairingRequests.get(folderPath) !== request) return;
+      clearPendingPairing(folderPath, request);
+      entry.pairingPhoneNumber = undefined;
+      entry.pairingRequestedAtMs = undefined;
+      request.reject(
+        err instanceof Error
+          ? err
+          : new PairingCodeError("request_failed", "Pairing request failed."),
+      );
+    }
+  })();
+
+  return promise;
+}
+
+function detachSocket(entry: AccountEntry): WASocket | undefined {
+  const sock = entry.sock;
+  entry.sock = undefined;
+  if (entry.ctx.sock === sock) entry.ctx.sock = undefined;
+  entry.waStatus = "close";
+  entry.pairingPhoneNumber = undefined;
+  entry.pairingRequestedAtMs = undefined;
+  cachedPairingCodes.delete(entry.folderPath);
+  rejectPendingPairing(
+    entry.folderPath,
+    new PairingCodeError("not_ready", "The account connection was reset."),
+  );
+  if (sock) pairingReadySockets.delete(sock);
+  return sock;
+}
+
+/** Rebuild one tenant's WhatsApp socket without touching its auth or DBs. */
+export async function reconnectAccount(folderPath: string): Promise<AccountEntry> {
+  const entry = registry.get(folderPath);
+  if (!entry) throw new Error("Account not found.");
+  entry.pairingRetryAfterMs = undefined;
+  const previous = detachSocket(entry);
+  if (previous) {
+    try {
+      previous.end(new Error("Manual reconnect from control panel"));
+    } catch (err) {
+      logger.debug({ err, folderPath }, "manual reconnect: old socket end failed");
+    }
+  }
+  return createOrResumeAccount({ folderPath, printQr: false });
+}
+
+/**
+ * Explicit destructive session reset used by the control panel's confirmed
+ * Disconnect action. The tenant DB/media remain intact; only WhatsApp auth is
+ * removed so the next action can start a fresh pairing flow.
+ */
+export async function disconnectAccount(folderPath: string): Promise<void> {
+  const entry = registry.get(folderPath);
+  if (!entry) throw new Error("Account not found.");
+  entry.pairingRetryAfterMs = undefined;
+  const previous = detachSocket(entry);
+  if (previous) {
+    try {
+      await Promise.race([
+        previous.logout(),
+        new Promise<void>((_resolve, reject) => {
+          const timer = setTimeout(
+            () => reject(new Error("WhatsApp logout timed out")),
+            10_000,
+          );
+          timer.unref?.();
+        }),
+      ]);
+    } catch (err) {
+      logger.warn({ err, folderPath }, "control panel logout failed; clearing local auth");
+      try {
+        previous.end(new Error("Control panel session reset"));
+      } catch {
+        // The socket may already be closed; local auth clearing remains valid.
+      }
+    }
+  }
+  const { authDir } = ensureFolderLayout(folderPath);
+  await fs.emptyDir(authDir);
+  forwardStatus(entry, "close", DisconnectReason.loggedOut);
+  logger.info({ folderPath }, "WhatsApp session disconnected from control panel");
 }
 
 /**
@@ -537,23 +884,34 @@ function attachConnectionListener(
 
     const { connection, lastDisconnect, qr } = update;
     if (qr) {
+      pairingReadySockets.add(sock);
+      // An authenticated control-panel request takes precedence over the
+      // static WA_PAIRING_NUMBER flow for this socket. The pending map is the
+      // at-most-once guard, even when Baileys refreshes QR every ~20 seconds.
+      if (pendingPairingRequests.has(folderPath)) {
+        void fulfillPendingPairing(entry, sock);
+      }
       // Pairing-code flow (no QR): when WA_PAIRING_NUMBER is configured and this
       // device isn't registered yet, request an 8-char pairing code instead of
       // rendering a QR. The `qr` event is the signal that the socket is ready to
       // issue a pairing code. Falls back to QR if the request fails.
       const pairingNumber = config.pairingNumber;
       const registered = Boolean(sock?.authState?.creds?.registered);
-      if (pairingNumber && !registered) {
+      if (
+        !pendingPairingRequests.has(folderPath)
+        && pairingNumber
+        && !registered
+      ) {
         if (!pairingRequested) {
           pairingRequested = true;
-          requestPairingCode(
+          requestConfiguredPairingCode(
             sock,
+            entry,
             pairingNumber,
-            folderPath,
             printQr ? qr : null,
           );
         }
-      } else if (printQr) {
+      } else if (!pendingPairingRequests.has(folderPath) && printQr) {
         logger.info("Scan QR to authenticate (valid for 20 seconds)");
         printQrInTerminal(qr);
       }
@@ -587,10 +945,23 @@ function attachConnectionListener(
       entry.sock = undefined;
       if (entry.ctx.sock === sock) entry.ctx.sock = undefined;
       const initialPairing = Boolean(
-        config.pairingNumber && !sock.authState?.creds?.registered,
+        !sock.authState?.creds?.registered
+        && (entry.pairingPhoneNumber || config.pairingNumber),
       );
       if (initialPairing) {
         entry.pairingRetryAfterMs = Date.now() + config.pairingRetryCooldownMs;
+        cachedPairingCodes.delete(folderPath);
+        pairingReadySockets.delete(sock);
+        rejectPendingPairing(
+          folderPath,
+          new PairingCodeError(
+            "request_failed",
+            "WhatsApp closed the initial pairing connection.",
+            entry.pairingRetryAfterMs,
+          ),
+        );
+        entry.pairingPhoneNumber = undefined;
+        entry.pairingRequestedAtMs = undefined;
         const knownPairingFailure = [408, 428, 429, 515].includes(
           statusCode ?? -1,
         );
@@ -619,6 +990,17 @@ function attachConnectionListener(
     if (status === "open") {
       logger.info({ folderPath }, "WhatsApp socket connected");
       entry.pairingRetryAfterMs = undefined;
+      entry.pairingPhoneNumber = undefined;
+      entry.pairingRequestedAtMs = undefined;
+      cachedPairingCodes.delete(folderPath);
+      pairingReadySockets.delete(sock);
+      rejectPendingPairing(
+        folderPath,
+        new PairingCodeError(
+          "already_linked",
+          "WhatsApp linked before another pairing code was needed.",
+        ),
+      );
       // Step 18: forward the normalized `whatsapp_status` exactly once.
       forwardStatus(entry, status);
       // Resolve configured owner phone numbers to their WhatsApp LIDs so
