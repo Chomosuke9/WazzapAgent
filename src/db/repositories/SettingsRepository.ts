@@ -29,6 +29,21 @@ interface OwnerContactInfo {
   displayName: string;
 }
 
+export interface LlmProviderConfig {
+  llm1Model: string | null;
+  llm1Endpoint: string | null;
+  llm1ApiKey: string | null;
+  llm1FallbackModel: string | null;
+  llm1FallbackEndpoint: string | null;
+  llm1FallbackApiKey: string | null;
+  llm2Model: string | null;
+  llm2Endpoint: string | null;
+  llm2ApiKey: string | null;
+  llm2FallbackModel: string | null;
+  llm2FallbackEndpoint: string | null;
+  llm2FallbackApiKey: string | null;
+}
+
 interface IdleTrigger {
   min: number;
   max: number;
@@ -298,6 +313,100 @@ export class SettingsRepository extends BaseRepository {
       displayName,
     );
     logger.info({ phoneNumber, displayName }, "DB set_owner_contact");
+  }
+
+  getLlmProviderConfig(): LlmProviderConfig | null {
+    const row = this.getOneFromState<{
+      llm1_model: string | null;
+      llm1_endpoint: string | null;
+      llm1_api_key: string | null;
+      llm1_fallback_model: string | null;
+      llm1_fallback_endpoint: string | null;
+      llm1_fallback_api_key: string | null;
+      llm2_model: string | null;
+      llm2_endpoint: string | null;
+      llm2_api_key: string | null;
+      llm2_fallback_model: string | null;
+      llm2_fallback_endpoint: string | null;
+      llm2_fallback_api_key: string | null;
+    }>(
+      this.settingsState,
+      initSettingsTables,
+      `SELECT llm1_model, llm1_endpoint, llm1_api_key,
+              llm1_fallback_model, llm1_fallback_endpoint, llm1_fallback_api_key,
+              llm2_model, llm2_endpoint, llm2_api_key,
+              llm2_fallback_model, llm2_fallback_endpoint, llm2_fallback_api_key
+       FROM llm_provider_config WHERE id = 1`,
+    );
+    if (!row) return null;
+    return {
+      llm1Model: row.llm1_model,
+      llm1Endpoint: row.llm1_endpoint,
+      llm1ApiKey: row.llm1_api_key,
+      llm1FallbackModel: row.llm1_fallback_model,
+      llm1FallbackEndpoint: row.llm1_fallback_endpoint,
+      llm1FallbackApiKey: row.llm1_fallback_api_key,
+      llm2Model: row.llm2_model,
+      llm2Endpoint: row.llm2_endpoint,
+      llm2ApiKey: row.llm2_api_key,
+      llm2FallbackModel: row.llm2_fallback_model,
+      llm2FallbackEndpoint: row.llm2_fallback_endpoint,
+      llm2FallbackApiKey: row.llm2_fallback_api_key,
+    };
+  }
+
+  setLlmProviderConfig(patch: Partial<LlmProviderConfig>): void {
+    const current = this.getLlmProviderConfig();
+    const next: LlmProviderConfig = {
+      llm1Model: patch.llm1Model !== undefined ? patch.llm1Model : current?.llm1Model ?? null,
+      llm1Endpoint: patch.llm1Endpoint !== undefined ? patch.llm1Endpoint : current?.llm1Endpoint ?? null,
+      llm1ApiKey: patch.llm1ApiKey !== undefined ? patch.llm1ApiKey : current?.llm1ApiKey ?? null,
+      llm1FallbackModel: patch.llm1FallbackModel !== undefined ? patch.llm1FallbackModel : current?.llm1FallbackModel ?? null,
+      llm1FallbackEndpoint: patch.llm1FallbackEndpoint !== undefined ? patch.llm1FallbackEndpoint : current?.llm1FallbackEndpoint ?? null,
+      llm1FallbackApiKey: patch.llm1FallbackApiKey !== undefined ? patch.llm1FallbackApiKey : current?.llm1FallbackApiKey ?? null,
+      llm2Model: patch.llm2Model !== undefined ? patch.llm2Model : current?.llm2Model ?? null,
+      llm2Endpoint: patch.llm2Endpoint !== undefined ? patch.llm2Endpoint : current?.llm2Endpoint ?? null,
+      llm2ApiKey: patch.llm2ApiKey !== undefined ? patch.llm2ApiKey : current?.llm2ApiKey ?? null,
+      llm2FallbackModel: patch.llm2FallbackModel !== undefined ? patch.llm2FallbackModel : current?.llm2FallbackModel ?? null,
+      llm2FallbackEndpoint: patch.llm2FallbackEndpoint !== undefined ? patch.llm2FallbackEndpoint : current?.llm2FallbackEndpoint ?? null,
+      llm2FallbackApiKey: patch.llm2FallbackApiKey !== undefined ? patch.llm2FallbackApiKey : current?.llm2FallbackApiKey ?? null,
+    };
+    this.runSettingsQuery(
+      `INSERT INTO llm_provider_config (
+         id, llm1_model, llm1_endpoint, llm1_api_key,
+         llm1_fallback_model, llm1_fallback_endpoint, llm1_fallback_api_key,
+         llm2_model, llm2_endpoint, llm2_api_key,
+         llm2_fallback_model, llm2_fallback_endpoint, llm2_fallback_api_key,
+         updated_at
+       ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(id) DO UPDATE SET
+         llm1_model = excluded.llm1_model,
+         llm1_endpoint = excluded.llm1_endpoint,
+         llm1_api_key = excluded.llm1_api_key,
+         llm1_fallback_model = excluded.llm1_fallback_model,
+         llm1_fallback_endpoint = excluded.llm1_fallback_endpoint,
+         llm1_fallback_api_key = excluded.llm1_fallback_api_key,
+         llm2_model = excluded.llm2_model,
+         llm2_endpoint = excluded.llm2_endpoint,
+         llm2_api_key = excluded.llm2_api_key,
+         llm2_fallback_model = excluded.llm2_fallback_model,
+         llm2_fallback_endpoint = excluded.llm2_fallback_endpoint,
+         llm2_fallback_api_key = excluded.llm2_fallback_api_key,
+         updated_at = excluded.updated_at`,
+      next.llm1Model,
+      next.llm1Endpoint,
+      next.llm1ApiKey,
+      next.llm1FallbackModel,
+      next.llm1FallbackEndpoint,
+      next.llm1FallbackApiKey,
+      next.llm2Model,
+      next.llm2Endpoint,
+      next.llm2ApiKey,
+      next.llm2FallbackModel,
+      next.llm2FallbackEndpoint,
+      next.llm2FallbackApiKey,
+    );
+    logger.info("DB set_llm_provider_config");
   }
 
   // -------------------------------------------------------------------------

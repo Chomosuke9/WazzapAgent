@@ -405,6 +405,55 @@ test('account API creates, pairs, persists, and removes an isolated tenant', asy
     assert.equal(pairCalls.length, 1);
     assert.equal(pairCalls[0].phoneNumber, '6281234567890');
 
+    const botConfigUrl = `${fixture.baseUrl}/api/accounts/${encodeURIComponent(payload.account.id)}/bot-config`;
+    const savedConfig = await fetch(botConfigUrl, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        botName: 'Vivy',
+        botOwnerJids: '628123456789, owner@example@s.whatsapp.net',
+      }),
+    });
+    assert.equal(savedConfig.status, 200);
+    const configured = await fetch(botConfigUrl, { headers });
+    assert.equal(configured.status, 200);
+    const identity = await configured.json() as {
+      botName: string;
+      botOwnerJids: string;
+    };
+    assert.equal(identity.botName, 'Vivy');
+    assert.equal(identity.botOwnerJids, '628123456789@s.whatsapp.net,owner@example@s.whatsapp.net');
+
+    const providerUrl = `${fixture.baseUrl}/api/accounts/${encodeURIComponent(payload.account.id)}/llm-config`;
+    const providerSaved = await fetch(providerUrl, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        llm2: {
+          model: 'gpt-tenant-a',
+          endpoint: 'https://tenant-a.example/v1',
+          apiKey: 'tenant-secret-value',
+          fallbackEndpoint: 'https://fallback.example/v1',
+        },
+      }),
+    });
+    assert.equal(providerSaved.status, 200);
+    const provider = await providerSaved.json() as {
+      llm2: {
+        model: string;
+        endpoint: string;
+        apiKeyConfigured: boolean;
+        apiKeyMasked: string;
+        fallbackEndpoint: string;
+      };
+    };
+    assert.equal(provider.llm2.model, 'gpt-tenant-a');
+    assert.equal(provider.llm2.endpoint, 'https://tenant-a.example/v1');
+    assert.equal(provider.llm2.fallbackEndpoint, 'https://fallback.example/v1');
+    assert.equal(provider.llm2.apiKeyConfigured, true);
+    assert.equal(provider.llm2.apiKeyMasked, '••••••••alue');
+    assert.doesNotMatch(JSON.stringify(provider), /tenant-secret-value/);
+
     const listed = await fetch(`${fixture.baseUrl}/api/accounts`, { headers });
     assert.equal(listed.status, 200);
     const listPayload = await listed.json() as {

@@ -10,6 +10,7 @@ import config from "../../config.js";
 import * as registry from "../../server/accountRegistry.js";
 import { parseConfigScope, scopeSuffix } from "./configScope.js";
 import { VALID_MODES } from "../../db/repositories/SettingsRepository.js";
+import { isTenantLlm1Configured } from "../botConfig.js";
 import type { CommandContext, CommandHandler } from "../command/CommandContext.js";
 
 async function handleMode({
@@ -55,13 +56,12 @@ async function handleMode({
   }
 
   // Auto/Hybrid need the LLM1 router; prefix works without it.
-  if (mode !== "prefix" && !config.llm1Configured) {
+  if (mode !== "prefix" && !isTenantLlm1Configured(repos!)) {
     try {
       await sock.sendMessage(chatId, {
         text:
           "Auto and Hybrid modes need the LLM1 router, which isn't configured yet. " +
-          "Set LLM1_ENDPOINT (plus LLM1_MODEL and LLM1_API_KEY) in your .env and " +
-          "restart the bot. Prefix mode works without it.",
+          "Configure the tenant's LLM1 endpoint in the control panel. Prefix mode works without it.",
       });
     } catch (err) {
       /* ignore */

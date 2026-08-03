@@ -215,14 +215,11 @@ async def call_llm1(
   group_description: str | None = None,
   prompt_override: str | None = None,
 ) -> LLM1Decision:
-  primary_endpoint = config.llm1_endpoint_base_url()
-  fallback_endpoint = config.llm1_fallback_endpoint_base_url()
-  # If LLM1 is not configured, allow responding by default.
-  if not primary_endpoint and not fallback_endpoint:
-    logger.debug("LLM1 disabled (no LLM1_ENDPOINT set); defaulting to respond")
-    return LLM1Decision(should_response=True, confidence=50, reason="llm1_disabled")
-
   targets = _llm1_targets()
+  # If LLM1 is not configured, allow responding by default.
+  if not targets:
+    logger.debug("LLM1 disabled (no tenant LLM1 endpoint set); defaulting to respond")
+    return LLM1Decision(should_response=True, confidence=50, reason="llm1_disabled")
   if client is not None and targets:
     targets = targets[:1]
   if not targets:

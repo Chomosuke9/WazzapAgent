@@ -118,7 +118,7 @@ async function handleButtonResponse(
     ? roleFlagsForJid(group?.participantRoles, senderId)
     : { isAdmin: false, isSuperAdmin: false };
   const senderIsAdmin = senderRole.isAdmin || senderRole.isSuperAdmin;
-  const senderIsOwner = isOwnerJid(senderId);
+  const senderIsOwner = isOwnerJid(senderId, account.botOwnerJids);
 
   const bc: ButtonContext = {
     sock,

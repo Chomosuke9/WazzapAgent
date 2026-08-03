@@ -226,6 +226,28 @@ function initSettingsTables(db: SqliteDb): void {
     )
   `);
 
+  // Tenant-scoped LLM provider configuration. API keys are intentionally kept
+  // out of bot_config because that table is returned by the control-panel
+  // diagnostics endpoint; provider keys are only returned in masked form.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS llm_provider_config (
+      id                     INTEGER PRIMARY KEY CHECK (id = 1),
+      llm1_model             TEXT,
+      llm1_endpoint          TEXT,
+      llm1_api_key           TEXT,
+      llm1_fallback_model    TEXT,
+      llm1_fallback_endpoint TEXT,
+      llm1_fallback_api_key TEXT,
+      llm2_model             TEXT,
+      llm2_endpoint          TEXT,
+      llm2_api_key           TEXT,
+      llm2_fallback_model    TEXT,
+      llm2_fallback_endpoint TEXT,
+      llm2_fallback_api_key TEXT,
+      updated_at             TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
   db.run(`
     CREATE TABLE IF NOT EXISTS activation_codes (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,

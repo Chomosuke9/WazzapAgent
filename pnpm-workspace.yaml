@@ -1,6 +1,13 @@
 packages:
   - .
 
+allowBuilds:
+  baileys: set this to true or false
+  better-sqlite3: set this to true or false
+  esbuild: set this to true or false
+  protobufjs: set this to true or false
+  sharp: set this to true or false
+
 onlyBuiltDependencies:
   - baileys
   - better-sqlite3

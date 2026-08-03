@@ -353,7 +353,7 @@ async function handleIncomingMessage(
   if (!fromMe && msg.key?.id && ctx.repos) {
     const device = getDevice(msg.key.id);
     if (device !== 'unknown') {
-      const isAdminOrOwner = senderRole.isAdmin || senderRole.isSuperAdmin || isOwnerJid(senderId);
+      const isAdminOrOwner = senderRole.isAdmin || senderRole.isSuperAdmin || isOwnerJid(senderId, ctx.botOwnerJids);
       if (!isGroup || isAdminOrOwner) {
         ctx.repos.settings.setAutoDevice(chatId, device);
       }
@@ -499,7 +499,7 @@ async function handleIncomingMessage(
   // account is set up), and the gate is DB-backed — without repos we cannot
   // read/enforce activation state, so skip the gate rather than dereference it.
   if (ctx.repos && isActivationRequired(ctx.repos) && !fromMe) {
-    const isOwner = isOwnerJid(senderId);
+    const isOwner = isOwnerJid(senderId, ctx.botOwnerJids);
     if (!isOwner) {
       const activated = ctx.repos!.activation.isChatActivated(chatId);
       if (!activated) {
@@ -546,7 +546,7 @@ async function handleIncomingMessage(
     senderName: fromMe ? (senderDisplay || 'LLM') : senderDisplay,
     senderIsAdmin: senderRole.isAdmin || senderRole.isSuperAdmin,
     senderIsSuperAdmin: Boolean(senderRole.isSuperAdmin),
-    senderIsOwner: isOwnerJid(senderId),
+    senderIsOwner: isOwnerJid(senderId, ctx.botOwnerJids),
     isGroup,
     botIsAdmin: Boolean(group?.botIsAdmin),
     botIsSuperAdmin: Boolean(group?.botIsSuperAdmin),

@@ -82,6 +82,12 @@ import { emitGroupJoinContextEvent, emitBotAddedEvent } from "../wa/events.js";
 import { currentBotAliases } from "../wa/domain/groupContext.js";
 import { compactParticipantJids } from "../wa/domain/participants.js";
 import { shouldIgnorePrivateChat } from "../wa/privateChat.js";
+import {
+  getTenantBotName,
+  getTenantBotOwnerJids,
+  seedTenantLlmProviderConfig,
+  seedTenantIdentity,
+} from "../wa/botConfig.js";
 
 // ---------------------------------------------------------------------------
 // Test seam: socket creator
@@ -280,6 +286,8 @@ export function openAccountPersistence(
   database.open();
   entry.database = database;
   entry.repos = createRepositories(database);
+  seedTenantIdentity(entry.repos);
+  seedTenantLlmProviderConfig(entry.repos);
   seedSubagentDefault(entry.repos);
 }
 
@@ -336,6 +344,8 @@ export async function createOrResumeAccount(
   if (!existingCtx || !existingCtx.messageCache) {
     entry.ctx = createAccountContext(folderPath);
   }
+  entry.ctx.botName = getTenantBotName(entry.repos!);
+  entry.ctx.botOwnerJids = getTenantBotOwnerJids(entry.repos!);
   // Thread this tenant's repositories onto the context so every ctx-first
   // `wa/*` helper reaches THIS account's DBs via `ctx.repos` (mirrors `sock`).
   entry.ctx.repos = entry.repos;
@@ -898,9 +908,9 @@ export async function stopAccount(folderPath: string): Promise<void> {
  * a phone-number-only BOT_OWNER_JIDS would otherwise never match in groups.
  * Best-effort: failures are logged at debug and never block the connection.
  */
-async function resolveOwnerLids(sock: WASocket): Promise<void> {
+async function resolveOwnerLids(sock: WASocket, ownerJids: string[]): Promise<void> {
   const numbers = new Set<string>();
-  for (const entry of config.botOwnerJids) {
+  for (const entry of ownerJids) {
     if (entry.includes("@lid")) continue; // already a LID
     const digits = entry.replace(/\D/g, "");
     if (digits.length >= 5) numbers.add(digits);
@@ -908,7 +918,7 @@ async function resolveOwnerLids(sock: WASocket): Promise<void> {
   for (const digits of numbers) {
     try {
       const lid = await resolveLidForPhone(sock, digits);
-      if (lid && registerOwnerLid(lid)) {
+      if (lid && registerOwnerLid(lid, ownerJids)) {
         logger.info({ phone: digits, lid }, "resolved owner LID");
       }
     } catch (err) {
@@ -1089,7 +1099,7 @@ function attachConnectionListener(
       forwardStatus(entry, status);
       // Resolve configured owner phone numbers to their WhatsApp LIDs so
       // owner detection keeps working when group senders arrive as `@lid`.
-      resolveOwnerLids(sock).catch((err) =>
+      resolveOwnerLids(sock, entry.ctx.botOwnerJids || []).catch((err) =>
         logger.debug({ err, folderPath }, "resolveOwnerLids failed"),
       );
     }
@@ -1223,7 +1233,7 @@ function attachCommandListener(
         const chatType = isGroup ? "group" : "private";
 
         if (chatType === "private" && slashCommand.command !== "activate") {
-          if (!isOwnerJid(senderId) && config.requireActivation && account.repos) {
+          if (!isOwnerJid(senderId, account.botOwnerJids) && config.requireActivation && account.repos) {
             if (!account.repos.activation.isChatActivated(chatId)) continue;
           }
         }
@@ -1247,7 +1257,7 @@ function attachCommandListener(
           chatType,
           senderId,
           senderIsAdmin,
-          senderIsOwner: isOwnerJid(senderId),
+          senderIsOwner: isOwnerJid(senderId, account.botOwnerJids),
           senderRole: isGroup
             ? roleFlagsForJid(group?.participantRoles, senderId)
             : { isAdmin: false, isSuperAdmin: false },

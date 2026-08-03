@@ -49,6 +49,7 @@ from .history import (
   WhatsAppMessage,
   set_tenant_assistant_name,
   reset_tenant_assistant_name,
+  update_tenant_assistant_name,
   tenant_assistant_name_context,
 )
 from .log import setup_logging
@@ -67,6 +68,7 @@ from .db import (
   clear_subagent_enabled_cache as db_clear_subagent_enabled_cache,
   get_idle_trigger as db_get_idle_trigger,
   get_prompt as db_get_prompt,
+  get_bot_config as db_get_bot_config,
   ScheduledTasksRepository,
   set_tenant_db_dir as db_set_tenant_db_dir,
   reset_tenant_db_dir as db_reset_tenant_db_dir,
@@ -155,6 +157,7 @@ class AgentSession:
     # (``assistant_name`` / aliases / mention pattern) uses THIS account's
     # identity. ``None`` selects the legacy ``ASSISTANT_NAME`` env (single-account
     # behaviour unchanged).
+    self._assistant_name_explicit = assistant_name is not None
     self.assistant_name_config = assistant_name
     # --- per-account agent state (was: handle_socket locals) ---
     self.per_chat: Dict[str, Deque[WhatsAppMessage]] = defaultdict(deque)
@@ -288,6 +291,13 @@ class AgentSession:
     self.tasks.add(task)
     task.add_done_callback(self.tasks.discard)
 
+  def _resolve_tenant_identity(self) -> None:
+    if self._assistant_name_explicit:
+      return
+    configured = db_get_bot_config('bot_name')
+    self.assistant_name_config = configured.strip() if configured and configured.strip() else None
+    update_tenant_assistant_name(self.assistant_name_config)
+
   async def _wait_for_whatsapp_open_or_stop(self, stop_event) -> bool:
     """Wait for a paired/open account without delaying graceful shutdown."""
     if self._whatsapp_open_event.is_set():
@@ -373,6 +383,7 @@ class AgentSession:
     # Bind this session's assistant identity for the whole run (mirrors the DB
     # dir binding above), so every name resolution this session's handlers make
     # uses THIS account's identity. ``None`` keeps the legacy env identity.
+    self._resolve_tenant_identity()
     name_token = set_tenant_assistant_name(self.assistant_name_config)
 
     # Start dashboard flush loop
@@ -464,6 +475,7 @@ class AgentSession:
   @contextlib.contextmanager
   def _tenant_scope(self):
     with db_tenant_db_context(self.folder_path):
+      self._resolve_tenant_identity()
       with tenant_assistant_name_context(self.assistant_name_config):
         yield
 
@@ -554,6 +566,7 @@ def _register_handlers(session) -> None:
   @ws.on("invalidate_chat_settings")
   async def _on_invalidate_chat_settings(evt):
     await events.handle(evt)
+    session._resolve_tenant_identity()
 
   @ws.on("schedule_task")
   async def _on_schedule_task(evt):

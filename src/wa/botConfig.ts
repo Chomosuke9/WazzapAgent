@@ -12,6 +12,9 @@ export const BOT_CONFIG_KEYS = {
   ACTIVATION_MSG: "activation_msg",
   PROMPT_OVERRIDE: "prompt_override", // stored via setDefaultPrompt, mirrored here for display
   REQUIRE_ACTIVATION: "require_activation",
+  BOT_NAME: "bot_name",
+  BOT_OWNER_JIDS: "bot_owner_jids",
+  IDENTITY_SEEDED: "tenant_identity_seeded",
 } as const;
 
 export const DEFAULT_ACTIVATION_MESSAGE =
@@ -33,4 +36,68 @@ export function isActivationRequired(repos: AccountRepositories | undefined): bo
   if (raw === "on" || raw === "true" || raw === "1") return true;
   if (raw === "off" || raw === "false" || raw === "0") return false;
   return config.requireActivation;
+}
+
+/** Normalize the comma-separated owner syntax used by BOT_OWNER_JIDS. */
+export function parseBotOwnerJids(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean)
+    .map((value) => value.includes("@") ? value : `${value}@s.whatsapp.net`);
+}
+
+/** Import legacy process-wide identity settings into a tenant exactly once. */
+export function seedTenantIdentity(repos: AccountRepositories): void {
+  if (repos.settings.getBotConfig(BOT_CONFIG_KEYS.IDENTITY_SEEDED) !== null) return;
+  if (!repos.settings.getBotConfig(BOT_CONFIG_KEYS.BOT_NAME) && config.assistantName !== "LLM") {
+    repos.settings.setBotConfig(BOT_CONFIG_KEYS.BOT_NAME, config.assistantName);
+  }
+  if (!repos.settings.getBotConfig(BOT_CONFIG_KEYS.BOT_OWNER_JIDS) && config.botOwnerJids.length) {
+    repos.settings.setBotConfig(
+      BOT_CONFIG_KEYS.BOT_OWNER_JIDS,
+      config.botOwnerJids.join(","),
+    );
+  }
+  repos.settings.setBotConfig(BOT_CONFIG_KEYS.IDENTITY_SEEDED, "1");
+}
+
+export function getTenantBotName(repos: AccountRepositories): string {
+  return repos.settings.getBotConfig(BOT_CONFIG_KEYS.BOT_NAME)?.trim()
+    || config.assistantName;
+}
+
+export function getTenantBotOwnerJids(repos: AccountRepositories): string[] {
+  const stored = repos.settings.getBotConfig(BOT_CONFIG_KEYS.BOT_OWNER_JIDS);
+  return stored === null ? config.botOwnerJids.slice() : parseBotOwnerJids(stored);
+}
+
+export function isTenantLlm1Configured(repos: AccountRepositories): boolean {
+  const provider = repos.settings.getLlmProviderConfig();
+  return Boolean(provider?.llm1Endpoint || provider?.llm1FallbackEndpoint);
+}
+
+function envNullable(name: string): string | null {
+  const value = process.env[name]?.trim();
+  return value || null;
+}
+
+/** Copy the legacy shared LLM env values into a tenant once. */
+export function seedTenantLlmProviderConfig(repos: AccountRepositories): void {
+  if (repos.settings.getLlmProviderConfig() !== null) return;
+  repos.settings.setLlmProviderConfig({
+    llm1Model: envNullable("LLM1_MODEL"),
+    llm1Endpoint: envNullable("LLM1_ENDPOINT"),
+    llm1ApiKey: envNullable("LLM1_API_KEY") || envNullable("OPENAI_API_KEY"),
+    llm1FallbackModel: envNullable("LLM1_FALLBACK_MODEL"),
+    llm1FallbackEndpoint: envNullable("LLM1_FALLBACK_ENDPOINT"),
+    llm1FallbackApiKey: envNullable("LLM1_FALLBACK_API_KEY"),
+    llm2Model: envNullable("LLM2_MODEL"),
+    llm2Endpoint: envNullable("LLM2_ENDPOINT"),
+    llm2ApiKey: envNullable("LLM2_API_KEY"),
+    llm2FallbackModel: envNullable("LLM2_FALLBACK_MODEL"),
+    llm2FallbackEndpoint: envNullable("LLM2_FALLBACK_ENDPOINT"),
+    llm2FallbackApiKey: envNullable("LLM2_FALLBACK_API_KEY"),
+  });
 }

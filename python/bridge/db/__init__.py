@@ -92,6 +92,8 @@ from .settings_repository import (
     get_prompt as get_prompt,
     set_prompt as set_prompt,
     get_join_prompt as get_join_prompt,
+    get_bot_config as get_bot_config,
+    get_llm_provider_config as get_llm_provider_config,
     get_memories as get_memories,
     get_participant_name as get_participant_name,
     get_permission as get_permission,

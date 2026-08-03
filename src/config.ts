@@ -98,6 +98,7 @@ export interface Config {
   staleMessageMaxAgeMs: number;
   perfLogEnabled: boolean;
   perfLogThresholdMs: number;
+  assistantName: string;
   botOwnerJids: string[];
   llmReplyInteractive: boolean;
   llmReplyFooter: string;
@@ -178,6 +179,7 @@ function buildConfig(): Config {
   staleMessageMaxAgeMs: nonNegativeInt(process.env.STALE_MESSAGE_MAX_AGE_MS, 5000),
   perfLogEnabled: process.env.PERF_LOG_ENABLED !== '0',
   perfLogThresholdMs: nonNegativeInt(process.env.PERF_LOG_THRESHOLD_MS, 400),
+  assistantName: (process.env.ASSISTANT_NAME || 'LLM').trim() || 'LLM',
   botOwnerJids: parseJidList(process.env.BOT_OWNER_JIDS),
   llmReplyInteractive: process.env.LLM_REPLY_INTERACTIVE === 'true',
   llmReplyFooter: process.env.LLM_REPLY_FOOTER || '',

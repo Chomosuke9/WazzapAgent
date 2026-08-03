@@ -543,6 +543,8 @@ async function showAccountConfig(accountId) {
     'Bot-wide defaults for this account.',
     `<div class="form-grid">
       <label class="form-field"><span class="field-label">Account name</span><input id="config-account-name" value="${escapeHtml(data.accountName || '')}"></label>
+      <label class="form-field"><span class="field-label">Bot name</span><input id="config-bot-name" value="${escapeHtml(data.botName || '')}" placeholder="e.g. Vivy"></label>
+      <label class="form-field full"><span class="field-label">Bot owner phone(s) / JID(s)</span><input id="config-bot-owner-jids" value="${escapeHtml(data.botOwnerJids || '')}" placeholder="e.g. 628123456789, 628987654321"></label>
       <label class="form-field"><span class="field-label">Owner display name</span><input id="config-owner-name" value="${escapeHtml(data.ownerContact?.displayName || '')}"></label>
       <label class="form-field full"><span class="field-label">Owner phone</span><input id="config-owner-phone" value="${escapeHtml(data.ownerContact?.phoneNumber || '')}"></label>
       <label class="form-field full"><span class="field-label">Activation message</span><textarea id="config-activation-message">${escapeHtml(data.activationMessage || '')}</textarea></label>
@@ -556,6 +558,8 @@ async function showAccountConfig(accountId) {
         const ownerPhone = root.querySelector('#config-owner-phone').value.trim();
         const body = {
           accountName: root.querySelector('#config-account-name').value.trim() || null,
+          botName: root.querySelector('#config-bot-name').value.trim() || null,
+          botOwnerJids: root.querySelector('#config-bot-owner-jids').value.trim() || null,
           requireActivation: root.querySelector('#config-require-activation').checked,
           activationMessage: root.querySelector('#config-activation-message').value.trim() || null,
           defaultPrompt: root.querySelector('#config-default-prompt').value.trim() || null,
@@ -737,16 +741,20 @@ function bindChatEditor() {
 async function renderModels() {
   await refreshAccounts();
   if (!state.selectedAccountId) return;
-  const data = await api(`/api/accounts/${encodeURIComponent(state.selectedAccountId)}/models`);
+  const [data, providerConfig] = await Promise.all([
+    api(`/api/accounts/${encodeURIComponent(state.selectedAccountId)}/models`),
+    api(`/api/accounts/${encodeURIComponent(state.selectedAccountId)}/llm-config`),
+  ]);
   state.models = data.models || [];
   const rows = state.models.length
     ? state.models.map((model) => `<tr><td><span class="cell-title">${escapeHtml(model.displayName)}</span><span class="cell-subtitle mono">${escapeHtml(model.modelId)}</span></td><td>${model.isActive ? '<span class="badge success">Active</span>' : '<span class="badge">Disabled</span>'}</td><td>${model.visionSupport ? 'Yes' : 'No'}</td><td>${model.sortOrder}</td><td>${escapeHtml(model.description || '—')}</td><td><div class="row-actions"><button class="icon-button default-model ${model.isDefault ? 'selected' : ''}" data-id="${encodeURIComponent(model.modelId)}" type="button" aria-label="${model.isDefault ? 'Current default model' : `Set ${escapeHtml(model.displayName)} as default`}" title="${model.isDefault ? 'Default model' : 'Set as default'}" ${model.isDefault ? 'disabled' : ''}>${model.isDefault ? '★' : '☆'}</button><button class="button secondary small edit-model" data-id="${encodeURIComponent(model.modelId)}" type="button">Edit</button><button class="button danger small delete-model" data-id="${encodeURIComponent(model.modelId)}" type="button">Delete</button></div></td></tr>`).join('')
     : '<tr><td colspan="6"><div class="empty-state">No model catalog entries. LLM2 falls back to environment configuration.</div></td></tr>';
   content.innerHTML = `
-    ${pageHeader('Models', 'Manage the per-tenant LLM2 model catalog.', `${accountSelector()}<button id="add-model" class="button primary" type="button">Add model</button>`)}
+    ${pageHeader('Models', 'Manage the per-tenant model catalog and provider settings.', `${accountSelector()}<button id="provider-settings" class="button secondary" type="button">Provider settings</button><button id="add-model" class="button primary" type="button">Add model</button>`)}
     <section class="panel"><div class="table-wrap"><table><thead><tr><th>Model</th><th>Status</th><th>Vision</th><th>Order</th><th>Description</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table></div></section>
   `;
   bindAccountSelector();
+  document.getElementById('provider-settings').addEventListener('click', () => showProviderModal(providerConfig));
   document.getElementById('add-model').addEventListener('click', () => showModelModal());
   document.querySelectorAll('.edit-model').forEach((button) => button.addEventListener('click', () => showModelModal(decodeURIComponent(button.dataset.id))));
   document.querySelectorAll('.default-model').forEach((button) => button.addEventListener('click', async () => {
@@ -761,6 +769,63 @@ async function renderModels() {
     toast('Model deleted.');
     await renderModels();
   }));
+}
+
+function providerField(prefix, label, value, secret = false) {
+  const configured = secret && value?.apiKeyConfigured;
+  const inputId = `${prefix}-${label}`;
+  const clearId = `${inputId}-clear`;
+  const current = secret ? '' : (value?.[label] || '');
+  const hint = secret && configured ? ` placeholder="Configured: ${escapeHtml(value.apiKeyMasked || 'hidden')}"` : '';
+  return `<label class="form-field"><span class="field-label">${escapeHtml(label.replace(/([A-Z])/g, ' $1'))}</span><input id="${inputId}" type="${secret ? 'password' : 'text'}" value="${escapeHtml(current)}"${hint}>${secret && configured ? `<span class="field-help"><label><input id="${clearId}" type="checkbox"> Clear saved key</label></span>` : ''}</label>`;
+}
+
+function showProviderModal(data) {
+  const llm1 = data.llm1 || {};
+  const llm2 = data.llm2 || {};
+  openModal(
+    'Provider settings',
+    'Credentials are tenant-scoped. API keys are never returned in full.',
+    `<div class="form-grid">
+      <div class="form-field full"><strong>LLM2 responder</strong></div>
+      ${providerField('llm2', 'endpoint', llm2)}
+      ${providerField('llm2', 'model', llm2)}
+      ${providerField('llm2', 'apiKey', llm2, true)}
+      ${providerField('llm2', 'fallbackEndpoint', llm2)}
+      ${providerField('llm2', 'fallbackModel', llm2)}
+      ${providerField('llm2', 'fallbackApiKey', { apiKeyConfigured: llm2.fallbackApiKeyConfigured, apiKeyMasked: llm2.fallbackApiKeyMasked }, true)}
+      <div class="form-field full"><strong>LLM1 router</strong></div>
+      ${providerField('llm1', 'endpoint', llm1)}
+      ${providerField('llm1', 'model', llm1)}
+      ${providerField('llm1', 'apiKey', llm1, true)}
+      ${providerField('llm1', 'fallbackEndpoint', llm1)}
+      ${providerField('llm1', 'fallbackModel', llm1)}
+      ${providerField('llm1', 'fallbackApiKey', { apiKeyConfigured: llm1.fallbackApiKeyConfigured, apiKeyMasked: llm1.fallbackApiKeyMasked }, true)}
+    </div>`,
+    {
+      onConfirm: async (root) => {
+        const group = (prefix) => {
+          const result = {};
+          for (const field of ['endpoint', 'model', 'fallbackEndpoint', 'fallbackModel']) {
+            result[field] = root.querySelector(`#${prefix}-${field}`).value.trim() || null;
+          }
+          for (const field of ['apiKey', 'fallbackApiKey']) {
+            const input = root.querySelector(`#${prefix}-${field}`);
+            const clear = root.querySelector(`#${prefix}-${field}-clear`);
+            if (clear?.checked) result[field] = null;
+            else if (input.value.trim()) result[field] = input.value.trim();
+          }
+          return result;
+        };
+        await api(`/api/accounts/${encodeURIComponent(state.selectedAccountId)}/llm-config`, {
+          method: 'PUT',
+          body: { llm1: group('llm1'), llm2: group('llm2') },
+        });
+        toast('Provider settings saved.');
+        await renderModels();
+      },
+    },
+  );
 }
 
 function showModelModal(modelId = '') {

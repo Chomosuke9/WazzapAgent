@@ -574,6 +574,23 @@ def _ensure_settings_tables(conn: sqlite3.Connection) -> None:
       chat_type     TEXT NOT NULL,
       updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS llm_provider_config (
+      id                     INTEGER PRIMARY KEY CHECK (id = 1),
+      llm1_model             TEXT,
+      llm1_endpoint          TEXT,
+      llm1_api_key           TEXT,
+      llm1_fallback_model    TEXT,
+      llm1_fallback_endpoint TEXT,
+      llm1_fallback_api_key TEXT,
+      llm2_model             TEXT,
+      llm2_endpoint          TEXT,
+      llm2_api_key           TEXT,
+      llm2_fallback_model    TEXT,
+      llm2_fallback_endpoint TEXT,
+      llm2_fallback_api_key TEXT,
+      updated_at             TEXT NOT NULL DEFAULT (datetime('now'))
+    );
     """
   )
   for col, col_type, default in [

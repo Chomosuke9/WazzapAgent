@@ -122,11 +122,34 @@ def set_prompt(chat_id: str, prompt: Optional[str]) -> None:
   logger.info('DB set_prompt chat_id=%s len=%s', chat_id, len(prompt) if prompt else 0)
 
 # ponytail: no set_join_prompt — only Node writes via /prompt join
-def get_join_prompt() -> str:
+@_db_resilient('settings')
+def get_bot_config(key: str) -> Optional[str]:
+  """Return one tenant-wide bot_config value written by the Node gateway."""
+  _ensure_split_ready()
   row = _get_settings_conn().execute(
-    'SELECT value FROM bot_config WHERE key = ?', ('join_prompt',)
+    'SELECT value FROM bot_config WHERE key = ?', (key,)
   ).fetchone()
-  return row['value'] if row and row['value'] else "Introduce yourself to this group. Tell them your name and what you can do."
+  return row['value'] if row else None
+
+
+@_db_resilient('settings')
+def get_llm_provider_config() -> Optional[dict[str, Optional[str]]]:
+  """Return the active tenant's LLM provider settings, if seeded."""
+  _ensure_split_ready()
+  row = _get_settings_conn().execute(
+    '''SELECT llm1_model, llm1_endpoint, llm1_api_key,
+              llm1_fallback_model, llm1_fallback_endpoint, llm1_fallback_api_key,
+              llm2_model, llm2_endpoint, llm2_api_key,
+              llm2_fallback_model, llm2_fallback_endpoint, llm2_fallback_api_key
+       FROM llm_provider_config WHERE id = 1'''
+  ).fetchone()
+  if not row:
+    return None
+  return dict(row)
+
+
+def get_join_prompt() -> str:
+  return get_bot_config('join_prompt') or "Introduce yourself to this group. Tell them your name and what you can do."
 
 @_db_resilient('settings')
 def get_memories(chat_id: str) -> list[str]:

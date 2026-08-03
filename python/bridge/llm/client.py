@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from langchain_openai import ChatOpenAI
 
 from .. import config
+from ..db import get_llm_provider_config
 from ..config import _clean_env, _endpoint_base_url  # noqa: F401  (re-exported via this module)
 
 
@@ -43,13 +44,28 @@ def _llm1_max_tokens() -> int | None:
 
 
 def _chat_base_url() -> str | None:
+  provider = get_llm_provider_config()
+  if provider is not None:
+    return _endpoint_base_url(provider.get("llm1_endpoint"))
   return config.llm1_endpoint_base_url()
 
 
 def _llm1_targets() -> list[LLM1Target]:
-  primary_model = config.llm1_model_clean() or "gpt-4o-mini"
-  primary_url = config.llm1_endpoint_base_url()
-  primary_api_key = config.llm1_api_key()
+  provider = get_llm_provider_config()
+  if provider is None:
+    primary_model = config.llm1_model_clean() or "gpt-4o-mini"
+    primary_url = config.llm1_endpoint_base_url()
+    primary_api_key = config.llm1_api_key()
+    fallback_model_raw = config.llm1_fallback_model_clean()
+    fallback_url_raw = config.llm1_fallback_endpoint_clean()
+    fallback_api_key_raw = config.llm1_fallback_api_key_clean()
+  else:
+    primary_model = _clean_env(provider.get("llm1_model")) or "gpt-4o-mini"
+    primary_url = _endpoint_base_url(provider.get("llm1_endpoint"))
+    primary_api_key = provider.get("llm1_api_key") or ""
+    fallback_model_raw = _clean_env(provider.get("llm1_fallback_model"))
+    fallback_url_raw = _clean_env(provider.get("llm1_fallback_endpoint"))
+    fallback_api_key_raw = _clean_env(provider.get("llm1_fallback_api_key"))
 
   targets: list[LLM1Target] = []
   if primary_url:
@@ -62,9 +78,6 @@ def _llm1_targets() -> list[LLM1Target]:
       )
     )
 
-  fallback_model_raw = config.llm1_fallback_model_clean()
-  fallback_url_raw = config.llm1_fallback_endpoint_clean()
-  fallback_api_key_raw = config.llm1_fallback_api_key_clean()
   fallback_enabled = any((fallback_model_raw, fallback_url_raw, fallback_api_key_raw))
   if not fallback_enabled:
     return targets
@@ -99,9 +112,15 @@ def get_llm1(
   api_key: str | None = None,
   timeout: float = 8.0,
 ) -> ChatOpenAI:
-  resolved_model = model or config.llm1_model_clean() or "gpt-4o-mini"
+  provider = get_llm_provider_config()
+  resolved_model = model or (
+    config.llm1_model_clean()
+    if provider is None else (_clean_env(provider.get("llm1_model")) or "gpt-4o-mini")
+  ) or "gpt-4o-mini"
   resolved_base_url = base_url if base_url is not None else _chat_base_url()
-  resolved_api_key = api_key if api_key is not None else config.llm1_api_key()
+  resolved_api_key = api_key if api_key is not None else (
+    config.llm1_api_key() if provider is None else (provider.get("llm1_api_key") or "")
+  )
   max_tokens = _llm1_max_tokens()
   kwargs = {
     "model": resolved_model,

@@ -24,7 +24,10 @@ import {
 import {
   BOT_CONFIG_KEYS,
   DEFAULT_ACTIVATION_MESSAGE,
+  getTenantBotName,
+  getTenantBotOwnerJids,
   isActivationRequired,
+  parseBotOwnerJids,
 } from '../wa/botConfig.js';
 import {
   deleteSticker,
@@ -39,6 +42,7 @@ import {
   VALID_MODES,
   VALID_TRIGGERS,
 } from '../db/repositories/SettingsRepository.js';
+import type { LlmProviderConfig } from '../db/repositories/SettingsRepository.js';
 import {
   readEnvironmentSettings,
   updateEnvironmentSettings,
@@ -239,6 +243,58 @@ function accountPhone(entry: AccountEntry): string | null {
   return jid.split('@')[0].split(':')[0] || null;
 }
 
+function maskApiKey(value: string | null): string | null {
+  if (!value) return null;
+  const visible = value.slice(-4);
+  return `••••••••${visible}`;
+}
+
+function publicLlmProviderConfig(value: LlmProviderConfig | null): Record<string, unknown> {
+  const group = (prefix: 'llm1' | 'llm2') => ({
+    model: value?.[`${prefix}Model` as keyof LlmProviderConfig] || null,
+    endpoint: value?.[`${prefix}Endpoint` as keyof LlmProviderConfig] || null,
+    apiKeyConfigured: Boolean(value?.[`${prefix}ApiKey` as keyof LlmProviderConfig]),
+    apiKeyMasked: maskApiKey(value?.[`${prefix}ApiKey` as keyof LlmProviderConfig] as string | null || null),
+    fallbackModel: value?.[`${prefix}FallbackModel` as keyof LlmProviderConfig] || null,
+    fallbackEndpoint: value?.[`${prefix}FallbackEndpoint` as keyof LlmProviderConfig] || null,
+    fallbackApiKeyConfigured: Boolean(value?.[`${prefix}FallbackApiKey` as keyof LlmProviderConfig]),
+    fallbackApiKeyMasked: maskApiKey(value?.[`${prefix}FallbackApiKey` as keyof LlmProviderConfig] as string | null || null),
+  });
+  return { llm1: group('llm1'), llm2: group('llm2') };
+}
+
+function tenantLlm1Configured(value: LlmProviderConfig | null): boolean {
+  return Boolean(value?.llm1Endpoint || value?.llm1FallbackEndpoint);
+}
+
+function providerPatch(
+  raw: unknown,
+  prefix: 'llm1' | 'llm2',
+): Partial<LlmProviderConfig> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new HttpError(400, `${prefix} provider settings must be an object.`);
+  }
+  const input = raw as Record<string, unknown>;
+  const field = (name: string, limit: number): string | null | undefined => {
+    if (!(name in input)) return undefined;
+    return nullableString(input[name], limit, `${prefix}.${name}`);
+  };
+  const result: Partial<LlmProviderConfig> = {};
+  const assignments: Array<[keyof LlmProviderConfig, string, number]> = [
+    [`${prefix}Model` as keyof LlmProviderConfig, 'model', 200],
+    [`${prefix}Endpoint` as keyof LlmProviderConfig, 'endpoint', 1000],
+    [`${prefix}ApiKey` as keyof LlmProviderConfig, 'apiKey', 1000],
+    [`${prefix}FallbackModel` as keyof LlmProviderConfig, 'fallbackModel', 200],
+    [`${prefix}FallbackEndpoint` as keyof LlmProviderConfig, 'fallbackEndpoint', 1000],
+    [`${prefix}FallbackApiKey` as keyof LlmProviderConfig, 'fallbackApiKey', 1000],
+  ];
+  for (const [key, name, limit] of assignments) {
+    const value = field(name, limit);
+    if (value !== undefined) result[key] = value;
+  }
+  return result;
+}
+
 function accountSummary(entry: AccountEntry): Record<string, unknown> {
   ensureAccountPersistence(entry);
   const id = accountControlPanelId(entry.folderPath);
@@ -334,7 +390,7 @@ function chatSettingsResponse(entry: AccountEntry, chatId: string): Record<strin
     settings: effective,
     memories: repos.settings.listMemories(chatId),
     capabilities: {
-      llm1Configured: config.llm1Configured,
+      llm1Configured: tenantLlm1Configured(entry.repos!.settings.getLlmProviderConfig()),
       subagentConfigured: config.subagentConfigured,
     },
   };
@@ -388,7 +444,7 @@ function updateChatSettings(
     if (
       body.mode !== before?.mode
       && (body.mode === 'auto' || body.mode === 'hybrid')
-      && !config.llm1Configured
+      && !tenantLlm1Configured(repos.settings.getLlmProviderConfig())
     ) {
       throw new HttpError(409, 'LLM1 must be configured before using auto or hybrid mode.');
     }
@@ -623,7 +679,9 @@ export function createControlPanelServer(
               : config.requireActivation,
             privateChatEnabled: config.privateChatEnabled,
             subagentDefault: config.subagentEnabledDefault,
-            llm1Configured: config.llm1Configured,
+            llm1Configured: defaultEntry
+              ? tenantLlm1Configured(defaultEntry.repos!.settings.getLlmProviderConfig())
+              : config.llm1Configured,
             subagentConfigured: config.subagentConfigured,
           },
           accounts,
@@ -891,6 +949,35 @@ export function createControlPanelServer(
         }
       }
 
+      const llmConfigRoute = pathname.match(
+        /^\/api\/accounts\/([^/]+)\/llm-config$/,
+      );
+      if (llmConfigRoute) {
+        const accountId = llmConfigRoute[1];
+        const entry = accountFromId(accountId);
+        const settings = entry.repos!.settings;
+        if (method === 'GET') {
+          json(res, 200, publicLlmProviderConfig(settings.getLlmProviderConfig()));
+          return;
+        }
+        if (method === 'PUT') {
+          const body = await readJsonBody<Record<string, unknown>>(req, maxBodyBytes);
+          const patch: Partial<LlmProviderConfig> = {};
+          if ('llm1' in body) Object.assign(patch, providerPatch(body.llm1, 'llm1'));
+          if ('llm2' in body) Object.assign(patch, providerPatch(body.llm2, 'llm2'));
+          settings.setLlmProviderConfig(patch);
+          registry.sendReliableToClient(entry.folderPath, {
+            type: 'invalidate_default_model',
+            folderPath: entry.folderPath,
+          });
+          audit.record('llm_provider_updated', 'Updated tenant LLM provider settings.', {
+            accountId,
+          });
+          json(res, 200, publicLlmProviderConfig(settings.getLlmProviderConfig()));
+          return;
+        }
+      }
+
       const modelsRoot = pathname.match(/^\/api\/accounts\/([^/]+)\/models$/);
       if (modelsRoot) {
         const accountId = modelsRoot[1];
@@ -1083,6 +1170,8 @@ export function createControlPanelServer(
             joinPrompt: repos.settings.getBotConfig('join_prompt'),
             ownerContact: repos.settings.getOwnerContact(),
             accountName: repos.settings.getBotConfig('control_panel_account_name'),
+            botName: getTenantBotName(repos),
+            botOwnerJids: getTenantBotOwnerJids(repos).join(','),
             raw: repos.settings.listBotConfig(),
           });
           return;
@@ -1118,6 +1207,22 @@ export function createControlPanelServer(
               nullableString(body.accountName, 80, 'accountName'),
             );
           }
+          if ('botName' in body) {
+            repos.settings.setBotConfig(
+              BOT_CONFIG_KEYS.BOT_NAME,
+              nullableString(body.botName, 120, 'botName'),
+            );
+          }
+          if ('botOwnerJids' in body) {
+            const rawOwnerJids = nullableString(body.botOwnerJids, 2000, 'botOwnerJids');
+            const ownerJids = parseBotOwnerJids(rawOwnerJids);
+            repos.settings.setBotConfig(
+              BOT_CONFIG_KEYS.BOT_OWNER_JIDS,
+              ownerJids.length ? ownerJids.join(',') : null,
+            );
+            entry.ctx.botOwnerJids = ownerJids;
+          }
+          entry.ctx.botName = getTenantBotName(repos);
           if ('ownerContact' in body) {
             const contact = body.ownerContact as Record<string, unknown> | null;
             if (!contact || typeof contact !== 'object') {

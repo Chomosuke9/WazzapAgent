@@ -48,6 +48,11 @@ def reset_tenant_assistant_name(token: contextvars.Token) -> None:
   _tenant_assistant_name.reset(token)
 
 
+def update_tenant_assistant_name(name: str | None) -> None:
+  """Update the current tenant identity after a live control-panel change."""
+  _tenant_assistant_name.set(name)
+
+
 @contextlib.contextmanager
 def tenant_assistant_name_context(name: str | None):
   """Context-manager form of :func:`set_tenant_assistant_name`."""

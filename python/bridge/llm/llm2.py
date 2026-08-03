@@ -10,6 +10,7 @@ from langchain_openai import ChatOpenAI
 
 from .. import config
 from ..config import (
+    _clean_env,
     _endpoint_base_url,
 )
 from ..db import (
@@ -18,6 +19,7 @@ from ..db import (
     permission_allows_delete,
     permission_allows_kick,
     permission_allows_mute,
+    get_llm_provider_config,
 )
 from ..db import get_llm2_model as db_get_llm2_model
 from ..db import get_permission as db_get_permission
@@ -100,9 +102,21 @@ def get_llm2_model_for_chat(chat_id: str) -> str:
 
 
 def _llm2_targets() -> list[LLM2Target]:
-    primary_model = config.llm2_model_clean() or "gpt-4.1"
-    primary_endpoint = config.llm2_endpoint_base_url()
-    primary_api_key = config.llm2_api_key_clean() or ""
+    provider = get_llm_provider_config()
+    if provider is None:
+        primary_model = config.llm2_model_clean() or "gpt-4.1"
+        primary_endpoint = config.llm2_endpoint_base_url()
+        primary_api_key = config.llm2_api_key_clean() or ""
+        fallback_model_raw = config.llm2_fallback_model_clean()
+        fallback_endpoint_raw = config.llm2_fallback_endpoint_clean()
+        fallback_api_key_raw = config.llm2_fallback_api_key_clean()
+    else:
+        primary_model = _clean_env(provider.get("llm2_model")) or "gpt-4.1"
+        primary_endpoint = _endpoint_base_url(provider.get("llm2_endpoint"))
+        primary_api_key = provider.get("llm2_api_key") or ""
+        fallback_model_raw = _clean_env(provider.get("llm2_fallback_model"))
+        fallback_endpoint_raw = _clean_env(provider.get("llm2_fallback_endpoint"))
+        fallback_api_key_raw = _clean_env(provider.get("llm2_fallback_api_key"))
 
     targets = [
         LLM2Target(
@@ -113,9 +127,6 @@ def _llm2_targets() -> list[LLM2Target]:
         )
     ]
 
-    fallback_model_raw = config.llm2_fallback_model_clean()
-    fallback_endpoint_raw = config.llm2_fallback_endpoint_clean()
-    fallback_api_key_raw = config.llm2_fallback_api_key_clean()
     fallback_enabled = any((fallback_model_raw, fallback_endpoint_raw, fallback_api_key_raw))
     if not fallback_enabled:
         return targets
@@ -152,8 +163,15 @@ def get_llm2(
     temperature = float(config.llm2_temperature_raw())
     timeout = _llm2_timeout()
     max_retries = _llm2_sdk_max_retries()
-    resolved_base_url = base_url if base_url is not None else config.llm2_endpoint_base_url()
-    resolved_api_key = api_key if api_key is not None else (config.llm2_api_key_clean() or "")
+    provider = get_llm_provider_config()
+    resolved_base_url = base_url if base_url is not None else (
+        config.llm2_endpoint_base_url()
+        if provider is None else _endpoint_base_url(provider.get("llm2_endpoint"))
+    )
+    resolved_api_key = api_key if api_key is not None else (
+        (config.llm2_api_key_clean() or "")
+        if provider is None else (provider.get("llm2_api_key") or "")
+    )
     kwargs = {
         "model": resolved_model,
         "temperature": temperature,

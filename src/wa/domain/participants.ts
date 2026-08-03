@@ -265,12 +265,17 @@ const runtimeOwnerLids = new Set<string>();
 
 /** Register a resolved owner LID so {@link isOwnerJid} matches it. Returns true
  * if it was newly added. Only `@lid` JIDs are accepted. */
-function registerOwnerLid(lid: unknown): boolean {
+function registerOwnerLid(lid: unknown, ownerJids?: string[]): boolean {
   if (typeof lid !== "string") return false;
   const normalized = (normalizeJid(lid) || lid).trim().toLowerCase();
   if (!normalized || !normalized.includes("@lid")) return false;
-  if (runtimeOwnerLids.has(normalized)) return false;
-  runtimeOwnerLids.add(normalized);
+  if (ownerJids) {
+    if (ownerJids.includes(normalized)) return false;
+    ownerJids.push(normalized);
+  } else {
+    if (runtimeOwnerLids.has(normalized)) return false;
+    runtimeOwnerLids.add(normalized);
+  }
   return true;
 }
 
@@ -305,7 +310,7 @@ async function resolveLidForPhone(sock: LidResolutionSocket | null, phone: unkno
   }
 }
 
-function isOwnerJid(senderId: unknown): boolean {
+function isOwnerJid(senderId: unknown, configuredOwnerJids?: string[]): boolean {
   if (!senderId) return false;
   const raw = String(senderId).trim().toLowerCase();
   const normalized = (normalizeJid(senderId) || raw).toLowerCase();
@@ -324,7 +329,7 @@ function isOwnerJid(senderId: unknown): boolean {
     const digits = s.replace(/\D/g, '');
     if (digits.length >= 5) { candidates.add(digits); candidates.add(`${digits}@s.whatsapp.net`); }
   }
-  const ownerEntries = config.botOwnerJids.concat(Array.from(runtimeOwnerLids));
+  const ownerEntries = configuredOwnerJids ?? config.botOwnerJids.concat(Array.from(runtimeOwnerLids));
   return ownerEntries.some(ownerJid => {
     if (!ownerJid) return false;
     const ownerLocal = ownerJid.split('@')[0];

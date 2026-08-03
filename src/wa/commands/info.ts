@@ -39,8 +39,8 @@ function formatUptime(totalSeconds: number): string {
   return parts.join(' ');
 }
 
-async function handleInfoCommand({ chatId, senderId, senderDisplay, senderRole, isGroup, group, msg, sock, repos }: CommandContext): Promise<void> {
-  const isOwner = isOwnerJid(senderId);
+async function handleInfoCommand({ chatId, senderId, senderDisplay, senderRole, isGroup, group, msg, sock, repos, account }: CommandContext): Promise<void> {
+  const isOwner = isOwnerJid(senderId, account?.botOwnerJids);
   const roleLabel = isOwner
     ? 'owner'
     : (senderRole?.isSuperAdmin ? 'superadmin' : (senderRole?.isAdmin ? 'admin' : 'member'));

@@ -63,6 +63,11 @@ export interface AccountContext {
   stickersDir?: string;
   stickerUploadDir?: string;
 
+  /** Per-tenant bot identity loaded from settings.db. */
+  botName?: string;
+  /** Per-tenant owner JIDs/numbers, including resolved WhatsApp LIDs. */
+  botOwnerJids?: string[];
+
   /**
    * Live Baileys socket for this account. Set by the factory once the socket
    * is created (Step 33 — replaces the removed global socket accessor) and
@@ -151,6 +156,8 @@ export function createAccountContext(folderPath: string): AccountContext {
     mediaDir: undefined,
     stickersDir: undefined,
     stickerUploadDir: undefined,
+    botName: undefined,
+    botOwnerJids: undefined,
     sock: undefined,
     forwarder: undefined,
     repos: undefined,
