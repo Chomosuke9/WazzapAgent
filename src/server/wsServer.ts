@@ -78,6 +78,18 @@ function authorizeUpgrade(req: IncomingMessage): boolean {
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
+/** Validate the tenant credential carried in the hello frame. */
+function authorizeAccountHello(folderPath: string, provided: unknown): boolean {
+  const expectedToken = registry.getConfiguredAccountToken(folderPath);
+  // Legacy single-account/test configurations may not have a catalog token;
+  // the process-level Authorization check still protects those deployments.
+  if (!expectedToken) return true;
+  if (typeof provided !== 'string') return false;
+  const expected = Buffer.from(expectedToken);
+  const actual = Buffer.from(provided);
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
+}
+
 /**
  * Start the inbound WS server.
  *
@@ -86,6 +98,14 @@ function authorizeUpgrade(req: IncomingMessage): boolean {
  * @returns the live {@link WebSocketServer}.
  */
 export function startWsServer(port: number = config.wsListenPort): WebSocketServer {
+  const isLoopback = config.wsBindHost === '127.0.0.1'
+    || config.wsBindHost === '::1'
+    || config.wsBindHost === 'localhost';
+  if (!isLoopback && !config.wsToken) {
+    throw new Error(
+      `Refusing to expose the WS control plane on ${config.wsBindHost} without LLM_WS_TOKEN.`,
+    );
+  }
   const wss = new WebSocketServer({
     port,
     // Bind to the configured host (loopback by default) so the gateway control
@@ -112,15 +132,6 @@ export function startWsServer(port: number = config.wsListenPort): WebSocketServ
     const addr = wss.address();
     const boundPort = typeof addr === 'object' && addr ? addr.port : port;
     logger.info({ port: boundPort, host: config.wsBindHost }, 'ws server listening');
-    // Loud warning if the control plane is reachable off-box without a token.
-    const isLoopback = config.wsBindHost === '127.0.0.1' || config.wsBindHost === '::1' || config.wsBindHost === 'localhost';
-    if (!isLoopback && !config.wsToken) {
-      logger.warn(
-        { host: config.wsBindHost },
-        'SECURITY: ws server bound to a non-loopback host without LLM_WS_TOKEN — ' +
-          'the WhatsApp control plane is exposed unauthenticated. Set LLM_WS_TOKEN.',
-      );
-    }
   });
 
   wss.on('connection', (rawWs: WebSocket) => {
@@ -237,6 +248,39 @@ async function handleHello(ws: ServerClient, frame: InboundFrame): Promise<void>
     return;
   }
 
+  if (folderPath.length > 4096 || /\u0000/.test(folderPath)) {
+    logger.warn('hello folderPath is invalid; closing');
+    try {
+      ws.close(1002, 'invalid folderPath');
+    } catch {
+      /* socket may already be closing */
+    }
+    return;
+  }
+
+  if (!authorizeAccountHello(folderPath, payload?.authToken)) {
+    logger.warn({ folderPath }, 'rejecting bridge hello with invalid account credential');
+    try {
+      ws.close(1008, 'invalid account credentials');
+    } catch {
+      /* socket may already be closing */
+    }
+    return;
+  }
+
+  // The bridge token authenticates the transport, but it is shared by the
+  // bridge process and is not a tenant credential. Never let a client choose
+  // an arbitrary filesystem path or impersonate another configured account.
+  if (!registry.isConfiguredAccount(folderPath)) {
+    logger.warn({ folderPath }, 'rejecting hello for an unconfigured account');
+    try {
+      ws.close(1008, 'account not configured');
+    } catch {
+      /* socket may already be closing */
+    }
+    return;
+  }
+
   if (registry.isBlocked(folderPath)) {
     logger.info({ folderPath }, 'rejecting bridge hello for a removed account');
     try {
@@ -250,14 +294,14 @@ async function handleHello(ws: ServerClient, frame: InboundFrame): Promise<void>
   try {
     // Delegated: account/socket creation + tenant folder layout (CONTRACT.md §8).
     const entry = await createOrResumeAccount({ folderPath });
-    ws.folderPath = folderPath;
+    ws.folderPath = entry.folderPath;
     ws.helloDone = true;
 
     // hello_ack BEFORE bind so it precedes any queued reliable frames that the
     // subsequent bindClient/flush delivers.
     const ack: OutboundFrame = {
       type: 'hello_ack',
-      payload: { folderPath, waStatus: entry.waStatus },
+      payload: { folderPath: entry.folderPath, waStatus: entry.waStatus },
     };
     try {
       ws.send(JSON.stringify(ack));
@@ -265,9 +309,9 @@ async function handleHello(ws: ServerClient, frame: InboundFrame): Promise<void>
       logger.error({ err, folderPath }, 'failed sending hello_ack');
     }
 
-    registry.bindClient(folderPath, ws);
+    registry.bindClient(entry.folderPath, ws);
     // Explicit per the contract; a no-op after bindClient already flushed.
-    registry.flushReliableQueue(folderPath);
+    registry.flushReliableQueue(entry.folderPath);
   } catch (err) {
     logger.error({ err, folderPath }, 'handshake failed');
     try {

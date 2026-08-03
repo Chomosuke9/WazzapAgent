@@ -428,6 +428,46 @@ test('pairing uses Baileys-generated code once and a failed initial pairing does
   }
 });
 
+test('401 during initial pairing clears only that tenant auth session', async () => {
+  const folder = tmpFolder('wazzap-pairing-401-');
+  const previousNumber = config.pairingNumber;
+  const previousCooldown = config.pairingRetryCooldownMs;
+  const sockets: FakeSock[] = [];
+
+  config.pairingNumber = '6281234567890';
+  config.pairingRetryCooldownMs = 60_000;
+  __setSocketCreatorForTests(async () => {
+    const sock = new FakeSock();
+    sock.authState.creds.registered = false;
+    sockets.push(sock);
+    return sock as unknown as never;
+  });
+
+  try {
+    const entry = await createOrResumeAccount({ folderPath: folder, printQr: false });
+    const sock = sockets[0]!;
+    const { authDir } = ensureFolderLayout(folder);
+    fs.writeFileSync(path.join(authDir, 'creds.json'), '{"pairingCode":"stale"}');
+
+    sock.emit('connection.update', { qr: 'pairing-qr' });
+    await waitFor(
+      () => sock.pairingRequests.length === 1,
+      'pairing code should be requested once',
+    );
+    sock.emit('connection.update', closeUpdate(DisconnectReason.loggedOut));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.equal(entry.sock, undefined);
+    assert.deepEqual(fs.readdirSync(authDir), [], 'stale pairing auth must be removed');
+    assert.ok((entry.pairingRetryAfterMs ?? 0) > Date.now());
+  } finally {
+    config.pairingNumber = previousNumber;
+    config.pairingRetryCooldownMs = previousCooldown;
+    cleanupAccount(folder);
+    __setSocketCreatorForTests(null);
+  }
+});
+
 test('a logged-out account clears auth so the same number can pair again', async () => {
   const folder = tmpFolder('wazzap-repair-after-logout-');
   const sockets: FakeSock[] = [];

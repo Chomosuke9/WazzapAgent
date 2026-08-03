@@ -42,6 +42,7 @@ First frame a `WaSocket` sends on every (re)connect.
   payload: {
     folderPath: string          // absolute path to the tenant folder (account key)
     protocolVersion: "2.0"
+    authToken?: string           // per-tenant credential from accounts.json
   }
 }
 ```
@@ -629,6 +630,7 @@ from typing import Optional, Any
 class Hello:
     folder_path: str
     protocol_version: str = "2.0"
+    auth_token: Optional[str] = None
 
 @dataclass(frozen=True)
 class HelloAck:

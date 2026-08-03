@@ -1,5 +1,5 @@
 import path from 'path';
-import { randomUUID } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import fs from 'fs-extra';
 import { parse as parseDotenv } from 'dotenv';
 
@@ -11,6 +11,7 @@ export interface ConfiguredAccount {
   configPath: string;
   nodeUrl: string;
   slot: number;
+  wsToken: string | null;
 }
 
 export type AccountCatalogSource =
@@ -57,6 +58,8 @@ interface RawAccount {
   node_url?: unknown;
   nodeUrl?: unknown;
   slot?: unknown;
+  ws_token?: unknown;
+  wsToken?: unknown;
 }
 
 interface ParsedCatalogFile {
@@ -100,6 +103,14 @@ function parseSlot(value: unknown): number | null {
   return Number(value);
 }
 
+function parseWsToken(value: unknown): string | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string' || value.trim().length < 32) {
+    throw new Error('Account ws_token must be a string of at least 32 characters.');
+  }
+  return value.trim();
+}
+
 function parseCatalogFile(raw: unknown, sharedNodeUrl: string): ParsedCatalogFile {
   if (Array.isArray(raw)) {
     return { accounts: raw, nodeUrl: sharedNodeUrl, managed: false };
@@ -128,6 +139,7 @@ function normalizeAccounts(
 ): ConfiguredAccount[] {
   const pending: Array<Omit<ConfiguredAccount, 'slot'> & { slot: number | null }> = [];
   const seenPaths = new Set<string>();
+  const seenTokens = new Set<string>();
   const usedSlots = new Set<number>();
 
   for (const item of rawAccounts) {
@@ -147,6 +159,11 @@ function normalizeAccounts(
       ? validateNodeUrl(rawNodeUrl)
       : sharedNodeUrl;
     const slot = parseSlot(raw.slot);
+    const wsToken = parseWsToken(raw.ws_token ?? raw.wsToken);
+    if (wsToken) {
+      if (seenTokens.has(wsToken)) throw new Error('Duplicate account ws_token.');
+      seenTokens.add(wsToken);
+    }
     if (slot !== null) {
       if (usedSlots.has(slot)) throw new Error(`Duplicate account slot: ${slot}`);
       usedSlots.add(slot);
@@ -155,6 +172,7 @@ function normalizeAccounts(
       folderPath,
       configPath: folderValue.trim(),
       nodeUrl,
+      wsToken,
       slot,
     });
   }
@@ -265,6 +283,7 @@ export class AccountCatalog {
         folder_path: portableConfigPath(this.rootDir, account.folderPath),
         ...(account.nodeUrl !== sharedNodeUrl ? { node_url: account.nodeUrl } : {}),
         slot: account.slot,
+        ...(account.wsToken ? { ws_token: account.wsToken } : {}),
       })),
     };
     await fs.ensureDir(path.dirname(sourcePath));
@@ -300,17 +319,46 @@ export class AccountCatalog {
         throw new AccountCatalogError('duplicate_account', 'An account with this ID already exists.');
       }
       const used = new Set(snapshot.accounts.map((account) => account.slot));
+      // Adding a second account can migrate a legacy single-account fallback
+      // into the managed catalog, so upgrade every existing entry at the same
+      // time instead of leaving one tenant on the shared process credential.
+      const securedExisting = snapshot.accounts.map((account) => ({
+        ...account,
+        wsToken: account.wsToken || randomBytes(32).toString('base64url'),
+      }));
       const account: ConfiguredAccount = {
         folderPath,
         configPath: portableConfigPath(this.rootDir, folderPath),
         nodeUrl: input.nodeUrl ? validateNodeUrl(input.nodeUrl) : snapshot.accounts[0].nodeUrl,
         slot: allocateSlot(used),
+        wsToken: randomBytes(32).toString('base64url'),
       };
-      const next = await this.write([...snapshot.accounts, account]);
+      const next = await this.write([...securedExisting, account]);
       return {
         account: next.accounts.find((item) => item.folderPath === folderPath)!,
         snapshot: next,
       };
+    });
+  }
+
+  /** Ensure managed catalogs have distinct per-account bridge credentials. */
+  ensureWsTokens(): Promise<AccountCatalogSnapshot> {
+    return this.mutate(async () => {
+      const snapshot = await this.read();
+      const missing = snapshot.accounts.filter((account) => !account.wsToken);
+      if (!missing.length) return snapshot;
+      if (snapshot.accounts.length === 1 && snapshot.source === 'fallback') return snapshot;
+      const managed = snapshot.source === 'managed_file'
+        || (snapshot.source === 'accounts_json' && snapshot.managed);
+      if (!managed) {
+        throw new Error(
+          'Every configured account in a multi-account source must define a unique ws_token.',
+        );
+      }
+      return this.write(snapshot.accounts.map((account) => ({
+        ...account,
+        wsToken: account.wsToken || randomBytes(32).toString('base64url'),
+      })));
     });
   }
 

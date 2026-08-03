@@ -53,6 +53,9 @@ class AccountConfig:
   # catalogs persist this so deleting account A never reroutes account B's
   # outstanding callbacks to a different tenant after a restart.
   slot: int | None = None
+  # Per-tenant credential sent in the Node hello handshake. None preserves the
+  # legacy single-account fallback, where the process bearer token is enough.
+  ws_token: str | None = None
 
 
 def _project_root() -> Path:
@@ -105,19 +108,24 @@ def _from_json(path: Path, shared_node_url: str) -> List[AccountConfig]:
       folder_path = item.get("folder_path") or item.get("folderPath")
       node_url = item.get("node_url") or item.get("nodeUrl") or file_node_url
       slot = item.get("slot")
+      ws_token = item.get("ws_token") or item.get("wsToken")
     else:
       raise ValueError(f"invalid account entry in {path}: {item!r}")
     if isinstance(item, str):
       slot = None
+      ws_token = None
     if not folder_path or not str(folder_path).strip():
       raise ValueError(f"account entry missing folder_path in {path}: {item!r}")
     if slot is not None and (isinstance(slot, bool) or not isinstance(slot, int) or not 0 <= slot <= 999):
       raise ValueError(f"invalid account slot in {path}: {slot!r}")
+    if ws_token is not None and (not isinstance(ws_token, str) or len(ws_token.strip()) < 32):
+      raise ValueError(f"invalid account ws_token in {path}: {ws_token!r}")
     accounts.append(
       AccountConfig(
         folder_path=str(folder_path).strip(),
         node_url=str(node_url).strip(),
         slot=slot,
+        ws_token=ws_token.strip() if isinstance(ws_token, str) else None,
       )
     )
   return accounts
@@ -152,7 +160,7 @@ def _normalize_accounts(accounts: List[AccountConfig]) -> List[AccountConfig]:
         raise ValueError(f"duplicate account slot: {account.slot}")
       seen_slots.add(account.slot)
     config.validate_node_url(account.node_url)
-    normalized.append(AccountConfig(folder_path, account.node_url, account.slot))
+    normalized.append(AccountConfig(folder_path, account.node_url, account.slot, account.ws_token))
   return normalized
 
 

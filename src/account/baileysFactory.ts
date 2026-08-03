@@ -927,6 +927,13 @@ async function resolveOwnerLids(sock: WASocket, ownerJids: string[]): Promise<vo
   }
 }
 
+/** Resolve owner phone numbers immediately for a live tenant socket. */
+export async function resolveAccountOwnerLids(folderPath: string): Promise<void> {
+  const entry = registry.get(folderPath);
+  if (!entry?.sock || !entry.ctx.botOwnerJids) return;
+  await resolveOwnerLids(entry.sock, entry.ctx.botOwnerJids);
+}
+
 /**
  * Connection-state listener: QR printing, normalized `whatsapp_status`
  * forwarding (exactly once), the `onStatusChange` side-hook, and the
@@ -1049,7 +1056,16 @@ function attachConnectionListener(
         );
         entry.pairingPhoneNumber = undefined;
         entry.pairingRequestedAtMs = undefined;
-        const knownPairingFailure = [408, 428, 429, 515].includes(
+        // A 401 immediately after entering the code is WhatsApp rejecting the
+        // unregistered companion session. The pairing request writes `me` and
+        // `pairingCode` into creds before WhatsApp accepts it; retain those
+        // files and the next attempt can inherit a stale half-paired session.
+        // Clear only this tenant's auth files so a fresh code starts from a
+        // genuinely unregistered state. Settings/history/media remain intact.
+        if (statusCode === DisconnectReason.loggedOut) {
+          clearAuthSession(authDir, folderPath);
+        }
+        const knownPairingFailure = [401, 408, 428, 429, 515].includes(
           statusCode ?? -1,
         );
         logger.error(

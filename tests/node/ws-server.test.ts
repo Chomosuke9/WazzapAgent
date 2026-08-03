@@ -11,6 +11,7 @@ import { __setSocketCreatorForTests } from '../../src/account/baileysFactory.ts'
 import {
   get,
   remove,
+  setConfiguredAccounts,
   sendReliableToClient,
 } from '../../src/server/accountRegistry.ts';
 import config from '../../src/config.ts';
@@ -100,6 +101,7 @@ test('hello handshake -> hello_ack with folderPath + waStatus', { timeout: 15000
   installFakeSocketCreator();
   const wss = startWsServer(0);
   const folderPath = config.dataDir;
+  setConfiguredAccounts([folderPath]);
   let client: WebSocket | undefined;
   try {
     const port = await listeningPort(wss);
@@ -123,6 +125,7 @@ test('hello handshake -> hello_ack with folderPath + waStatus', { timeout: 15000
     client?.close();
     await new Promise<void>((r) => wss.close(() => r()));
     remove(config.dataDir);
+    setConfiguredAccounts([]);
     __setSocketCreatorForTests(null);
   }
 });
@@ -135,6 +138,7 @@ test('send_message action -> action_ack(ok) + send_ack', { timeout: 15000 }, asy
   const previousDataDir = config.dataDir;
   const folderPath = await mkdtemp(path.join(tmpdir(), 'wazzap-ws-send-'));
   config.dataDir = folderPath;
+  setConfiguredAccounts([folderPath]);
   let client: WebSocket | undefined;
   try {
     const port = await listeningPort(wss);
@@ -175,6 +179,65 @@ test('send_message action -> action_ack(ok) + send_ack', { timeout: 15000 }, asy
     remove(folderPath);
     config.dataDir = previousDataDir;
     await rm(folderPath, { recursive: true, force: true });
+    setConfiguredAccounts([]);
+    __setSocketCreatorForTests(null);
+  }
+});
+
+test('hello rejects a tenant that is not in the configured account allowlist', { timeout: 15000 }, async () => {
+  installFakeSocketCreator();
+  const wss = startWsServer(0);
+  const unknownFolder = await mkdtemp(path.join(tmpdir(), 'wazzap-ws-unconfigured-'));
+  setConfiguredAccounts([config.dataDir]);
+  let client: WebSocket | undefined;
+  try {
+    const port = await listeningPort(wss);
+    client = await openClient(port);
+    send(client, { type: 'hello', payload: { folderPath: unknownFolder, protocolVersion: '2.0' } });
+    await once(client, 'close');
+    assert.equal(get(unknownFolder), undefined, 'unconfigured hello must not create a tenant');
+  } finally {
+    client?.close();
+    await new Promise<void>((r) => wss.close(() => r()));
+    await rm(unknownFolder, { recursive: true, force: true });
+    setConfiguredAccounts([]);
+    __setSocketCreatorForTests(null);
+  }
+});
+
+test('hello binds only with the configured tenant credential', { timeout: 15000 }, async () => {
+  installFakeSocketCreator();
+  const wss = startWsServer(0);
+  const folderPath = await mkdtemp(path.join(tmpdir(), 'wazzap-ws-tenant-credential-'));
+  const wsToken = 'a'.repeat(32);
+  setConfiguredAccounts([{ folderPath, wsToken }]);
+  let badClient: WebSocket | undefined;
+  let goodClient: WebSocket | undefined;
+  try {
+    const port = await listeningPort(wss);
+    badClient = await openClient(port);
+    send(badClient, {
+      type: 'hello',
+      payload: { folderPath, protocolVersion: '2.0', authToken: 'b'.repeat(32) },
+    });
+    await once(badClient, 'close');
+    assert.equal(get(folderPath), undefined, 'wrong tenant credential must not create runtime');
+
+    goodClient = await openClient(port);
+    send(goodClient, {
+      type: 'hello',
+      payload: { folderPath, protocolVersion: '2.0', authToken: wsToken },
+    });
+    assert.equal((await nextFrame(goodClient)).type, 'hello_ack');
+    assert.ok(get(folderPath));
+  } finally {
+    badClient?.close();
+    goodClient?.close();
+    await new Promise<void>((r) => wss.close(() => r()));
+    get(folderPath)?.database?.close();
+    remove(folderPath);
+    setConfiguredAccounts([]);
+    await rm(folderPath, { recursive: true, force: true });
     __setSocketCreatorForTests(null);
   }
 });
@@ -184,6 +247,7 @@ test('LLM_WS_TOKEN configured: missing/invalid Authorization -> connection rejec
   const prevToken = config.wsToken;
   config.wsToken = 'secret-token-123';
   const wss = startWsServer(0);
+  setConfiguredAccounts([config.dataDir]);
   try {
     const port = await listeningPort(wss);
 
@@ -208,8 +272,25 @@ test('LLM_WS_TOKEN configured: missing/invalid Authorization -> connection rejec
   } finally {
     await new Promise<void>((r) => wss.close(() => r()));
     remove(config.dataDir);
+    setConfiguredAccounts([]);
     config.wsToken = prevToken;
     __setSocketCreatorForTests(null);
+  }
+});
+
+test('non-loopback WS binding requires LLM_WS_TOKEN', () => {
+  const previousHost = config.wsBindHost;
+  const previousToken = config.wsToken;
+  config.wsBindHost = '0.0.0.0';
+  config.wsToken = null;
+  try {
+    assert.throws(
+      () => startWsServer(0),
+      /Refusing to expose the WS control plane.*LLM_WS_TOKEN/,
+    );
+  } finally {
+    config.wsBindHost = previousHost;
+    config.wsToken = previousToken;
   }
 });
 
@@ -217,6 +298,7 @@ test('reconnect flush: queued reliable control event delivered AFTER hello_ack',
   installFakeSocketCreator();
   const wss = startWsServer(0);
   const folderPath = '/tmp/wazzap-ws-reconnect-tenant';
+  setConfiguredAccounts([folderPath]);
   let client2: WebSocket | undefined;
   try {
     const port = await listeningPort(wss);
@@ -254,6 +336,7 @@ test('reconnect flush: queued reliable control event delivered AFTER hello_ack',
     client2?.close();
     await new Promise<void>((r) => wss.close(() => r()));
     remove(folderPath);
+    setConfiguredAccounts([]);
     __setSocketCreatorForTests(null);
   }
 });

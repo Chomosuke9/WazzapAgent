@@ -118,6 +118,7 @@ class WaSocket:
         *,
         transport: Optional[WSClientTransport] = None,
         ack_timeout: float = 30.0,
+        auth_token: Optional[str] = None,
         **transport_options: object,
     ) -> None:
         self._folder_path = folder_path
@@ -125,6 +126,7 @@ class WaSocket:
         self._pending = PendingAcks()
         self._handlers: Dict[str, List[Handler]] = {}
         self._ack_timeout = ack_timeout
+        self._auth_token = auth_token
         # True only between a successful handshake ("open") and the next "close".
         self._handshake_done = False
 
@@ -155,7 +157,7 @@ class WaSocket:
         """
         if self.is_connected:
             return
-        hello = protocol.Hello(folder_path=self._folder_path)
+        hello = protocol.Hello(folder_path=self._folder_path, auth_token=self._auth_token)
         await self._transport.connect(
             node_url, hello, self._route_frame, self._on_transport_status
         )

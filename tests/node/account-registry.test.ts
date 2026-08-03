@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type WebSocket from 'ws';
+import path from 'node:path';
 import type { OutboundFrame } from '../../src/protocol/types.ts';
 
 import {
@@ -46,7 +47,7 @@ test('getOrCreate is idempotent (same object for same folderPath)', () => {
   const second = getOrCreate(folder);
   assert.strictEqual(first, second, 'same folderPath must return the same object');
   assert.strictEqual(get(folder), first);
-  assert.equal(first.folderPath, folder);
+    assert.equal(first.folderPath, folder);
   assert.deepEqual(first.reliableQueue, []);
   remove(folder);
 });
@@ -103,6 +104,17 @@ test('sendToClient with no client is a no-op (no throw, no enqueue)', () => {
     assert.equal(entry, undefined);
   }
   remove(folder);
+});
+
+test('path aliases share one canonical account entry', () => {
+  const folder = path.resolve(process.cwd(), 'tenants', 'canonical');
+  const alias = path.join(path.dirname(folder), 'canonical', '..', 'canonical');
+  const first = getOrCreate(folder);
+  const second = getOrCreate(alias);
+
+  assert.strictEqual(second, first, 'dot-segment aliases must not create another runtime');
+  remove(alias);
+  assert.equal(get(folder), undefined);
 });
 
 test('removed-account tombstones block late reconnects until the tenant is re-added', () => {

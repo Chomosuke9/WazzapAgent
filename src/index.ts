@@ -20,7 +20,7 @@ import {
   ensureFolderLayout,
   openAccountPersistence,
 } from './account/baileysFactory.js';
-import { loadConfiguredAccounts } from './account/accountCatalog.js';
+import { AccountCatalog } from './account/accountCatalog.js';
 import { startWsServer } from './server/wsServer.js';
 import { initCommandRegistry } from './wa/command/CommandRegistry.js';
 import { initButtonRegistry } from './wa/command/ButtonRegistry.js';
@@ -46,7 +46,8 @@ async function bootstrap(): Promise<void> {
   // Pre-register every configured tenant so the control panel remains useful
   // even while the Python bridge is offline. WhatsApp sockets are still built
   // lazily by a bridge `hello` or an explicit panel pairing request.
-  const accountCatalog = await loadConfiguredAccounts();
+  const accountCatalog = await new AccountCatalog().ensureWsTokens();
+  registry.setConfiguredAccounts(accountCatalog.accounts);
   for (const account of accountCatalog.accounts) {
     const entry = registry.getOrCreate(account.folderPath);
     const layout = ensureFolderLayout(account.folderPath);

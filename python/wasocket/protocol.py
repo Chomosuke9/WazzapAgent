@@ -37,6 +37,7 @@ from typing import Optional, get_origin
 class Hello:
     folder_path: str
     protocol_version: str = "2.0"
+    auth_token: Optional[str] = None
 
 
 @dataclass(frozen=True)

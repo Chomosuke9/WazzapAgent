@@ -27,7 +27,12 @@ export interface Attachment {
 }
 
 // ---- inbound frames Node RECEIVES from Python ----
-export interface HelloPayload { folderPath: string; protocolVersion: "2.0"; }
+export interface HelloPayload {
+  folderPath: string;
+  protocolVersion: "2.0";
+  /** Per-tenant credential; transport bearer auth remains process-level. */
+  authToken?: string;
+}
 
 export interface SendMessagePayload {
   requestId: string; chatId: string;

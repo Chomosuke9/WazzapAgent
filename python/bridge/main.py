@@ -84,7 +84,11 @@ def build_session(
     ``{index}`` placeholder in ``SUBAGENT_WEBHOOK_URL`` so its proxy can route
     each account to the matching local webhook server.
     """
-    sock = make_wa_socket(account.folder_path, **ws_transport_options())
+    sock = make_wa_socket(
+        account.folder_path,
+        auth_token=account.ws_token,
+        **ws_transport_options(),
+    )
     webhook_port = base_webhook_port + slot
     webhook_url = _resolve_webhook_url(webhook_port, index=slot)
     # Direct-invoke endpoint port mirrors the webhook per-account offset

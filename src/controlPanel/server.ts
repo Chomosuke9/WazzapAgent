@@ -14,6 +14,7 @@ import {
   openAccountPersistence,
   PairingCodeError,
   reconnectAccount,
+  resolveAccountOwnerLids,
   requestAccountPairingCode,
   stopAccount,
 } from '../account/baileysFactory.js';
@@ -729,6 +730,9 @@ export function createControlPanelServer(
           throw accountCatalogHttpError(error);
         }
         const entry = registry.getOrCreate(added.account.folderPath);
+        for (const account of added.snapshot.accounts) {
+          registry.allowConfiguredAccount(account);
+        }
         registry.unblock(entry.folderPath);
         ensureAccountPersistence(entry);
         entry.repos!.settings.setBotConfig('control_panel_account_name', name);
@@ -1221,6 +1225,7 @@ export function createControlPanelServer(
               ownerJids.length ? ownerJids.join(',') : null,
             );
             entry.ctx.botOwnerJids = ownerJids;
+            await resolveAccountOwnerLids(entry.folderPath);
           }
           entry.ctx.botName = getTenantBotName(repos);
           if ('ownerContact' in body) {

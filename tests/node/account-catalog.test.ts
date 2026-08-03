@@ -57,6 +57,22 @@ test('managed account catalog migrates fallback config and preserves stable slot
   }
 });
 
+test('managed account catalog upgrades legacy entries with distinct WS credentials', async () => {
+  const item = await fixture();
+  try {
+    await item.catalog.add({ accountKey: 'support' });
+    const secured = await item.catalog.ensureWsTokens();
+    const tokens = secured.accounts.map((account) => account.wsToken);
+    assert.ok(tokens.every((token): token is string => typeof token === 'string' && token.length >= 32));
+    assert.equal(new Set(tokens).size, tokens.length);
+
+    const reread = await item.catalog.read();
+    assert.deepEqual(reread.accounts.map((account) => account.wsToken), tokens);
+  } finally {
+    await item.cleanup();
+  }
+});
+
 test('managed catalog rejects unsafe IDs, duplicates, and removing the final account', async () => {
   const item = await fixture();
   try {

@@ -10,14 +10,15 @@ The gateway and bridge communicate via JSON messages over WebSocket. This page d
 
 1. The Python `WaSocket` (client) dials the Node gateway (server) at `NODE_URL` (default `ws://localhost:3000`). Node binds its WS server to `WS_BIND_HOST:WS_LISTEN_PORT` (default `127.0.0.1:3000`).
 2. If `LLM_WS_TOKEN` is set, the client sends an `Authorization: Bearer <token>` header (verified by Node).
-3. After connecting, the client sends a `hello` message carrying its tenant `folderPath`; Node replies with `hello_ack`:
+3. After connecting, the client sends a `hello` message carrying its tenant `folderPath` and, for managed multi-account catalogs, that account's private credential; Node replies with `hello_ack`:
 
 ```json
 {
   "type": "hello",
   "payload": {
     "folderPath": "/tenants/acct-a",
-    "protocolVersion": "2.0"
+    "protocolVersion": "2.0",
+    "authToken": "<per-account-secret>"
   }
 }
 ```

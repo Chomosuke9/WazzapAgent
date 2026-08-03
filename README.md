@@ -202,8 +202,9 @@ The account becomes live without restarting Node or the Python bridge.
 
 The panel stores its catalog in the git-ignored `accounts.json`. Each account is
 fully isolated under `tenants/<id>/{auth,db,media,stickers}` and owns a stable
-callback port slot. Removing an account stops its runtime but deliberately keeps
-that tenant directory, so an accidental removal does not destroy auth or data.
+callback port slot plus a generated per-account WebSocket credential. Removing
+an account stops its runtime but deliberately keeps that tenant directory, so an
+accidental removal does not destroy auth or data.
 
 Manual `FOLDER_PATHS` and `ACCOUNTS_JSON` configuration remains supported for
 custom deployments; see [`.env.example`](./.env.example).
