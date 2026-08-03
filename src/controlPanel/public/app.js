@@ -107,6 +107,27 @@ async function copyText(value) {
   }
 }
 
+function withPreservedListScroll(selector, task) {
+  const scroller = document.querySelector(selector);
+  const scrollTop = scroller ? scroller.scrollTop : 0;
+  const restore = () => {
+    const restored = document.querySelector(selector);
+    if (restored) restored.scrollTop = scrollTop;
+  };
+  let result;
+  try {
+    result = task();
+  } catch (error) {
+    restore();
+    throw error;
+  }
+  if (result && typeof result.then === 'function') {
+    return result.then((value) => { restore(); return value; }, (error) => { restore(); throw error; });
+  }
+  restore();
+  return result;
+}
+
 function statusMarkup(account) {
   if (account.linked) {
     return '<span class="status-label success"><span class="status-dot success"></span>Linked</span>';
@@ -648,10 +669,10 @@ async function renderChats() {
   `;
   bindAccountSelector();
   document.getElementById('new-chat').addEventListener('click', showNewChatModal);
-  document.querySelectorAll('.select-row[data-chat-id]').forEach((button) => button.addEventListener('click', async () => {
+  document.querySelectorAll('.select-row[data-chat-id]').forEach((button) => button.addEventListener('click', () => {
     state.currentChatId = button.dataset.chatId;
     state.pendingScopeName = '';
-    await renderChats();
+    void withPreservedListScroll('.list-panel', renderChats);
   }));
   bindChatEditor();
 }
@@ -703,7 +724,7 @@ function bindChatEditor() {
       state.chatDetail = await api(`/api/accounts/${encodeURIComponent(state.selectedAccountId)}/chat-settings/detail`, { method: 'PUT', body });
       state.pendingScopeName = '';
       toast('Chat settings saved.');
-      await renderChats();
+      await withPreservedListScroll('.list-panel', renderChats);
     } catch (error) {
       toast(error.message, 'error');
     }
@@ -715,7 +736,7 @@ function bindChatEditor() {
       body: { chatId: state.currentChatId },
     });
     toast('Chat settings reset.');
-    await renderChats();
+    await withPreservedListScroll('.list-panel', renderChats);
   });
   document.getElementById('memory-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -726,7 +747,7 @@ function bindChatEditor() {
       body: { scope: state.currentChatId, text },
     });
     toast('Memory added.');
-    await renderChats();
+    await withPreservedListScroll('.list-panel', renderChats);
   });
   document.querySelectorAll('.delete-memory').forEach((button) => button.addEventListener('click', async () => {
     await api(`/api/accounts/${encodeURIComponent(state.selectedAccountId)}/memories`, {
@@ -734,7 +755,7 @@ function bindChatEditor() {
       body: { scope: state.currentChatId, index: Number(button.dataset.index) },
     });
     toast('Memory deleted.');
-    await renderChats();
+    await withPreservedListScroll('.list-panel', renderChats);
   }));
 }
 
@@ -771,13 +792,44 @@ async function renderModels() {
   }));
 }
 
-function providerField(prefix, label, value, secret = false) {
+function providerLabel(key) {
+  return key
+    .replace(/([A-Z])/g, ' $1')
+    .replace(/^./, (ch) => ch.toUpperCase())
+    .replace(/\bApi\b/, 'API');
+}
+
+function providerField(prefix, label, value, secret = false, full = '') {
   const configured = secret && value?.apiKeyConfigured;
   const inputId = `${prefix}-${label}`;
   const clearId = `${inputId}-clear`;
   const current = secret ? '' : (value?.[label] || '');
   const hint = secret && configured ? ` placeholder="Configured: ${escapeHtml(value.apiKeyMasked || 'hidden')}"` : '';
-  return `<label class="form-field"><span class="field-label">${escapeHtml(label.replace(/([A-Z])/g, ' $1'))}</span><input id="${inputId}" type="${secret ? 'password' : 'text'}" value="${escapeHtml(current)}"${hint}>${secret && configured ? `<span class="field-help"><label><input id="${clearId}" type="checkbox"> Clear saved key</label></span>` : ''}</label>`;
+  return `<label class="form-field ${full}"><span class="field-label">${escapeHtml(providerLabel(label))}</span><input id="${inputId}" type="${secret ? 'password' : 'text'}" value="${escapeHtml(current)}"${hint}>${secret && configured ? `<span class="field-help"><label class="clear-key"><input id="${clearId}" type="checkbox"> Clear saved key</label></span>` : ''}</label>`;
+}
+
+function providerSection(prefix, title, subtitle, values) {
+  const fallback = {
+    apiKeyConfigured: values.fallbackApiKeyConfigured,
+    apiKeyMasked: values.fallbackApiKeyMasked,
+  };
+  return `
+    <section class="modal-section">
+      <header class="modal-section-header"><h3>${escapeHtml(title)}</h3><p>${escapeHtml(subtitle)}</p></header>
+      <div class="form-grid">
+        ${providerField(prefix, 'endpoint', values, false, 'full')}
+        ${providerField(prefix, 'model', values)}
+        ${providerField(prefix, 'apiKey', values, true, 'full')}
+      </div>
+      <div class="provider-subgroup">
+        <span class="provider-subgroup-label">Fallback provider</span>
+        <div class="form-grid">
+          ${providerField(prefix, 'fallbackEndpoint', values, false, 'full')}
+          ${providerField(prefix, 'fallbackModel', values)}
+          ${providerField(prefix, 'fallbackApiKey', fallback, true, 'full')}
+        </div>
+      </div>
+    </section>`;
 }
 
 function showProviderModal(data) {
@@ -786,21 +838,9 @@ function showProviderModal(data) {
   openModal(
     'Provider settings',
     'Credentials are tenant-scoped. API keys are never returned in full.',
-    `<div class="form-grid">
-      <div class="form-field full"><strong>LLM2 responder</strong></div>
-      ${providerField('llm2', 'endpoint', llm2)}
-      ${providerField('llm2', 'model', llm2)}
-      ${providerField('llm2', 'apiKey', llm2, true)}
-      ${providerField('llm2', 'fallbackEndpoint', llm2)}
-      ${providerField('llm2', 'fallbackModel', llm2)}
-      ${providerField('llm2', 'fallbackApiKey', { apiKeyConfigured: llm2.fallbackApiKeyConfigured, apiKeyMasked: llm2.fallbackApiKeyMasked }, true)}
-      <div class="form-field full"><strong>LLM1 router</strong></div>
-      ${providerField('llm1', 'endpoint', llm1)}
-      ${providerField('llm1', 'model', llm1)}
-      ${providerField('llm1', 'apiKey', llm1, true)}
-      ${providerField('llm1', 'fallbackEndpoint', llm1)}
-      ${providerField('llm1', 'fallbackModel', llm1)}
-      ${providerField('llm1', 'fallbackApiKey', { apiKeyConfigured: llm1.fallbackApiKeyConfigured, apiKeyMasked: llm1.fallbackApiKeyMasked }, true)}
+    `<div class="modal-sections">
+      ${providerSection('llm2', 'LLM2 responder', 'Generates the actual replies and tool calls in chats.', llm2)}
+      ${providerSection('llm1', 'LLM1 router', 'Cheap decision router that gates whether group chats get a reply.', llm1)}
     </div>`,
     {
       onConfirm: async (root) => {
@@ -838,7 +878,10 @@ function showModelModal(modelId = '') {
       <label class="form-field"><span class="field-label">Display name</span><input id="model-name" value="${escapeHtml(model?.displayName || '')}"></label>
       <label class="form-field"><span class="field-label">Sort order</span><input id="model-order" type="number" min="0" step="1" value="${model?.sortOrder ?? ''}"><p class="field-help">Uses non-negative values; choosing a default never changes this order.</p></label>
       <label class="form-field full"><span class="field-label">Description</span><textarea id="model-description">${escapeHtml(model?.description || '')}</textarea></label>
-      <div class="form-field full"><div class="toggle-row"><strong>Active</strong><label class="toggle"><input id="model-active" type="checkbox" ${model?.isActive !== false ? 'checked' : ''}><span></span></label></div><div class="toggle-row"><strong>Vision support</strong><label class="toggle"><input id="model-vision" type="checkbox" ${model?.visionSupport ? 'checked' : ''}><span></span></label></div></div>
+      <div class="form-field full"><span class="field-label">Capabilities</span><div class="toggle-grid">
+        <div class="toggle-row"><div><strong>Active</strong><p class="field-help">Shown in the chat model selector.</p></div><label class="toggle"><input id="model-active" type="checkbox" ${model?.isActive !== false ? 'checked' : ''}><span></span></label></div>
+        <div class="toggle-row"><div><strong>Vision support</strong><p class="field-help">Accepts images from chats.</p></div><label class="toggle"><input id="model-vision" type="checkbox" ${model?.visionSupport ? 'checked' : ''}><span></span></label></div>
+      </div></div>
     </div>`,
     {
       onConfirm: async (root) => {
@@ -1113,11 +1156,13 @@ function renderSystemShell() {
   document.querySelectorAll('[data-system-section]').forEach((button) => button.addEventListener('click', () => {
     state.systemSection = button.dataset.systemSection;
     sessionStorage.setItem('wazzap_system_section', state.systemSection);
-    if (state.systemSection === 'subagent-outbox') {
-      void refreshSubagentOutbox();
-    } else {
-      renderSystemShell();
-    }
+    void withPreservedListScroll('.system-section-nav', async () => {
+      if (state.systemSection === 'subagent-outbox') {
+        await refreshSubagentOutbox();
+      } else {
+        renderSystemShell();
+      }
+    });
   }));
 
   if (selected.id === 'runtime') {

@@ -940,6 +940,31 @@ tbody tr:hover td {
   transform: translateX(18px);
 }
 
+.toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.toggle-grid .toggle-row {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-soft);
+}
+
+.toggle-grid .toggle-row:last-child {
+  border-bottom: 1px solid var(--border);
+}
+
+.toggle-grid .toggle-row p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .form-footer {
   display: flex;
   align-items: center;
@@ -1220,6 +1245,65 @@ tbody tr:hover td {
   border-top: 1px solid var(--border);
 }
 
+.modal-sections {
+  display: grid;
+  gap: 14px;
+}
+
+.modal-section {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-soft);
+}
+
+.modal-section-header {
+  margin-bottom: 14px;
+}
+
+.modal-section-header h3 {
+  margin: 0 0 2px;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+
+.modal-section-header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.provider-subgroup {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.provider-subgroup-label {
+  display: block;
+  margin-bottom: 12px;
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.clear-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  color: var(--muted-strong);
+}
+
+.clear-key input[type="checkbox"] {
+  width: 14px;
+  min-height: 14px;
+  margin: 0;
+  accent-color: var(--green);
+}
+
 .toast-region {
   position: fixed;
   z-index: 200;
@@ -1326,7 +1410,8 @@ tbody tr:hover td {
 
   .split-layout,
   .system-layout,
-  .form-grid {
+  .form-grid,
+  .toggle-grid {
     grid-template-columns: 1fr;
   }
 
