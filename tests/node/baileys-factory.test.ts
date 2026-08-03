@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DisconnectReason } from 'baileys';
 import config from '../../src/config.ts';
 
 import {
@@ -422,6 +423,49 @@ test('pairing uses Baileys-generated code once and a failed initial pairing does
   } finally {
     config.pairingNumber = previousNumber;
     config.pairingRetryCooldownMs = previousCooldown;
+    cleanupAccount(folder);
+    __setSocketCreatorForTests(null);
+  }
+});
+
+test('a logged-out account clears auth so the same number can pair again', async () => {
+  const folder = tmpFolder('wazzap-repair-after-logout-');
+  const sockets: FakeSock[] = [];
+  let creatorCalls = 0;
+
+  __setSocketCreatorForTests(async (authState) => {
+    const sock = new FakeSock();
+    // Simulate a previously linked first socket, then let the replacement
+    // reflect the auth state loaded from disk after logout cleanup.
+    sock.authState.creds.registered = creatorCalls === 0
+      ? true
+      : Boolean(authState.creds.registered);
+    creatorCalls += 1;
+    sockets.push(sock);
+    return sock as unknown as never;
+  });
+
+  try {
+    const entry = await createOrResumeAccount({ folderPath: folder, printQr: false });
+    const first = sockets[0]!;
+    const { authDir } = ensureFolderLayout(folder);
+    fs.writeFileSync(path.join(authDir, 'creds.json'), '{}');
+
+    first.emit('connection.update', closeUpdate(DisconnectReason.loggedOut));
+    assert.equal(entry.sock, undefined);
+    assert.deepEqual(fs.readdirSync(authDir), [], 'logged-out auth files must be removed');
+
+    const pairing = requestAccountPairingCode(folder, '6281234567890');
+    await waitFor(() => sockets.length === 2, 'pairing should build a fresh socket');
+    const second = sockets[1]!;
+    second.emit('connection.update', { qr: 'fresh-qr' });
+    const result = await pairing;
+
+    assert.equal(result.phoneNumber, '6281234567890');
+    assert.deepEqual(second.pairingRequests, [
+      { phoneNumber: '6281234567890', customCode: undefined },
+    ]);
+  } finally {
     cleanupAccount(folder);
     __setSocketCreatorForTests(null);
   }

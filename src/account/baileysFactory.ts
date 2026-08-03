@@ -782,6 +782,23 @@ function detachSocket(entry: AccountEntry): WASocket | undefined {
   return sock;
 }
 
+/**
+ * Remove only the Baileys session files so a logged-out tenant can start a
+ * genuinely fresh pairing flow. Settings, history, media, and stickers stay
+ * tenant-local and are intentionally preserved.
+ */
+function clearAuthSession(authDir: string, folderPath: string): void {
+  try {
+    fs.emptyDirSync(authDir);
+    logger.info({ folderPath }, "cleared logged-out WhatsApp auth session");
+  } catch (err) {
+    logger.error(
+      { err, folderPath, authDir },
+      "failed to clear logged-out WhatsApp auth session",
+    );
+  }
+}
+
 /** Rebuild one tenant's WhatsApp socket without touching its auth or DBs. */
 export async function reconnectAccount(folderPath: string): Promise<AccountEntry> {
   const entry = registry.get(folderPath);
@@ -1040,8 +1057,15 @@ function attachConnectionListener(
           logger.error({ err, folderPath }, "reconnect failed"),
         );
       } else {
+        // WhatsApp has invalidated this device session. Leaving creds.json in
+        // place makes the next pairing request rebuild a socket with
+        // `registered: true`, which is then rejected as "already linked" even
+        // though the account is logged out. Clear only auth files so the next
+        // socket starts with an unregistered auth state and can be paired with
+        // the same phone number again.
+        clearAuthSession(authDir, folderPath);
         logger.error(
-          "Logged out from WhatsApp. Delete auth folder to re-pair.",
+          "Logged out from WhatsApp. Auth cleared; pair again from the control panel or QR.",
         );
       }
       return;
