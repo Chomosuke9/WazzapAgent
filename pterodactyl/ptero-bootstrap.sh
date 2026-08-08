@@ -165,7 +165,29 @@ if [ -x "$FFMPEG_BIN" ]; then
   export PATH="$FFMPEG_DIR:$PATH"
 fi
 
-# --- 3b) qrencode (best-effort; renders the WhatsApp login QR) --------------
+# --- 3b) yt-dlp (best-effort; media download from URLs) ---------------------
+# The bootstrap runs WITHOUT root, so instead of installing to /usr/local/bin
+# we download the standalone yt-dlp binary into the persistent volume and add
+# it to PATH. The github release URL is the same one the sudo variant uses:
+#   sudo wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
+#     -O /usr/local/bin/yt-dlp
+#   sudo chmod a+rx /usr/local/bin/yt-dlp
+YDLP_BIN="/home/container/.yt-dlp/yt-dlp"
+if [ ! -x "$YDLP_BIN" ]; then
+  log "provisioning yt-dlp (best-effort)..."
+  if download "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp" "$YDLP_BIN"; then
+    chmod a+rx "$YDLP_BIN"
+    log "yt-dlp ready at $YDLP_BIN"
+  else
+    rm -f "$YDLP_BIN"
+    log "WARN: yt-dlp download failed"
+  fi
+fi
+if [ -x "$YDLP_BIN" ]; then
+  export PATH="/home/container/.yt-dlp:$PATH"
+fi
+
+# --- 3c) qrencode (best-effort; renders the WhatsApp login QR) --------------
 # The Node gateway shells out to `qrencode -t ANSIUTF8` to draw the pairing QR
 # (src/wa/connection.ts → printQrInTerminal). The node-only yolk image ships no
 # qrencode, so provision it WITHOUT root by extracting the Debian .deb packages

@@ -208,8 +208,10 @@ async function handleDownload({
         quoted: msg,
       },
     );
+    await reactWithProgress('✅');
   } catch (error) {
     const errorMessage = getYtDlpError(error);
+    await reactWithProgress('❌');
 
     console.error(
       'yt-dlp download failed:',
