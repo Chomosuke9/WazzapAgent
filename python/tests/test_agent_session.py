@@ -22,6 +22,7 @@ import is lazy), so the module imports in PIL-less environments.
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import bridge.agent.batch_processor as batch_processor_module
 import bridge.session as session_module
@@ -57,6 +58,20 @@ class StubWaSocket:
       result = handler(payload)
       if asyncio.iscoroutine(result):
         await result
+
+
+class _AckBlockingWaSocket(StubWaSocket):
+  """Models send_message awaiting ACK unless the bridge supplies an ID."""
+
+  def __init__(self, folder_path: str) -> None:
+    super().__init__(folder_path)
+    self.sent: list[dict] = []
+
+  async def send_message(self, chat_id: str, text: str, *, request_id=None):
+    self.sent.append({"chatId": chat_id, "text": text, "requestId": request_id})
+    if request_id is None:
+      await asyncio.Event().wait()
+    return None
 
 
 class _LifecycleWaSocket(StubWaSocket):
@@ -349,6 +364,43 @@ def test_action_ack_handler_never_blocks_the_socket_frame_pump():
     release_hydration.set()
     if session.tasks:
       await asyncio.gather(*list(session.tasks))
+
+  asyncio.run(scenario())
+
+
+def test_daily_task_list_and_delete_do_not_wait_for_action_ack():
+  """Control-event replies must return so the pump can read their ACKs."""
+
+  class _DailyTasks:
+    def list_for_chat(self, _chat_id):
+      return [SimpleNamespace(id="abcdef12-full", time_of_day="08:00", prompt="ping")]
+
+    def delete_for_chat(self, _chat_id, _task_id):
+      task = SimpleNamespace(id="abcdef12-full")
+      return "deleted", task
+
+  async def scenario():
+    sock = _AckBlockingWaSocket("/tenant-a")
+    session = AgentSession(sock)
+    session._daily = _DailyTasks()
+    session.register()
+
+    await asyncio.wait_for(
+      sock.emit("daily_task_list", {"chatId": "123@g.us"}),
+      timeout=0.25,
+    )
+    await asyncio.wait_for(
+      sock.emit(
+        "daily_task_delete",
+        {"chatId": "123@g.us", "taskId": "abcdef12"},
+      ),
+      timeout=0.25,
+    )
+
+    assert len(sock.sent) == 2
+    assert all(item["requestId"] for item in sock.sent)
+    assert sock.sent[0]["requestId"].startswith("daily_task_list-")
+    assert sock.sent[1]["requestId"].startswith("daily_task_delete-")
 
   asyncio.run(scenario())
 

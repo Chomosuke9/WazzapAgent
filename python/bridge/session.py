@@ -623,7 +623,14 @@ def _register_handlers(session) -> None:
       logger.exception("daily_task_list: failed chat_id=%s: %s", chat_id, exc)
       text = "❌ Could not load daily tasks. Please try again."
     try:
-      await session.sock.send_message(chat_id, text)
+      # This handler runs inside WaSocket's serialized receive/frame pump. A
+      # caller-supplied request ID makes send_message return after transport
+      # delivery instead of waiting for an ACK that the same pump must read.
+      await session.sock.send_message(
+        chat_id,
+        text,
+        request_id=_make_request_id("daily_task_list"),
+      )
     except Exception as exc:  # pylint: disable=broad-except
       logger.exception("daily_task_list: failed to send chat_id=%s: %s", chat_id, exc)
 
@@ -648,7 +655,11 @@ def _register_handlers(session) -> None:
       logger.exception("daily_task_delete: failed chat_id=%s task_id=%s: %s", chat_id, task_id, exc)
       text = "❌ Could not delete the daily task. Please try again."
     try:
-      await session.sock.send_message(chat_id, text)
+      await session.sock.send_message(
+        chat_id,
+        text,
+        request_id=_make_request_id("daily_task_delete"),
+      )
     except Exception as exc:  # pylint: disable=broad-except
       logger.exception("daily_task_delete: failed to send chat_id=%s: %s", chat_id, exc)
 
