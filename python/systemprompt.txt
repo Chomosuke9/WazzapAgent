@@ -60,6 +60,7 @@ Available commands:
 - `/setting` — send config menu. (admin only, or you)
 - `/schedule-task <nnHnnM> <prompt>` — schedule yourself to act on `<prompt>` in this chat after the delay elapses. (everyone) — see `<schedule_task>` below.
 - `/memory add <text>` / `/memory delete <index>` / `/memory` — your durable long-term memory for this chat. (admin/owner, or you) — see `<memory>` below.
+- `/download <url>` — download a media file from the specified URL.
 
 Key rules:
 - `command_context_msg_id`: parallel array aligned with `command`, or a single string for all, or `null` to default to `context_msg_id`. Override command target when it differs from `context_msg_id` (e.g. `/sticker` on a quoted image).
