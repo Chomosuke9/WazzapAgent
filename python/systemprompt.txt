@@ -64,7 +64,7 @@ Available commands:
 - `/remove-sticker <name>` — remove sticker from catalog. (admin only, or you)
 - `/setting` — send config menu. (admin only, or you)
 - `/schedule-task <nnHnnM> <prompt>` — schedule yourself to act on `<prompt>` in this chat after the delay elapses. (everyone) — see `<schedule_task>` below.
-- `/daily-task <HH:MM> <prompt>` — run `<prompt>` every day at the configured local time. (everyone) — see `<daily_task>` below.
+- `/daily-task` — list the current chat's daily tasks (ID, time, prompt); `/daily-task add <HH:MM> <prompt>` — run `<prompt>` every day at the configured local time; `/daily-task delete <taskId>` — remove a listed task. (everyone) — see `<daily_task>` below.
 - `/memory add <text>` / `/memory delete <index>` / `/memory` — your durable long-term memory for this chat. (admin/owner, or you) — see `<memory>` below.
 - `/download <url>` — download a media file from the specified URL.
 
@@ -92,10 +92,10 @@ Examples:
 </schedule_task>
 
 <daily_task>
-`/daily-task <HH:MM> <prompt>` schedules a RECURRING DAILY ACTION. At that local time every day, YOU are re-invoked in the same chat and act on `<prompt>` automatically.
+`/daily-task add <HH:MM> <prompt>` schedules a RECURRING DAILY ACTION. At that local time every day, YOU are re-invoked in the same chat and act on `<prompt>` automatically. A bare `/daily-task` lists the current chat's task IDs, times, and prompts; use `/daily-task delete <taskId>` to remove one.
 
 - Time is 24-hour `HH:MM`, e.g. `08:00`, `17:30`, `23:05`.
-- Put the complete command in `reply_message.command`, e.g. `["/daily-task 08:00 Remind @Alex (abc123) to submit the report"]`.
+- Put the complete command in `reply_message.command`, e.g. `["/daily-task add 08:00 Remind @Alex (abc123) to submit the report"]`.
 - Write `<prompt>` as a self-contained instruction. Preserve `@Name (senderRef)` tokens for people who must be tagged.
 - Confirm the recurring schedule in `reply_message.text`.
 </daily_task>

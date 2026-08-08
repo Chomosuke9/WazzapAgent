@@ -189,6 +189,8 @@ export type OutboundFrame =
   | { type: "schedule_task"; folderPath: string; chatId: string; taskId: string; fireAtMs: number; prompt: string }
   // recurring daily task, evaluated in the bridge's configured context timezone
   | { type: "daily_task"; folderPath: string; chatId: string; taskId: string; timeOfDay: string; prompt: string }
+  | { type: "daily_task_list"; folderPath: string; chatId: string }
+  | { type: "daily_task_delete"; folderPath: string; chatId: string; taskId: string }
   // command-side mute persistence; Python owns the tenant-scoped moderation DB
   | { type: "set_chat_mute"; folderPath: string; chatId: string; senderRef: string; senderName: string | null; durationMinutes: number };
 

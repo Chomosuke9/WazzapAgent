@@ -47,6 +47,8 @@ INVALIDATE_CHAT_SETTINGS = "invalidate_chat_settings"
 SET_SUBAGENT_ENABLED = "set_subagent_enabled"
 SCHEDULE_TASK = "schedule_task"
 DAILY_TASK = "daily_task"
+DAILY_TASK_LIST = "daily_task_list"
+DAILY_TASK_DELETE = "daily_task_delete"
 SET_CHAT_MUTE = "set_chat_mute"
 
 
@@ -148,6 +150,8 @@ __all__ = [
     "SET_SUBAGENT_ENABLED",
     "SCHEDULE_TASK",
     "DAILY_TASK",
+    "DAILY_TASK_LIST",
+    "DAILY_TASK_DELETE",
     "SET_CHAT_MUTE",
     # model
     "WhatsAppMessage",

@@ -38,6 +38,9 @@ class _Repo:
   def list_all(self):
     return list(self.rows.values())
 
+  def delete(self, task_id):
+    del self.rows[task_id]
+
 
 class _Responder:
   def __init__(self):
@@ -99,5 +102,53 @@ def test_daily_runner_persists_fires_and_rearms(monkeypatch):
         task.cancel()
       if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
+
+  asyncio.run(asyncio.wait_for(scenario(), timeout=5))
+
+
+def test_daily_runner_lists_and_deletes_only_the_originating_chat(monkeypatch):
+  async def scenario():
+    import bridge.agent.daily_task_runner as daily_mod
+
+    repo = _Repo()
+    tracked = set()
+
+    def track(task):
+      tracked.add(task)
+      task.add_done_callback(tracked.discard)
+
+    monkeypatch.setattr(
+      daily_mod,
+      "next_daily_fire_at_ms",
+      lambda *_a, **_k: int(time.time() * 1000) + 60_000,
+    )
+    runner = DailyTaskRunner(
+      repository=repo,
+      ws=_Ws(),
+      responder=_Responder(),
+      per_chat=defaultdict(deque),
+      per_chat_lock=defaultdict(asyncio.Lock),
+      track_task=track,
+      get_prompt=lambda _chat: None,
+    )
+    await runner.schedule({
+      "chatId": "one@g.us", "taskId": "abcdef12-first", "timeOfDay": "08:00", "prompt": "first",
+    })
+    await runner.schedule({
+      "chatId": "two@g.us", "taskId": "abcdef12-other", "timeOfDay": "09:00", "prompt": "other",
+    })
+    assert [task.prompt for task in runner.list_for_chat("one@g.us")] == ["first"]
+
+    result, deleted = runner.delete_for_chat("one@g.us", "abcdef12")
+    assert result == "deleted"
+    assert deleted.prompt == "first"
+    assert "abcdef12-first" not in repo.rows
+    assert "abcdef12-other" in repo.rows
+    assert runner.delete_for_chat("one@g.us", "abcdef12")[0] == "not_found"
+
+    for task in list(tracked):
+      task.cancel()
+    if tracked:
+      await asyncio.gather(*tracked, return_exceptions=True)
 
   asyncio.run(asyncio.wait_for(scenario(), timeout=5))

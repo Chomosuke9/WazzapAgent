@@ -114,6 +114,8 @@ def test_event_name_constants():
     assert events.SET_SUBAGENT_ENABLED == "set_subagent_enabled"
     assert events.SCHEDULE_TASK == "schedule_task"
     assert events.DAILY_TASK == "daily_task"
+    assert events.DAILY_TASK_LIST == "daily_task_list"
+    assert events.DAILY_TASK_DELETE == "daily_task_delete"
     assert events.SET_CHAT_MUTE == "set_chat_mute"
 
 

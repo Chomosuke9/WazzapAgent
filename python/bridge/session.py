@@ -593,6 +593,65 @@ def _register_handlers(session) -> None:
   async def _on_daily_task(evt):
     await session._daily.schedule(evt)
 
+  @ws.on("daily_task_list")
+  async def _on_daily_task_list(evt):
+    chat_id = evt.get("chatId")
+    if not chat_id:
+      logger.warning("daily_task_list: dropped malformed event=%s", evt)
+      return
+    try:
+      tasks = session._daily.list_for_chat(chat_id)
+      if not tasks:
+        text = "🔁 No daily tasks are scheduled in this chat."
+      else:
+        lines = ["🔁 *Daily tasks*", ""]
+        for index, task in enumerate(tasks, start=1):
+          # Keep the WhatsApp reply useful even if an old task has a very long
+          # prompt. Normal tasks are shown in full; only unusually long text is
+          # shortened with an explicit marker.
+          prompt = task.prompt.strip() or "(empty prompt)"
+          if len(prompt) > 600:
+            prompt = f"{prompt[:597]}..."
+          lines.extend([
+            f"{index}. ID: `{task.id[:8]}` — every day at `{task.time_of_day}`",
+            f"   {prompt}",
+          ])
+        text = "\n".join(lines)
+        if len(text) > 3900:
+          text = f"{text[:3860]}\n\n_The remaining tasks are not shown. Delete a listed task, then run /daily-task again._"
+    except Exception as exc:  # pylint: disable=broad-except
+      logger.exception("daily_task_list: failed chat_id=%s: %s", chat_id, exc)
+      text = "❌ Could not load daily tasks. Please try again."
+    try:
+      await session.sock.send_message(chat_id, text)
+    except Exception as exc:  # pylint: disable=broad-except
+      logger.exception("daily_task_list: failed to send chat_id=%s: %s", chat_id, exc)
+
+  @ws.on("daily_task_delete")
+  async def _on_daily_task_delete(evt):
+    chat_id = evt.get("chatId")
+    task_id = evt.get("taskId")
+    if not chat_id or not task_id:
+      logger.warning("daily_task_delete: dropped malformed event=%s", evt)
+      return
+    try:
+      result, task = session._daily.delete_for_chat(chat_id, task_id)
+      if result == "deleted":
+        text = f"✅ Daily task `{task.id[:8]}` deleted."
+      elif result == "invalid":
+        text = "❌ Task ID must be the full ID or at least the 8 characters shown by /daily-task."
+      elif result == "ambiguous":
+        text = "❌ That task ID matches more than one task. Use a longer ID."
+      else:
+        text = "❌ Daily task not found in this chat. Run /daily-task to see the current list."
+    except Exception as exc:  # pylint: disable=broad-except
+      logger.exception("daily_task_delete: failed chat_id=%s task_id=%s: %s", chat_id, task_id, exc)
+      text = "❌ Could not delete the daily task. Please try again."
+    try:
+      await session.sock.send_message(chat_id, text)
+    except Exception as exc:  # pylint: disable=broad-except
+      logger.exception("daily_task_delete: failed to send chat_id=%s: %s", chat_id, exc)
+
   @ws.on("set_chat_mute")
   async def _on_set_chat_mute(evt):
     chat_id = evt.get("chatId")

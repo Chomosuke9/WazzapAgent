@@ -77,6 +77,8 @@ _CONTROL_TYPES = frozenset(
         events.SET_SUBAGENT_ENABLED,
         events.SCHEDULE_TASK,
         events.DAILY_TASK,
+        events.DAILY_TASK_LIST,
+        events.DAILY_TASK_DELETE,
         events.SET_CHAT_MUTE,
     }
 )

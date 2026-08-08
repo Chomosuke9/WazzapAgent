@@ -46,9 +46,9 @@ test('daily task emits a reliable recurring frame and converts human mentions', 
     const expectedRef = rememberSenderRef(account, '12345@g.us', jid, jid);
     const msg = {
       key: { remoteJid: '12345@g.us', id: 'm1', fromMe: false },
-      message: { extendedTextMessage: { text: '/daily-task 08:00 ping @628123', contextInfo: { mentionedJid: [jid] } } },
+      message: { extendedTextMessage: { text: '/daily-task add 08:00 ping @628123', contextInfo: { mentionedJid: [jid] } } },
     };
-    const { ctx, sent } = makeCtx('08:00 ping @628123', folderPath, account, msg);
+    const { ctx, sent } = makeCtx('add 08:00 ping @628123', folderPath, account, msg);
     await handleDailyTask(ctx);
     const frame: any = registry.get(folderPath)!.reliableQueue.at(-1);
     assert.equal(frame.type, 'daily_task');
@@ -60,14 +60,41 @@ test('daily task emits a reliable recurring frame and converts human mentions', 
   }
 });
 
-test('daily task rejects invalid time or missing prompt', async () => {
+test('daily task lists and deletes through bridge-owned task storage', async () => {
+  const folderPath = '/tenants/daily-list-delete';
+  registry.getOrCreate(folderPath);
+  try {
+    const { ctx: listCtx } = makeCtx('', folderPath);
+    await handleDailyTask(listCtx);
+    const listFrame: any = registry.get(folderPath)!.reliableQueue.at(-1);
+    assert.deepEqual(listFrame, {
+      type: 'daily_task_list', folderPath, chatId: '12345@g.us',
+    });
+
+    const { ctx: deleteCtx } = makeCtx('delete a1b2c3d4', folderPath);
+    await handleDailyTask(deleteCtx);
+    const deleteFrame: any = registry.get(folderPath)!.reliableQueue.at(-1);
+    assert.deepEqual(deleteFrame, {
+      type: 'daily_task_delete', folderPath, chatId: '12345@g.us', taskId: 'a1b2c3d4',
+    });
+  } finally {
+    registry.remove(folderPath);
+  }
+});
+
+test('daily task rejects invalid add and delete arguments', async () => {
   const folderPath = '/tenants/daily-B';
   registry.getOrCreate(folderPath);
   try {
-    const { ctx, sent } = makeCtx('25:00 nope', folderPath);
+    const { ctx, sent } = makeCtx('add 25:00 nope', folderPath);
     await handleDailyTask(ctx);
     assert.equal(registry.get(folderPath)!.reliableQueue.length, 0);
     assert.match(sent.at(-1)!.text, /daily-task/);
+
+    const { ctx: deleteCtx, sent: deleteSent } = makeCtx('delete', folderPath);
+    await handleDailyTask(deleteCtx);
+    assert.equal(registry.get(folderPath)!.reliableQueue.length, 0);
+    assert.match(deleteSent.at(-1)!.text, /daily-task/);
   } finally {
     registry.remove(folderPath);
   }

@@ -98,7 +98,7 @@ test('persistent command arguments repair missing @ before dispatch', () => {
 
   for (const command of [
     `/schedule-task 30M Remind Alice Example (${senderRef}) about lunch`,
-    `/daily-task 08:00 Remind Alice Example (${senderRef}) about lunch`,
+    `/daily-task add 08:00 Remind Alice Example (${senderRef}) about lunch`,
     `/prompt Always greet Alice Example (${senderRef}) politely`,
     `/memory add Alice Example (${senderRef}) likes tea`,
   ]) {

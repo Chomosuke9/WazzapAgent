@@ -121,6 +121,42 @@ class DailyTaskRunner:
     if tasks:
       logger.info("daily_task: re-armed %d task(s)", len(tasks))
 
+  def list_for_chat(self, chat_id: str):
+    """Return only this chat's recurring tasks, in repository order."""
+    return [task for task in self._repository.list_all() if task.chat_id == chat_id]
+
+  def delete_for_chat(self, chat_id: str, task_id: str):
+    """Cancel and delete one task addressed by its full ID or list prefix.
+
+    IDs are resolved inside the originating chat. This keeps a UUID learned in
+    one chat from deleting a task owned by another chat in the same tenant.
+    """
+    token = str(task_id or "").strip()
+    tasks = self.list_for_chat(chat_id)
+    exact = [task for task in tasks if task.id == token]
+    if exact:
+      matches = exact
+    elif len(token) < 8:
+      return "invalid", None
+    else:
+      folded = token.lower()
+      matches = [task for task in tasks if task.id.lower().startswith(folded)]
+    if not matches:
+      return "not_found", None
+    if len(matches) > 1:
+      return "ambiguous", None
+
+    task = matches[0]
+    # Persist the deletion before cancelling its in-memory timer. If SQLite is
+    # temporarily unavailable, the existing timer keeps running rather than
+    # silently leaving a durable task unscheduled until the next restart.
+    self._repository.delete(task.id)
+    timer = self._timers.pop(task.id, None)
+    if timer and timer is not asyncio.current_task() and not timer.done():
+      timer.cancel()
+    logger.info("daily_task: deleted id=%s chat_id=%s", task.id, chat_id)
+    return "deleted", task
+
   def _arm(self, task) -> asyncio.Task:
     previous = self._timers.get(task.id)
     if previous and previous is not asyncio.current_task() and not previous.done():

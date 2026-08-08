@@ -48,6 +48,8 @@ from wasocket.protocol import (  # noqa: E402
     SetSubagentEnabledEvent,
     ScheduleTaskEvent,
     DailyTaskEvent,
+    DailyTaskListEvent,
+    DailyTaskDeleteEvent,
     SetChatMuteEvent,
     WhatsAppStatusEvent,
     camel_to_snake,
@@ -164,6 +166,10 @@ ROUND_TRIP_INSTANCES = [
     DailyTaskEvent(
         folder_path="/tenants/acme", chat_id="123@g.us", task_id="d1",
         time_of_day="08:00", prompt="daily",
+    ),
+    DailyTaskListEvent(folder_path="/tenants/acme", chat_id="123@g.us"),
+    DailyTaskDeleteEvent(
+        folder_path="/tenants/acme", chat_id="123@g.us", task_id="d1",
     ),
     SetChatMuteEvent(
         folder_path="/tenants/acme", chat_id="123@g.us", sender_ref="abc123",

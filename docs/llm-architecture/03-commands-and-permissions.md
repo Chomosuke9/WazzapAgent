@@ -291,7 +291,7 @@ Only the bot owner can use the `global` variant.
 | `/dump` | Everyone | Python | Export full LLM context as .txt |
 | `/lid <number>` | Owner / own phone | Node | Resolve a WhatsApp LID |
 | `/schedule-task <nnHnnM> <prompt>` | Everyone | Node + Python | Persist and fire a one-shot task |
-| `/daily-task <HH:MM> <prompt>` | Everyone | Node + Python | Persist and fire a recurring daily task |
+| `/daily-task [add <HH:MM> <prompt>\|delete <taskId>]` | Everyone | Node + Python | List, persist, or delete a recurring daily task in the current chat |
 | `/group <action>` | Group admin/bot | Node (+ Python for mute persistence) | Manage group state and moderation |
 | `/sticker [upper#lower]` | Everyone | Node + Python | Create sticker from image/video |
 | `/trigger <type>` | Admin/owner | Node | Set prefix triggers |

@@ -218,6 +218,19 @@ class DailyTaskEvent:
 
 
 @dataclass(frozen=True)
+class DailyTaskListEvent:
+    folder_path: str
+    chat_id: str
+
+
+@dataclass(frozen=True)
+class DailyTaskDeleteEvent:
+    folder_path: str
+    chat_id: str
+    task_id: str
+
+
+@dataclass(frozen=True)
 class SetChatMuteEvent:
     folder_path: str
     chat_id: str
@@ -290,6 +303,8 @@ _FRAME_TABLE: tuple[tuple[type, str, bool], ...] = (
     (SetSubagentEnabledEvent, "set_subagent_enabled", True),
     (ScheduleTaskEvent, "schedule_task", True),
     (DailyTaskEvent, "daily_task", True),
+    (DailyTaskListEvent, "daily_task_list", True),
+    (DailyTaskDeleteEvent, "daily_task_delete", True),
     (SetChatMuteEvent, "set_chat_mute", True),
 )
 
@@ -424,6 +439,10 @@ __all__ = [
     "InvalidateChatSettingsEvent",
     "SetSubagentEnabledEvent",
     "ScheduleTaskEvent",
+    "DailyTaskEvent",
+    "DailyTaskListEvent",
+    "DailyTaskDeleteEvent",
+    "SetChatMuteEvent",
     # ack / error
     "AckResult",
     "ErrorResult",

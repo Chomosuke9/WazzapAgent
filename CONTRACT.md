@@ -285,6 +285,8 @@ the top level so the SDK can assert ownership.
 { type: "set_subagent_enabled",     folderPath: string, chatId: string | "global", enabled: boolean }
 { type: "schedule_task",            folderPath: string, chatId: string, taskId: string, fireAtMs: number, prompt: string }
 { type: "daily_task",               folderPath: string, chatId: string, taskId: string, timeOfDay: string, prompt: string }
+{ type: "daily_task_list",          folderPath: string, chatId: string }
+{ type: "daily_task_delete",        folderPath: string, chatId: string, taskId: string }
 { type: "set_chat_mute",            folderPath: string, chatId: string, senderRef: string, senderName: string | null, durationMinutes: number }
 ```
 
@@ -596,6 +598,8 @@ export type OutboundFrame =
   | { type: "set_subagent_enabled"; folderPath: string; chatId: string; enabled: boolean }
   | { type: "schedule_task"; folderPath: string; chatId: string; taskId: string; fireAtMs: number; prompt: string }
   | { type: "daily_task"; folderPath: string; chatId: string; taskId: string; timeOfDay: string; prompt: string }
+  | { type: "daily_task_list"; folderPath: string; chatId: string }
+  | { type: "daily_task_delete"; folderPath: string; chatId: string; taskId: string }
   | { type: "set_chat_mute"; folderPath: string; chatId: string; senderRef: string; senderName: string | null; durationMinutes: number };
 
 // ---- registry & factory ----

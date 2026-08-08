@@ -39,7 +39,7 @@ All commands start with `/` (forward slash). In groups, most commands can only b
 | `/reset` | Reset bot memory | Admin (group), Anyone (private) |
 | `/revoke <id\|ids\|unused>` | Revoke activation code(s) from /generate | Bot owner only |
 | `/schedule-task <nnHnnM> <prompt>` | Schedule the bot to run a prompt later | Everyone |
-| `/daily-task <HH:MM> <prompt>` | Run a prompt every day at the configured local time | Everyone |
+| `/daily-task [add <HH:MM> <prompt>\|delete <taskId>]` | List, add, or delete a recurring daily task | Everyone |
 | `/group <action>` | Close/open, pin/delete, change description, kick, or mute | Group admin; bot must be admin |
 | `/setting` | View/edit per-chat settings | Admin (group), Anyone (private) |
 | `/sticker [top#bottom]` | Create a sticker from an image/video | Everyone |
@@ -513,13 +513,19 @@ Schedules the bot to **run a prompt later**. Time format `nnHnnM` (e.g. `2H30M` 
 
 ## `/daily-task`
 
-Schedules the bot to run the same prompt every day at a 24-hour local time.
-The recurring schedule persists across restarts. Human WhatsApp mentions are
-stored as stable `@Name (senderRef)` references, just like `/schedule-task`.
+Lists, adds, and deletes recurring daily tasks. The recurring schedule persists
+across restarts. Human WhatsApp mentions are stored as stable `@Name (senderRef)`
+references, just like `/schedule-task`.
 
 ```
-/daily-task 08:00 Remind @Budi to submit the report
+/daily-task
+/daily-task add 08:00 Remind @Budi to submit the report
+/daily-task delete a1b2c3d4
 ```
+
+The bare command lists only tasks in the current chat, showing each task's
+8-character ID, scheduled time, and prompt. Use that ID with `delete`; a task
+from another chat cannot be deleted.
 
 The timezone follows `CONTEXT_TIME_UTC_OFFSET_HOURS`, or the server's local
 timezone when that setting is empty. **Can be used by everyone.**
