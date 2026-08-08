@@ -9,10 +9,23 @@ import type { CommandContext } from '../../src/wa/command/CommandContext.ts';
 process.env.LOG_LEVEL = 'silent';
 
 const {
+  buildSpotDlInvocation,
   downloadDirectFile,
   downloadErrorForWhatsApp,
   handleDownload,
 } = await import('../../src/wa/commands/download.ts');
+
+test('SpotDL runs through the selected bridge Python, not a spotdl shim', () => {
+  const invocation = buildSpotDlInvocation(
+    'https://open.spotify.com/track/track-id',
+    '/tmp/spotdl-test',
+    '/runtime/python3',
+  );
+
+  assert.equal(invocation.file, '/runtime/python3');
+  assert.deepEqual(invocation.args.slice(0, 3), ['-m', 'spotdl', 'download']);
+  assert.notEqual(invocation.file, 'spotdl');
+});
 
 test('/download selects the final yt-dlp error and redacts URLs', () => {
   const detail = downloadErrorForWhatsApp({

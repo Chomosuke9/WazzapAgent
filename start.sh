@@ -36,6 +36,13 @@ if [ -z "$PYTHON" ]; then
   fi
 fi
 
+# Node invokes Python-backed command tools (currently SpotDL) through PY_BIN.
+# Export the interpreter resolved above so both processes use the exact same
+# environment instead of a potentially stale pyenv/launcher shim.
+if [ -n "$PYTHON" ]; then
+  export PY_BIN="$PYTHON"
+fi
+
 # ── Ensure PYTHONPATH includes our python/ dir ─────────────────────────────
 export PYTHONPATH="${PYTHONPATH:-$SCRIPT_DIR/python}"
 

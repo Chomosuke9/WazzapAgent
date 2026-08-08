@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import config from '../../config.js';
 import logger from '../../logger.js';
 
 const execFileAsync = promisify(execFile);
@@ -256,6 +257,32 @@ function isDrmError(errorText: string): boolean {
     || normalized.includes('drm protection');
 }
 
+export function buildSpotDlInvocation(
+  url: string,
+  tempDir: string,
+  pythonBin = config.pythonBin,
+): { file: string; args: string[] } {
+  return {
+    file: pythonBin,
+    args: [
+      '-m',
+      'spotdl',
+      'download',
+      '--format',
+      'mp3',
+      '--output',
+      join(tempDir, '{artists} - {title}.{output-ext}'),
+      '--restrict',
+      'ascii',
+      '--simple-tui',
+      '--print-errors',
+      '--log-level',
+      'ERROR',
+      url,
+    ],
+  };
+}
+
 export async function downloadSpotifyMedia(url: string): Promise<{
   filePath: string;
   tempDir: string;
@@ -269,22 +296,10 @@ export async function downloadSpotifyMedia(url: string): Promise<{
   const tempDir = await mkdtemp(join(tmpdir(), 'spotdl-'));
 
   try {
+    const invocation = buildSpotDlInvocation(url, tempDir);
     await execFileAsync(
-      'spotdl',
-      [
-        'download',
-        '--format',
-        'mp3',
-        '--output',
-        join(tempDir, '{artists} - {title}.{output-ext}'),
-        '--restrict',
-        'ascii',
-        '--simple-tui',
-        '--print-errors',
-        '--log-level',
-        'ERROR',
-        url,
-      ],
+      invocation.file,
+      invocation.args,
       {
         cwd: tempDir,
         maxBuffer: 10 * 1024 * 1024,

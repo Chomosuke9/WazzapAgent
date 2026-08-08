@@ -71,6 +71,7 @@ function parseJidList(raw: string | undefined): string[] {
 
 export interface Config {
   instanceId: string;
+  pythonBin: string;
   pairingNumber: string | null;
   pairingRetryCooldownMs: number;
   wsListenPort: number;
@@ -129,6 +130,10 @@ export interface Config {
 function buildConfig(): Config {
   return {
   instanceId: process.env.INSTANCE_ID || 'default',
+  // Keep Node-side Python tools (currently SpotDL) on the exact interpreter
+  // used by start.sh/the bridge instead of relying on an ambiguous CLI shim.
+  pythonBin: (process.env.PY_BIN || '').trim()
+    || (process.platform === 'win32' ? 'python' : 'python3'),
   // Optional WhatsApp pairing-code flow (no QR). When set, the gateway requests
   // an 8-char pairing code for this number instead of printing a QR. Must be
   // digits only with country code (e.g. 6281234567890); we strip everything
