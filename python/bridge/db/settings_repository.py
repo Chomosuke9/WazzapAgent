@@ -264,8 +264,8 @@ def permission_description(level: int) -> str:
   mapping = {
     0: 'all moderation FORBIDDEN',
     1: 'delete ALLOWED',
-    2: 'delete & mute ALLOWED',
-    3: 'delete, mute & kick ALLOWED',
+    2: 'delete and mute ALLOWED',
+    3: 'delete, mute, and kick ALLOWED',
   }
   return mapping.get(level, mapping[0])
 

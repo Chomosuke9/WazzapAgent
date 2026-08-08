@@ -61,7 +61,7 @@ Use `/compat auto|full|semi|safe` to control interactive-message compatibility.
 
 Admins and the bot owner can configure bot behavior:
 - `/prompt <text>` — Set custom instructions for the bot in this chat
-- `/permission <0-3>` — Set moderation permission level (delete/mute/kick)
+- `/permission <0-3>` — Configure bot moderation: 0 none, 1 delete, 2 delete+mute, 3 delete+mute+kick; human admins may use `/group` at any level
 - `/setting` — Change the response mode and other per-chat settings
 - `/mode <auto|prefix|hybrid>` — Change the response mode without a menu
 - `/model [id]` — List or switch the model without a menu

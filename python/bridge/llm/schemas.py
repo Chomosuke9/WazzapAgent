@@ -279,97 +279,6 @@ LLM2_STICKER_TOOL = {
 }
 
 
-LLM2_DELETE_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "delete_messages",
-        "description": (
-            "Delete one or more messages by their contextMsgId. Only use when messages clearly violate rules."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "context_msg_ids": {
-                    "type": "array",
-                    "items": {
-                        "type": "string",
-                        "minLength": 6,
-                        "maxLength": 6,
-                    },
-                    "description": "List of 6-digit contextMsgIds to delete.",
-                    "minItems": 1,
-                },
-            },
-            "required": ["context_msg_ids"],
-            "additionalProperties": False,
-        },
-    },
-}
-
-LLM2_MUTE_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "mute_member",
-        "description": (
-            "Mute or unmute a member. "
-            "Set duration_minutes > 0 to mute (auto-delete all their messages for that duration). "
-            "Set duration_minutes = 0 to unmute (cancel an active mute). "
-            "Use mute for persistent rule violators."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "sender_ref": {
-                    "type": "string",
-                    "description": "The senderRef of the member to mute or unmute.",
-                    "minLength": 1,
-                },
-                "duration_minutes": {
-                    "type": "integer",
-                    "description": "How long to mute in minutes (1-1440). Use 0 to unmute.",
-                    "minimum": 0,
-                    "maximum": 1440,
-                },
-            },
-            "required": ["sender_ref", "duration_minutes"],
-            "additionalProperties": False,
-        },
-    },
-}
-
-LLM2_KICK_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "kick_members",
-        "description": (
-            "Remove members from the group. Cannot kick admins. Only use for serious or repeated violations."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "targets": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "sender_ref": {
-                                "type": "string",
-                                "description": "The senderRef of the member to kick.",
-                            },
-                        },
-                        "required": ["sender_ref"],
-                        "additionalProperties": False,
-                    },
-                    "description": "List of members to kick.",
-                    "minItems": 1,
-                },
-            },
-            "required": ["targets"],
-            "additionalProperties": False,
-        },
-    },
-}
-
 LLM2_SUBAGENT_TOOL = {
     "type": "function",
     "function": {
@@ -520,9 +429,6 @@ LLM2_BASE_TOOLS = [LLM2_REPLY_TOOL, LLM2_REACT_TOOL]
 
 def build_llm2_tools(
     *,
-    allow_delete: bool = False,
-    allow_mute: bool = False,
-    allow_kick: bool = False,
     allow_subagent: bool = False,
     allow_quiz: bool = True,
 ) -> list[dict]:
@@ -531,12 +437,6 @@ def build_llm2_tools(
     tools.append(LLM2_STICKER_TOOL)
     if allow_quiz:
         tools.append(LLM2_QUIZ_TOOL)
-    if allow_delete:
-        tools.append(LLM2_DELETE_TOOL)
-    if allow_mute:
-        tools.append(LLM2_MUTE_TOOL)
-    if allow_kick:
-        tools.append(LLM2_KICK_TOOL)
     if allow_subagent:
         tools.append(LLM2_SUBAGENT_TOOL)
     return tools

@@ -26,6 +26,7 @@ import asyncio
 import bridge.agent.batch_processor as batch_processor_module
 import bridge.session as session_module
 from bridge.session import AgentSession
+from bridge.db import is_muted, tenant_db_context
 from wasocket.events import WhatsAppMessage
 
 
@@ -90,14 +91,15 @@ class _LifecycleWaSocket(StubWaSocket):
 
 
 class _LifecycleScheduledTasks:
-  def __init__(self, sock: _LifecycleWaSocket, events: list[str]) -> None:
+  def __init__(self, sock: _LifecycleWaSocket, events: list[str], kind: str = "scheduled") -> None:
     self.sock = sock
     self.events = events
+    self.kind = kind
     self.connected_when_rearmed = False
 
   def rearm_pending(self) -> None:
     self.connected_when_rearmed = self.sock.connected
-    self.events.append("scheduled:rearm")
+    self.events.append(f"{self.kind}:rearm")
 
 
 class _LifecycleDirectInvoke:
@@ -365,8 +367,10 @@ def test_run_connects_before_rearm_and_direct_invoke_start(tmp_path, monkeypatch
     session.register()
 
     scheduled = _LifecycleScheduledTasks(sock, events)
+    daily = _LifecycleScheduledTasks(sock, events, "daily")
     direct = _LifecycleDirectInvoke(sock, events)
     session._scheduled = scheduled
+    session._daily = daily
     session._direct_invoke = direct
     session._dashboard = _LifecycleDashboard(events)
 
@@ -384,8 +388,10 @@ def test_run_connects_before_rearm_and_direct_invoke_start(tmp_path, monkeypatch
     await asyncio.wait_for(run_task, timeout=5.0)
 
     assert scheduled.connected_when_rearmed is True
+    assert daily.connected_when_rearmed is True
     assert direct.connected_when_started is True
     assert events.index("connect:done") < events.index("scheduled:rearm")
+    assert events.index("connect:done") < events.index("daily:rearm")
     assert events.index("connect:done") < events.index("direct:start")
     # The reorder remains inside run()'s existing cleanup boundary.
     assert events.index("direct:stop") < events.index("disconnect")
@@ -406,8 +412,10 @@ def test_run_waits_for_whatsapp_open_before_cold_outbound_work(tmp_path, monkeyp
     session = AgentSession(sock)
     session.register()
     scheduled = _LifecycleScheduledTasks(sock, events)
+    daily = _LifecycleScheduledTasks(sock, events, "daily")
     direct = _LifecycleDirectInvoke(sock, events)
     session._scheduled = scheduled
+    session._daily = daily
     session._direct_invoke = direct
     session._dashboard = _LifecycleDashboard(events)
 
@@ -427,6 +435,7 @@ def test_run_waits_for_whatsapp_open_before_cold_outbound_work(tmp_path, monkeyp
     await asyncio.sleep(0.02)
     assert "recovery" not in events
     assert "scheduled:rearm" not in events
+    assert "daily:rearm" not in events
     assert "direct:start" not in events
 
     await sock.emit(
@@ -436,8 +445,34 @@ def test_run_waits_for_whatsapp_open_before_cold_outbound_work(tmp_path, monkeyp
     await asyncio.wait_for(direct.started.wait(), timeout=1.0)
     assert events.index("connect:done") < events.index("recovery")
     assert events.index("recovery") < events.index("scheduled:rearm")
+    assert events.index("recovery") < events.index("daily:rearm")
 
     stop_event.set()
     await asyncio.wait_for(run_task, timeout=5.0)
+
+  asyncio.run(scenario())
+
+
+def test_set_chat_mute_event_updates_tenant_moderation_state(tmp_path):
+  async def scenario():
+    sock = StubWaSocket(str(tmp_path))
+    session = AgentSession(sock)
+    session.register()
+    with tenant_db_context(str(tmp_path)):
+      await sock.emit("set_chat_mute", {
+        "chatId": "12345@g.us",
+        "senderRef": "abc123",
+        "senderName": "Alice",
+        "durationMinutes": 15,
+      })
+      assert is_muted("12345@g.us", "abc123") is True
+
+      await sock.emit("set_chat_mute", {
+        "chatId": "12345@g.us",
+        "senderRef": "abc123",
+        "senderName": "Alice",
+        "durationMinutes": 0,
+      })
+      assert is_muted("12345@g.us", "abc123") is False
 
   asyncio.run(scenario())

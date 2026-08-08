@@ -69,13 +69,14 @@
 9. **LLM1** (`bridge/agent/llm1_router.py`) decides respond / express-only /
    skip (bypassed in DMs; disabled when `LLM1_ENDPOINT` is empty). The idle
    trigger can override a skip.
-10. **LLM2** (`bridge/agent/llm2_responder.py`) assembles the prompt + history +
-    metadata + permission flags, calls the model (LangChain `ChatOpenAI`), with
+10. **LLM2** (`bridge/agent/llm2_responder.py`) assembles the system prompt,
+    compact chat information, optional memory/task blocks, and history, then
+    calls the model (LangChain `ChatOpenAI`), with
     fallback provider on failure.
 11. **Action extraction** (`messaging/actions.py`): tool calls →
-    `reply_message`, `react_to_message`, `delete_messages`, `mute_member`,
-    `kick_members`, `send_quiz`, `send_sticker`, `execute_subtask`, … with
-    permission gating (admin status AND chat permission level).
+    `reply_message`, `react_to_message`, `send_quiz`, `send_sticker`,
+    `execute_subtask`, …. Delete/mute/kick/group administration use `/group ...`
+    through `reply_message.command`, avoiding parallel tool calls.
 12. **Python → Node actions:** each action is sent over the SAME connection via
     the `WaSocket` SDK (`messaging/gateway.py`), carrying a unique `requestId`.
 13. **Node dispatch** (`account/actionDispatcher.ts`, one handler per action →

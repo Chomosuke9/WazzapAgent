@@ -185,13 +185,13 @@ async function handleSettings({
               },
               {
                 id: "/permission 2",
-                title: "Level 2 - Mute",
-                description: "Delete & mute",
+                title: "Level 2 - Delete + Mute",
+                description: "Bot may delete and mute",
               },
               {
                 id: "/permission 3",
-                title: "Level 3 - All",
-                description: "Delete, mute & kick",
+                title: "Level 3 - Full",
+                description: "Bot may delete, mute, and kick",
               },
             ],
           },

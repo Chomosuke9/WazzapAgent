@@ -108,32 +108,26 @@ LLM2 is the second stage that generates complete responses.
 
 ### Prompt Structure
 
-LLM2 receives 4 messages in LangChain format:
+LLM2 receives an ordered LangChain message list. Optional memory/sub-agent/task
+messages are inserted only when relevant:
 
 1. **SystemMessage** — System prompt from `python/systemprompt.txt` with template variables:
    - `{{prompt_override}}` — Custom prompt from the `/prompt` command.
    - `{{assistant_name}}` — Bot display name.
 
-2. **HumanMessage** — Group description:
+2. **HumanMessage** — Compact chat information:
    ```
-   Group description:
-   <group description>
+   Chat information:
+   - Group name: <name>
+   - Group description: <description or (none)>
+   - Chat state: group | private
+   - Bot role: regular member | admin | super admin
+   - Bot moderation permission: 0 | 1 | 2 | 3
+   - Bot moderation capabilities: none | delete | delete + mute | delete + mute + kick
    ```
 
-3. **HumanMessage** — Context injection (metadata):
-   ```
-   Current message metadata:
-   - Bot is mentioned 2 times in this current message window.
-   - A message replies to the bot.
-   - The last assistant reply was 5 messages ago.
-   - Assistant has sent 1 reply in the last 20 messages.
-   - There are 3 human messages in this current message window.
-
-   Chat state:
-   This is a group chat.
-   Bot is an admin.
-   Bot permissions: can delete messages, cannot kick members.
-   ```
+3. **Optional HumanMessages** — Long-term memory, sub-agent state/files,
+   sub-agent result, or scheduled/daily-task re-invoke instructions.
 
 4. **HumanMessage** — History and current messages:
    ```
@@ -175,7 +169,9 @@ The bridge only receives state synchronization after the gateway executes a comm
 
 `ChatReinvoker` is the shared engine for proactive turns: it injects a system
 turn, invokes LLM2 without LLM1 gating, and dispatches the reply. The persisted
-`ScheduledTaskRunner` uses it for one-shot `/schedule-task` events.
+`ScheduledTaskRunner` uses it for one-shot `/schedule-task` events, while
+`DailyTaskRunner` uses the same re-invocation path for persistent recurring
+`/daily-task` events.
 
 `DirectInvokeServer` exposes an authenticated `POST /post` endpoint for trusted
 local automation. It is disabled unless `DIRECT_INVOKE_API_KEY` is configured,
@@ -220,6 +216,10 @@ CREATE TABLE chat_settings (
 | 1 | Yes | No | No | Delete messages only |
 | 2 | Yes | Yes | No | Delete + mute members |
 | 3 | Yes | Yes | Yes | Full moderation (delete + mute + kick) |
+
+These capabilities are executed through `/group` commands rather than separate
+moderation tools. The level restricts bot-initiated commands; human group admins
+may use `/group` directly at any level when the bot is also an admin.
 
 ## History (`history.py`)
 

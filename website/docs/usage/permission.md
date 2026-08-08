@@ -19,7 +19,7 @@ Permissions control how much authority the bot has in managing the group.
 
 ```
 /permission       ← check current level
-/permission 0     ← disable all moderation
+/permission 0     ← disable bot moderation
 /permission 1     ← enable message deletion only
 /permission 2     ← enable delete + mute
 /permission 3     ← enable delete + mute + kick
@@ -33,8 +33,14 @@ Can only be used in **groups**. Only **group admins** can change permissions.
 
 - **Level 0** — Bot is only used for chatting, no moderation needed
 - **Level 1** — Group has lots of spam links/toxic messages but you don't want anyone kicked
-- **Level 2** — You need to delete messages + mute disruptive members
-- **Level 3** — Group needs full moderation (delete + mute + kick)
+- **Level 2** — Bot may delete and mute, but cannot kick
+- **Level 3** — Full bot moderation authority
+
+These levels control moderation initiated by the bot. Human group admins may
+use `/group` directly even at level 0, provided the bot is also a group admin.
+
+Mute and kick are performed with `/group mute ...` and `/group kick ...`.
+Those commands require a group-admin requester and the bot must also be admin.
 
 ## Recommended Workflow
 

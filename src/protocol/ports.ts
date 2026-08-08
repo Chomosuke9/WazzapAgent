@@ -38,6 +38,8 @@ export type WaSocketLike = Pick<
   | "readMessages"
   | "groupMetadata"
   | "groupParticipantsUpdate"
+  | "groupSettingUpdate"
+  | "groupUpdateDescription"
   | "groupFetchAllParticipating"
   | "groupAcceptInvite"
   | "waUploadToServer"

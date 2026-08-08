@@ -128,3 +128,66 @@ def test_build_messages_omits_subagent_helper_when_disabled(monkeypatch):
     assert "<files_in_chat>" not in text
     assert "Active sub-agent task" not in text
     assert "report.pdf" in text  # still in older-messages history
+
+
+def test_llm2_uses_compact_chat_information_without_activity_metadata(monkeypatch):
+    _patch_db(monkeypatch)
+    current = _msg("000102", "hello", sender="Alice", sender_ref="a1")
+    built = llm2_mod.build_llm2_messages(
+        [],
+        current,
+        current_payload={
+            "chatId": "grp@g.us",
+            "chatName": "Project Room",
+            "llm1Reason": "mentioned",
+            "messagesSinceAssistantReply": 12,
+            "humanMessagesInWindow": 3,
+        },
+        group_description="Build discussion",
+        chat_type="group",
+        bot_is_admin=True,
+    )
+    text = llm2_mod.serialize_llm2_messages(built.messages)
+    assert "Chat information:" in text
+    assert "Group name: Project Room" in text
+    assert "Group description: Build discussion" in text
+    assert "Chat state: group" in text
+    assert "Bot role: admin" in text
+    assert "Bot moderation permission: 0" in text
+    assert "Bot moderation capabilities: none" in text
+    assert "Current message metadata:" not in text
+    assert "Invoke reason:" not in text
+    assert "Currently muted users" not in text
+
+
+def test_chat_information_shows_effective_permission_capabilities(monkeypatch):
+    _patch_db(monkeypatch)
+    monkeypatch.setattr(llm2_mod, "db_get_permission", lambda *_a, **_k: 2)
+    current = _msg("000103", "hello", sender="Alice", sender_ref="a1")
+    built = llm2_mod.build_llm2_messages(
+        [],
+        current,
+        current_payload={"chatId": "grp@g.us", "chatName": "Project Room"},
+        chat_type="group",
+        bot_is_admin=True,
+    )
+    text = llm2_mod.serialize_llm2_messages(built.messages)
+    assert "Bot moderation permission: 2" in text
+    assert "Bot moderation capabilities: delete messages, mute members" in text
+
+
+def test_non_admin_chat_information_forces_effective_permission_zero(monkeypatch):
+    _patch_db(monkeypatch)
+    monkeypatch.setattr(llm2_mod, "db_get_permission", lambda *_a, **_k: 3)
+    current = _msg("000104", "hello", sender="Alice", sender_ref="a1")
+    built = llm2_mod.build_llm2_messages(
+        [],
+        current,
+        current_payload={"chatId": "grp@g.us", "chatName": "Project Room"},
+        group_description="Build discussion",
+        chat_type="group",
+        bot_is_admin=False,
+    )
+    text = llm2_mod.serialize_llm2_messages(built.messages)
+    assert "Bot moderation permission: 0" in text
+    assert "Bot moderation capabilities: none (bot is not a group admin)" in text

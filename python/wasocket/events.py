@@ -46,6 +46,8 @@ INVALIDATE_DEFAULT_MODEL = "invalidate_default_model"
 INVALIDATE_CHAT_SETTINGS = "invalidate_chat_settings"
 SET_SUBAGENT_ENABLED = "set_subagent_enabled"
 SCHEDULE_TASK = "schedule_task"
+DAILY_TASK = "daily_task"
+SET_CHAT_MUTE = "set_chat_mute"
 
 
 from .protocol import camel_to_snake, snake_to_camel
@@ -145,6 +147,8 @@ __all__ = [
     "INVALIDATE_CHAT_SETTINGS",
     "SET_SUBAGENT_ENABLED",
     "SCHEDULE_TASK",
+    "DAILY_TASK",
+    "SET_CHAT_MUTE",
     # model
     "WhatsAppMessage",
     # helpers

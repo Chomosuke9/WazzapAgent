@@ -39,6 +39,8 @@ All commands start with `/` (forward slash). In groups, most commands can only b
 | `/reset` | Reset bot memory | Admin (group), Anyone (private) |
 | `/revoke <id\|ids\|unused>` | Revoke activation code(s) from /generate | Bot owner only |
 | `/schedule-task <nnHnnM> <prompt>` | Schedule the bot to run a prompt later | Everyone |
+| `/daily-task <HH:MM> <prompt>` | Run a prompt every day at the configured local time | Everyone |
+| `/group <action>` | Close/open, pin/delete, change description, kick, or mute | Group admin; bot must be admin |
 | `/setting` | View/edit per-chat settings | Admin (group), Anyone (private) |
 | `/sticker [top#bottom]` | Create a sticker from an image/video | Everyone |
 | `/subagent <on\|off>` | Enable/disable the sub-agent per chat | Bot owner only |
@@ -200,7 +202,7 @@ chat are bounded and redact URLs that may contain signed query parameters.
 
 ## `/dump`
 
-Builds the **full LLM context** — system prompt, group description, chat state, history, and the current message — into a `.txt` file and sends it as a document. Handled on the Python side. Useful for debugging the context the bot sees.
+Builds the **full LLM context** — system prompt, compact chat information, optional memory/task blocks, history, and the current message — into a `.txt` file and sends it as a document. Handled on the Python side. Useful for debugging the context the bot sees.
 
 ```
 /dump
@@ -366,7 +368,8 @@ Sends the **bot owner contact card** to this chat. The owner can set the contact
 
 ## `/permission`
 
-Configures **moderation permission levels** for delete/mute/kick actions.
+Configures which moderation commands the bot may execute through `/group`.
+Delete, mute, and kick are not separate LLM tools.
 
 ### View current permission
 
@@ -379,14 +382,18 @@ Configures **moderation permission levels** for delete/mute/kick actions.
 ```txt
 /permission 0    # No moderation
 /permission 1    # Bot can delete messages
-/permission 2    # + mute members
-/permission 3    # + kick members (full moderation)
+/permission 2    # Bot can delete and mute
+/permission 3    # Bot can delete, mute, and kick
 ```
 
 - **Level 0** — Bot only chats, moderation disabled
 - **Level 1** — Bot can delete spam or violating messages
-- **Level 2** — Bot can mute troublesome members
-- **Level 3** — Bot has full moderation authority (including kick)
+- **Level 2** — Bot can delete messages and mute/unmute members
+- **Level 3** — Bot can delete, mute/unmute, and kick members
+
+The permission level limits actions initiated by the bot. A human group admin
+can use `/group` directly even at level 0, provided the bot is also a group
+admin.
 
 :::info
 Permission can only be changed by **group admins**. Settings apply per chat.
@@ -501,6 +508,43 @@ Schedules the bot to **run a prompt later**. Time format `nnHnnM` (e.g. `2H30M` 
 ```
 
 **Can be used by everyone**, no admin required.
+
+---
+
+## `/daily-task`
+
+Schedules the bot to run the same prompt every day at a 24-hour local time.
+The recurring schedule persists across restarts. Human WhatsApp mentions are
+stored as stable `@Name (senderRef)` references, just like `/schedule-task`.
+
+```
+/daily-task 08:00 Remind @Budi to submit the report
+```
+
+The timezone follows `CONTEXT_TIME_UTC_OFFSET_HOURS`, or the server's local
+timezone when that setting is empty. **Can be used by everyone.**
+
+---
+
+## `/group`
+
+Group administration is collected under one command family:
+
+```
+/group close
+/group open
+/group pin 7
+/group delete
+/group description New group description
+/group kick @Budi
+/group mute @Budi 60
+/group mute @Budi 0
+```
+
+`pin` and `delete` operate on the message being replied to. Pin duration must be
+`1`, `7`, or `30` days; mute duration is in minutes and `0` unmutes the member.
+Every action requires the requester to be a group admin (or the bot invoking
+itself), and the bot must also be a group admin.
 
 ---
 

@@ -208,6 +208,24 @@ class ScheduleTaskEvent:
     prompt: str
 
 
+@dataclass(frozen=True)
+class DailyTaskEvent:
+    folder_path: str
+    chat_id: str
+    task_id: str
+    time_of_day: str
+    prompt: str
+
+
+@dataclass(frozen=True)
+class SetChatMuteEvent:
+    folder_path: str
+    chat_id: str
+    sender_ref: str
+    sender_name: Optional[str]
+    duration_minutes: int
+
+
 # (incoming_message is parsed into WhatsAppMessage — CONTRACT.md §7, in
 #  wasocket/events.py; NOT bridge.history.WhatsAppMessage.)
 
@@ -271,6 +289,8 @@ _FRAME_TABLE: tuple[tuple[type, str, bool], ...] = (
     (InvalidateChatSettingsEvent, "invalidate_chat_settings", True),
     (SetSubagentEnabledEvent, "set_subagent_enabled", True),
     (ScheduleTaskEvent, "schedule_task", True),
+    (DailyTaskEvent, "daily_task", True),
+    (SetChatMuteEvent, "set_chat_mute", True),
 )
 
 _TYPE_BY_CLASS: dict[type, str] = {cls: t for cls, t, _ in _FRAME_TABLE}

@@ -16,9 +16,6 @@ from ..config import (
 from ..db import (
     get_default_llm2_model,
     get_model_vision_support,
-    permission_allows_delete,
-    permission_allows_kick,
-    permission_allows_mute,
     get_llm_provider_config,
 )
 from ..db import get_llm2_model as db_get_llm2_model
@@ -30,11 +27,11 @@ from ..stickers import sticker_catalog_text
 from .error_utils import _error_chain, _is_timeout_error
 from .prompt import (  # noqa: F401
     _chat_state_header,
-    _context_injection_block,
+    _chat_information_block,
+    _context_injection_block,  # compatibility export; no longer injected into LLM2
     _current_date_str,
     _files_for_subagent_block,
     _format_current_window,
-    _group_description_block,
     _load_system_prompt,
     _normalize_chat_type,
     _render_system_prompt,
@@ -191,24 +188,6 @@ def _resolve_llm2_chat_id(current_payload: dict | None, current: WhatsAppMessage
     return payload.get("chatId") or payload.get("chat_id") or current.sender
 
 
-def _compute_llm2_permissions(
-    chat_id: str | None, bot_is_admin: bool, bot_is_super_admin: bool
-) -> tuple[bool, bool, bool]:
-    """Return ``(can_delete, can_mute, can_kick)`` for dynamic tool/prompt gating.
-
-    Shared by :func:`generate_reply` (tool gating) and
-    :func:`build_llm2_messages` (system-prompt rule injection) so the two can
-    never drift apart.
-    """
-    admin_ok = bool(bot_is_admin or bot_is_super_admin)
-    perm_level = db_get_permission(chat_id) if chat_id else 0
-    return (
-        admin_ok and permission_allows_delete(perm_level),
-        admin_ok and permission_allows_mute(perm_level),
-        admin_ok and permission_allows_kick(perm_level),
-    )
-
-
 @dataclass(frozen=True)
 class BuiltLlm2Prompt:
     """The exact prompt LLM2 is invoked with, plus a few derived log helpers.
@@ -247,8 +226,8 @@ def build_llm2_messages(
     """Build the EXACT message list LLM2 is invoked with.
 
     This is the single source of truth for the LLM2 prompt: the rendered system
-    prompt, the group-description block, the context/helper injection, the
-    sub-agent state block + ``execute_subtask`` file-ID helper, the optional
+    prompt, the compact chat-information block, the sub-agent state block plus
+    ``execute_subtask`` file-ID helper, the optional
     re-invoke / scheduled-task slots, and finally the older-messages + current
     burst (with any visual attachments). :func:`generate_reply` calls this to
     talk to the model; ``/dump`` calls it (via :func:`serialize_llm2_messages`)
@@ -256,18 +235,14 @@ def build_llm2_messages(
     of a hand-rebuilt approximation.
     """
     log_chat_id = _resolve_llm2_chat_id(current_payload, current)
-    can_delete, can_mute, can_kick = _compute_llm2_permissions(log_chat_id, bot_is_admin, bot_is_super_admin)
+    bot_permission_level = db_get_permission(log_chat_id) if log_chat_id else 0
     sticker_catalog = sticker_catalog_text(log_chat_id) if log_chat_id else sticker_catalog_text()
     base_system = (system or _load_system_prompt()).strip()
     rendered_system = _render_system_prompt(
         base_system,
         prompt_override=prompt_override,
-        allow_delete=can_delete,
-        allow_mute=can_mute,
-        allow_kick=can_kick,
         allow_subagent=allow_subagent,
         sticker_catalog=sticker_catalog,
-        chat_type=chat_type,
     )
     history_list = list(history)
     message_max_chars = _llm2_message_max_chars()
@@ -276,13 +251,13 @@ def build_llm2_messages(
         current = _truncate_message(current, message_max_chars)
     hist_text = format_history(history_list, history=history_list, trim_quoted=True) or "(no older messages)"
     current_line = _format_current_window(current) or "(no current messages)"
-    group_text = _group_description_block(group_description)
-    context_injection = _context_injection_block(
+    chat_information = _chat_information_block(
+        group_description,
         current_payload,
         chat_type=chat_type or "private",
         bot_is_admin=bot_is_admin,
         bot_is_super_admin=bot_is_super_admin,
-        chat_id=log_chat_id,
+        bot_permission_level=bot_permission_level,
     )
     messages_content_text = f"""older messages:\n{hist_text}\n\n
     <reasoning>
@@ -318,20 +293,18 @@ def build_llm2_messages(
 
     # Final prompt order, in the sequence the model actually sees them:
     #   1) system        : system prompt
-    #   2) user          : group description
-    #   3) user          : helper / context injection
-    #   4) user          : sub-agent task block  (only when allow_subagent /
+    #   2) user          : compact chat information (name/state/bot role/description)
+    #   3) user          : sub-agent task block  (only when allow_subagent /
     #                      subagent_context is provided for this chat)
-    #   5) user          : sub-agent execute_subtask file-ID helper
+    #   4) user          : sub-agent execute_subtask file-ID helper
     #                      (only when allow_subagent and the chat has files)
-    #   6) user          : sub-agent FINISHED-this-turn block (re-invoke only)
-    #   7) user          : scheduled-task block (scheduled cold-fire only)
-    #   8) user          : older messages + current burst
+    #   5) user          : sub-agent FINISHED-this-turn block (re-invoke only)
+    #   6) user          : scheduled/daily-task block (cold-fire only)
+    #   7) user          : older messages + current burst
     msgs: list[SystemMessage | HumanMessage] = [SystemMessage(content=rendered_system)]
-    msgs.append(HumanMessage(content=f"Group description:\n{group_text}"))
-    msgs.append(HumanMessage(content=context_injection))
+    msgs.append(HumanMessage(content=chat_information))
     # Long-term memory (the /memory command): durable per-chat facts injected as
-    # a standing block every turn, right after the helper/context injection so
+    # a standing block every turn, right after chat information so
     # the model always sees it (independent of the older-messages window).
     if memory_block:
         msgs.append(HumanMessage(content=memory_block))
@@ -358,8 +331,7 @@ def build_llm2_messages(
     # repeated in the fallback.
     text_fallback_msgs = [
         SystemMessage(content=rendered_system),
-        HumanMessage(content=f"Group description:\n{group_text}"),
-        HumanMessage(content=context_injection),
+        HumanMessage(content=chat_information),
     ]
     if memory_block:
         text_fallback_msgs.append(HumanMessage(content=memory_block))
@@ -373,9 +345,7 @@ def build_llm2_messages(
 
     prompt_preview = trunc(
         (
-            group_text
-            + "\n"
-            + context_injection
+            chat_information
             + "\nolder messages:\n"
             + hist_text
             + "\n\ncurrent messages(burst):\n"
@@ -457,17 +427,10 @@ async def generate_reply(
     retry_max = _llm2_retry_max()
     retry_backoff_s = _llm2_retry_backoff_seconds()
     sdk_max_retries = _llm2_sdk_max_retries()
-    # Permissions gate both the dynamic tool list (here) and the system-prompt
-    # rule injection (inside build_llm2_messages); the shared helper keeps the
-    # two from drifting apart.
-    can_delete, can_mute, can_kick = _compute_llm2_permissions(log_chat_id, bot_is_admin, bot_is_super_admin)
-
-    # Build tools dynamically: base tools always, moderation tools only when permitted
+    # Build tools dynamically: base tools plus optional sub-agent support.
+    # Moderation is performed through /group commands, not standalone tools.
     if tools is None:
         tools = build_llm2_tools(
-            allow_delete=can_delete,
-            allow_mute=can_mute,
-            allow_kick=can_kick,
             allow_subagent=allow_subagent,
         )
 

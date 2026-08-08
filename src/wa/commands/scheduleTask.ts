@@ -5,6 +5,7 @@ import type {
   CommandContext,
   CommandHandler,
 } from "../command/CommandContext.js";
+import { rewritePromptMentions } from "./prompt.js";
 
 // Feature 5 — `/schedule-task <nnHnnM> <prompt>`.
 //
@@ -62,13 +63,13 @@ const USAGE =
   "Maximum 30 days. Use the `@Name (senderRef)` format in the prompt so specific people get tagged later.";
 
 export async function handleScheduleTask(ctx: CommandContext): Promise<void> {
-  const { chatId, args, folderPath = config.dataDir, sock } = ctx;
+  const { chatId, args, folderPath = config.dataDir, sock, account, msg } = ctx;
   const trimmed = (args || "").trim();
 
   // First whitespace-delimited token = duration; the rest = the prompt.
   const spaceIdx = trimmed.search(/\s/);
   const durationToken = spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx);
-  const prompt = spaceIdx === -1 ? "" : trimmed.slice(spaceIdx + 1).trim();
+  let prompt = spaceIdx === -1 ? "" : trimmed.slice(spaceIdx + 1).trim();
 
   const parsed = durationToken ? parseScheduleDuration(durationToken) : null;
   if (!parsed || !prompt) {
@@ -89,6 +90,17 @@ export async function handleScheduleTask(ctx: CommandContext): Promise<void> {
       /* ignore */
     }
     return;
+  }
+
+  // Human-entered WhatsApp mentions arrive as raw @<jid-localpart> tokens.
+  // Store the same canonical @Name (senderRef) form used by LLM run_command so
+  // delayed sends still resolve the intended person.
+  if (account) {
+    try {
+      prompt = await rewritePromptMentions(account, chatId, prompt, msg);
+    } catch {
+      /* best effort: keep the original prompt */
+    }
   }
 
   const taskId = randomUUID();

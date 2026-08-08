@@ -186,7 +186,11 @@ export type OutboundFrame =
   | { type: "invalidate_chat_settings"; folderPath: string; chatId: string }
   | { type: "set_subagent_enabled"; folderPath: string; chatId: string; enabled: boolean }
   // feature 5: schedule a one-shot task that re-invokes LLM2 after a delay
-  | { type: "schedule_task"; folderPath: string; chatId: string; taskId: string; fireAtMs: number; prompt: string };
+  | { type: "schedule_task"; folderPath: string; chatId: string; taskId: string; fireAtMs: number; prompt: string }
+  // recurring daily task, evaluated in the bridge's configured context timezone
+  | { type: "daily_task"; folderPath: string; chatId: string; taskId: string; timeOfDay: string; prompt: string }
+  // command-side mute persistence; Python owns the tenant-scoped moderation DB
+  | { type: "set_chat_mute"; folderPath: string; chatId: string; senderRef: string; senderName: string | null; durationMinutes: number };
 
 // ---- registry & factory ----
 

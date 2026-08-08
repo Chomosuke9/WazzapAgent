@@ -181,6 +181,8 @@ The initial `hello` (Python→Node, with `protocolVersion: "2.0"`) / `hello_ack`
 | `invalidate_chat_settings` | Invalidate after a mode/prompt/permission/trigger/idle/announcement change |
 | `set_subagent_enabled` | Toggle the sub-agent per chat: `{chatId, enabled}` |
 | `schedule_task` | Scheduled task: `{chatId, taskId, fireAtMs, prompt}` — persisted, fires once |
+| `daily_task` | Recurring task: `{chatId, taskId, timeOfDay, prompt}` — persisted and re-armed daily |
+| `set_chat_mute` | Persist/remove a command-created mute: `{chatId, senderRef, senderName, durationMinutes}` |
 
 ## Bridge → Gateway
 
@@ -344,11 +346,10 @@ The following actions are also sent bridge→gateway (Python→Node). Each retur
 
 ### Moderation Gating
 
-The bridge enforces gating for moderation actions based on the permission level set via the `/permission` command:
-
-- `DELETE` is only executed if the permission level allows it (level 1, 2, or 3) **AND** bot is admin.
-- `MUTE` is only executed if the permission level allows it (level 2 or 3) **AND** bot is admin.
-- `KICK` is only executed if the permission level allows it (level 3 only) **AND** bot is admin.
+Delete, mute, and kick are `/group` commands, not LLM tools. For commands
+initiated by the bot, permission levels allow: 0 none, 1 delete, 2 delete+mute,
+3 delete+mute+kick. Human group admins may run `/group` at any permission level.
+The bot must be a group admin in every case.
 
 Permissions are managed using the `/permission <0-3>` command and stored in the per-chat database.
 

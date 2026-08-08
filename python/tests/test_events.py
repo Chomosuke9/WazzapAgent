@@ -112,6 +112,9 @@ def test_event_name_constants():
     assert events.INVALIDATE_DEFAULT_MODEL == "invalidate_default_model"
     assert events.INVALIDATE_CHAT_SETTINGS == "invalidate_chat_settings"
     assert events.SET_SUBAGENT_ENABLED == "set_subagent_enabled"
+    assert events.SCHEDULE_TASK == "schedule_task"
+    assert events.DAILY_TASK == "daily_task"
+    assert events.SET_CHAT_MUTE == "set_chat_mute"
 
 
 def test_full_payload_every_field_populated():

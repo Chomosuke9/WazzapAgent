@@ -92,6 +92,67 @@ def _group_description_block(group_description: str | None) -> str:
     return "(none)"
 
 
+def _chat_information_block(
+    group_description: str | None,
+    current_payload: dict | None,
+    *,
+    chat_type: str | None,
+    bot_is_admin: bool,
+    bot_is_super_admin: bool,
+    bot_permission_level: int = 0,
+) -> str:
+    """Compact LLM2 chat identity/state block (no activity metadata or mutes)."""
+    payload = current_payload if isinstance(current_payload, dict) else {}
+    normalized_type = _normalize_chat_type(
+        chat_type
+        or payload.get("chatType")
+        or payload.get("chat_type")
+        or ("group" if payload.get("isGroup") else "private")
+    )
+    chat_name = str(payload.get("chatName") or payload.get("chat_name") or "").strip()
+    if not chat_name:
+        chat_name = "(unnamed group)" if normalized_type == "group" else "(private chat)"
+    if bot_is_super_admin:
+        bot_role = "super admin"
+    elif bot_is_admin:
+        bot_role = "admin"
+    else:
+        bot_role = "regular member"
+    try:
+        permission_level = max(0, min(3, int(bot_permission_level)))
+    except (TypeError, ValueError):
+        permission_level = 0
+    effective_permission_level = (
+        permission_level
+        if normalized_type == "group" and (bot_is_admin or bot_is_super_admin)
+        else 0
+    )
+    effective_capabilities = {
+        0: "none",
+        1: "delete messages",
+        2: "delete messages, mute members",
+        3: "delete messages, mute members, kick members",
+    }[effective_permission_level]
+    if normalized_type != "group":
+        effective_capabilities = "none (not a group chat)"
+    elif not (bot_is_admin or bot_is_super_admin):
+        effective_capabilities = "none (bot is not a group admin)"
+    identity_lines = (
+        f"- Group name: {chat_name}\n"
+        f"- Group description: {_group_description_block(group_description)}\n"
+        if normalized_type == "group"
+        else f"- Chat name: {chat_name}\n"
+    )
+    return (
+        "Chat information:\n"
+        f"{identity_lines}"
+        f"- Chat state: {normalized_type}\n"
+        f"- Bot role: {bot_role}\n"
+        f"- Bot moderation permission: {effective_permission_level}\n"
+        f"- Bot moderation capabilities: {effective_capabilities}"
+    )
+
+
 def _format_current_window(msg: WhatsAppMessage) -> str:
     # Burst windows are already serialized as multi-line chat entries.
     text = (msg.text or "").strip()
@@ -447,44 +508,11 @@ def _load_system_prompt() -> str:
     return _SYSTEM_PROMPT_CACHE
 
 
-_DELETE_RULES = """<delete>
-DELETE is ALLOWED for this chat.
-</delete>"""
-
-_MUTE_RULES = """<mute>
-MUTE is ALLOWED for this chat. Use the mute_member tool to auto-delete all messages from a user for a specified duration.
-To unmute a currently muted user, call mute_member with duration_minutes=0. The senderRefs of everyone currently muted are listed under "Currently muted users" in the message metadata — use those exact senderRefs to unmute.
-</mute>"""
-
-_KICK_RULES = """<kick>
-KICK is ALLOWED for this chat. Use the kick_members tool to remove disruptive members.
-Only kick with clear justification. Cannot kick admins.
-</kick>"""
-
-# Warning blocks injected INSTEAD of the "ALLOWED" rules above when a moderation
-# action is NOT available — i.e. the chat's /permission level is too low OR the
-# bot isn't a group admin (see _compute_llm2_permissions). Without these the
-# model gets neither the tool nor any rule, so it silently ignores moderation
-# requests or hallucinates that it acted. These let it warn the user instead.
-# Only injected in GROUP chats (moderation is N/A in private chats), mirroring
-# the _SUBAGENT_OFF_RULES pattern.
-_DELETE_OFF_RULES = """<delete>
-DELETE is NOT allowed in this chat — you have no delete_messages tool and cannot remove messages. If asked to delete a message, briefly tell the user you can't because message-delete permission isn't enabled here, and do NOT pretend you deleted anything. An admin can enable it with /permission (the bot must also be a group admin).
-</delete>"""
-
-_MUTE_OFF_RULES = """<mute>
-MUTE is NOT allowed in this chat — you have no mute_member tool and cannot mute or unmute anyone. If asked, briefly tell the user you can't because mute permission isn't enabled here, and do NOT pretend you muted anyone. An admin can enable it with /permission (the bot must also be a group admin).
-</mute>"""
-
-_KICK_OFF_RULES = """<kick>
-KICK is NOT allowed in this chat — you have no kick_members tool and cannot remove members. If asked to kick or remove someone, briefly tell the user you can't because kick permission isn't enabled here, and do NOT pretend you removed anyone. An admin can enable it with /permission (the bot must also be a group admin).
-</kick>"""
-
 # Injected into the system prompt only when /subagent on is set for this chat
 # (i.e. allow_subagent=True). Tells LLM2 when to delegate via the
 # execute_subtask tool and what the sub-agent can / cannot do, so the model
 # does not silently forget the tool exists or use it for trivial replies.
-# Mirrors the structure of _DELETE_RULES / _MUTE_RULES / _KICK_RULES.
+# Mirrors the structure of the dynamic delete rules.
 _SUBAGENT_RULES = """<subagent>
 SUB-AGENT is ALLOWED. Use `execute_subtask` for tasks needing a real compute environment: file processing, code execution, file analysis, web scraping, producing attachments, or anything you can't answer from knowledge alone. Assume full internet + system access — it can do almost anything.
 IT'S THE ONLY WAY TO ACTUALLY DO WHAT AGENTS ARE MEANT TO DO. DO NOT HALLUCINATE AND SAY YOU ALREADY DID SOMETHING WITHOUT USING THIS.
@@ -538,7 +566,7 @@ def _current_date_str() -> str:
 
 _PLACEHOLDER_KEYS = (
     "prompt_override", "assistant_name", "current_date", "sticker_catalog",
-    "delete_rules", "mute_rules", "kick_rules", "subagent_rules",
+    "subagent_rules",
 )
 _PLACEHOLDER_RE = re.compile(
     r"\{\{\s*(" + "|".join(re.escape(k) for k in _PLACEHOLDER_KEYS) + r")\s*\}\}"
@@ -549,12 +577,8 @@ def _render_system_prompt(
     base_system: str,
     *,
     prompt_override: str | None = None,
-    allow_delete: bool = False,
-    allow_mute: bool = False,
-    allow_kick: bool = False,
     allow_subagent: bool = False,
     sticker_catalog: str | None = None,
-    chat_type: str | None = None,
 ) -> str:
     overide_text = (prompt_override or "").strip()
     configured_assistant_name = assistant_name()
@@ -562,22 +586,11 @@ def _render_system_prompt(
     catalog = (
         f"<sticker_catalog>\nAvailable stickers:\n{sticker_catalog}\n</sticker_catalog>" if sticker_catalog else ""
     )
-    # Moderation blocks: the "ALLOWED" rule when the action is available, else a
-    # warning block in GROUP chats (so the model tells the user it lacks the
-    # permission instead of ignoring/hallucinating), else nothing in private
-    # chats where moderation does not apply.
-    is_group = _normalize_chat_type(chat_type) == "group"
-    delete_block = _DELETE_RULES if allow_delete else (_DELETE_OFF_RULES if is_group else "")
-    mute_block = _MUTE_RULES if allow_mute else (_MUTE_OFF_RULES if is_group else "")
-    kick_block = _KICK_RULES if allow_kick else (_KICK_OFF_RULES if is_group else "")
     _placeholders = {
         "prompt_override": overide_text,
         "assistant_name": configured_assistant_name,
         "current_date": current_date,
         "sticker_catalog": catalog,
-        "delete_rules": delete_block,
-        "mute_rules": mute_block,
-        "kick_rules": kick_block,
         "subagent_rules": _SUBAGENT_RULES if allow_subagent else _SUBAGENT_OFF_RULES,
     }
     return _PLACEHOLDER_RE.sub(lambda m: _placeholders[m.group(1)], base_system)
@@ -588,38 +601,6 @@ def _normalize_chat_type(chat_type: str | None) -> str:
     if lowered in {"private", "group"}:
         return lowered
     return "private"
-
-
-def _active_mutes_block(chat_id: str | None) -> str:
-    """Render the list of currently-muted users so LLM2 can reference them.
-
-    A muted user's messages are deleted by the mute gate before they ever
-    reach LLM2's history, so without this block the model has no senderRef to
-    target when asked to unmute someone — making unmute unreliable. Returns an
-    empty string when nothing is muted (or when ``chat_id`` is unknown).
-    """
-    if not chat_id:
-        return ""
-    try:
-        from ..db import list_active_mutes  # local import avoids db↔llm import cycle
-
-        mutes = list_active_mutes(chat_id)
-    except Exception:
-        return ""
-    if not mutes:
-        return ""
-    lines = []
-    for m in mutes:
-        name = (m.get("name") or "").strip() or "unknown"
-        ref = m.get("sender_ref") or "?"
-        remaining = m.get("remaining_minutes")
-        lines.append(f"- {name} (senderRef: {ref}, {remaining}m remaining)")
-    listing = "\n".join(lines)
-    return (
-        "\n\nCurrently muted users (their messages are auto-deleted and hidden from you):\n"
-        f"{listing}\n"
-        "To unmute one of them, call mute_member with their senderRef and duration_minutes=0."
-    )
 
 
 # A stored mention is `@<baked name> (<senderRef>)`. The senderRef is a 6-char
@@ -665,8 +646,7 @@ def build_memory_block(chat_id: str | None) -> str | None:
     right after the helper/context injection. Returns ``None`` when the chat has
     no saved memory so nothing is injected.
 
-    A local import of ``get_memories`` avoids a db<->llm import cycle (mirrors
-    :func:`_active_mutes_block`).
+    A local import of ``get_memories`` avoids a db<->llm import cycle.
     """
     if not chat_id:
         return None
@@ -823,8 +803,6 @@ def _context_injection_block(
 
     assistant_reply_block = "\n".join(assistant_reply_lines)
     chat_state_text = _chat_state_header(chat_type, bot_is_admin, bot_is_super_admin)
-    muted_users_block = _active_mutes_block(chat_id)
-
     return (
         "Current message metadata:\n"
         "Helper:\n"
@@ -839,5 +817,4 @@ def _context_injection_block(
         f"{llm1_reason_line}"
         "Chat state:\n"
         f"{chat_state_text}"
-        f"{muted_users_block}"
     )

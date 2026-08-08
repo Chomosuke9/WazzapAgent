@@ -1,4 +1,4 @@
-"""Tests for LLM2 tool call extraction, permission levels, mute DB, and build_llm2_tools."""
+"""Tests for LLM2 tool extraction, permissions, mute DB, and tool availability."""
 from __future__ import annotations
 
 import os
@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bridge.llm.tool_utils import extract_tool_args, get_tool_call_name
 from bridge.llm.schemas import build_llm2_tools
-from bridge.messaging.actions import _extract_actions_from_tool_calls
+from bridge.messaging.actions import _extract_actions, _extract_actions_from_tool_calls
 from bridge.db import (
   permission_allows_delete,
   permission_allows_mute,
@@ -73,75 +73,10 @@ class TestBuildLlm2Tools:
     names = [t["function"]["name"] for t in tools]
     assert names == ["reply_message", "react_to_message", "send_sticker", "send_quiz"]
 
-  def test_delete_adds_delete(self):
-    tools = build_llm2_tools(allow_delete=True)
+  def test_moderation_is_never_exposed_as_tools(self):
+    tools = build_llm2_tools()
     names = [t["function"]["name"] for t in tools]
-    assert "delete_messages" in names
-    assert "mute_member" not in names
-    assert "kick_members" not in names
-
-  def test_mute_adds_mute(self):
-    tools = build_llm2_tools(allow_mute=True)
-    names = [t["function"]["name"] for t in tools]
-    assert "mute_member" in names
-
-  def test_kick_adds_kick(self):
-    tools = build_llm2_tools(allow_kick=True)
-    names = [t["function"]["name"] for t in tools]
-    assert "kick_members" in names
-
-  def test_all_permissions(self):
-    tools = build_llm2_tools(allow_delete=True, allow_mute=True, allow_kick=True)
-    names = [t["function"]["name"] for t in tools]
-    assert len(names) == 7
-    assert "delete_messages" in names
-    assert "mute_member" in names
-    assert "kick_members" in names
-
-  def test_permission_level_0(self):
-    """Level 0: no moderation tools."""
-    tools = build_llm2_tools(
-      allow_delete=permission_allows_delete(0),
-      allow_mute=permission_allows_mute(0),
-      allow_kick=permission_allows_kick(0),
-    )
-    assert len(tools) == 4
-
-  def test_permission_level_1(self):
-    """Level 1: delete only."""
-    tools = build_llm2_tools(
-      allow_delete=permission_allows_delete(1),
-      allow_mute=permission_allows_mute(1),
-      allow_kick=permission_allows_kick(1),
-    )
-    names = [t["function"]["name"] for t in tools]
-    assert "delete_messages" in names
-    assert "mute_member" not in names
-    assert "kick_members" not in names
-
-  def test_permission_level_2(self):
-    """Level 2: delete + mute."""
-    tools = build_llm2_tools(
-      allow_delete=permission_allows_delete(2),
-      allow_mute=permission_allows_mute(2),
-      allow_kick=permission_allows_kick(2),
-    )
-    names = [t["function"]["name"] for t in tools]
-    assert "delete_messages" in names
-    assert "mute_member" in names
-    assert "kick_members" not in names
-
-  def test_permission_level_3(self):
-    """Level 3: delete + mute + kick."""
-    tools = build_llm2_tools(
-      allow_delete=permission_allows_delete(3),
-      allow_mute=permission_allows_mute(3),
-      allow_kick=permission_allows_kick(3),
-    )
-    names = [t["function"]["name"] for t in tools]
-    assert "delete_messages" in names
-    assert "mute_member" in names
-    assert "kick_members" in names
+    assert not {"delete_messages", "mute_member", "kick_members"} & set(names)
 
 
 # ---------------------------------------------------------------------------
@@ -335,57 +270,14 @@ class TestExtractActionsFromToolCalls:
     assert actions[0]["type"] == "send_sticker"
     assert actions[0]["stickerName"] == "laughing"
 
-  def test_delete_messages(self):
-    tc = [{"name": "delete_messages", "args": {"context_msg_ids": ["000123", "000124"]}}]
-    actions = _extract_actions_from_tool_calls(
-      tc, fallback_reply_to=None, allowed_context_ids={"000123", "000124"},
-    )
-    assert len(actions) == 2
-    assert all(a["type"] == "delete_message" for a in actions)
-
-  def test_delete_deduplicates(self):
-    tc = [{"name": "delete_messages", "args": {"context_msg_ids": ["000123", "000123"]}}]
-    actions = _extract_actions_from_tool_calls(
-      tc, fallback_reply_to=None, allowed_context_ids={"000123"},
-    )
-    assert len(actions) == 1
-
-  def test_kick_members(self):
-    tc = [{"name": "kick_members", "args": {"targets": [
-      {"sender_ref": "u8k2d1"},
-    ]}}]
-    actions = _extract_actions_from_tool_calls(
-      tc, fallback_reply_to=None, allowed_context_ids={"000123"},
-    )
-    assert len(actions) == 1
-    assert actions[0]["type"] == "kick_member"
-    assert actions[0]["targets"][0]["senderRef"] == "u8k2d1"
-    assert "anchorContextMsgId" not in actions[0]["targets"][0]
-    assert "autoReplyAnchor" not in actions[0]
-
-  def test_mute_member(self):
-    tc = [{"name": "mute_member", "args": {
-      "sender_ref": "u8k2d1",
-      "duration_minutes": 30,
-    }}]
-    actions = _extract_actions_from_tool_calls(
-      tc, fallback_reply_to=None, allowed_context_ids={"000123"},
-    )
-    assert len(actions) == 1
-    assert actions[0]["type"] == "mute_member"
-    assert actions[0]["senderRef"] == "u8k2d1"
-    assert actions[0]["durationMinutes"] == 30
-    assert "anchorContextMsgId" not in actions[0]
-
-  def test_mute_clamps_duration(self):
-    tc = [{"name": "mute_member", "args": {
-      "sender_ref": "u8k2d1",
-      "duration_minutes": 9999,
-    }}]
-    actions = _extract_actions_from_tool_calls(
-      tc, fallback_reply_to=None, allowed_context_ids={"000123"},
-    )
-    assert actions[0]["durationMinutes"] == 1440
+  def test_removed_moderation_tools_are_ignored(self):
+    for name in ("delete_messages", "mute_member", "kick_members"):
+      actions = _extract_actions_from_tool_calls(
+        [{"name": name, "args": {}}],
+        fallback_reply_to=None,
+        allowed_context_ids={"000123"},
+      )
+      assert actions == []
 
   def test_empty_tool_calls(self):
     assert _extract_actions_from_tool_calls(
@@ -399,6 +291,15 @@ class TestExtractActionsFromToolCalls:
     )
     assert len(actions) == 0
 
+  def test_legacy_delete_and_kick_markers_no_longer_create_moderation_actions(self):
+    class Msg:
+      content = "DELETE: 000123\nKICK: abc123"
+
+    actions = _extract_actions(
+      Msg(), fallback_reply_to=None, allowed_context_ids={"000123"},
+    )
+    assert not any(a["type"] in {"delete_message", "kick_member"} for a in actions)
+
   def test_multiple_tool_calls(self):
     tc = [
       {"name": "reply_message", "args": {"context_msg_id": "000123", "text": "Warned."}},
@@ -408,11 +309,11 @@ class TestExtractActionsFromToolCalls:
     actions = _extract_actions_from_tool_calls(
       tc, fallback_reply_to=None, allowed_context_ids={"000123", "000124"},
     )
-    assert len(actions) == 3
+    assert len(actions) == 2
     types = [a["type"] for a in actions]
     assert "send_message" in types
     assert "react_message" in types
-    assert "delete_message" in types
+    assert "delete_message" not in types
 
   def test_invalid_context_id_filtered(self):
     tc = [{"name": "react_to_message", "args": {"context_msg_id": "bad", "emoji": "👍"}}]

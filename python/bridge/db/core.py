@@ -591,6 +591,12 @@ def _ensure_settings_tables(conn: sqlite3.Connection) -> None:
       llm2_fallback_api_key TEXT,
       updated_at             TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS bot_config (
+      key        TEXT PRIMARY KEY,
+      value      TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
     """
   )
   for col, col_type, default in [
@@ -695,6 +701,14 @@ def _ensure_settings_tables(conn: sqlite3.Connection) -> None:
       id            TEXT PRIMARY KEY,
       chat_id       TEXT NOT NULL,
       fire_at_ms    INTEGER NOT NULL,
+      prompt        TEXT NOT NULL,
+      created_at_ms INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS daily_tasks (
+      id            TEXT PRIMARY KEY,
+      chat_id       TEXT NOT NULL,
+      time_of_day   TEXT NOT NULL,
       prompt        TEXT NOT NULL,
       created_at_ms INTEGER NOT NULL
     );

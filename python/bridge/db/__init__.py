@@ -150,6 +150,13 @@ from .scheduled_tasks_repository import (
     delete_scheduled_task as delete_scheduled_task,
     ScheduledTasksRepository as ScheduledTasksRepository,
 )
+from .daily_tasks_repository import (
+    DailyTask as DailyTask,
+    add_daily_task as add_daily_task,
+    list_daily_tasks as list_daily_tasks,
+    delete_daily_task as delete_daily_task,
+    DailyTasksRepository as DailyTasksRepository,
+)
 
 # Compatibility shim: the legacy single-module ``bridge.db`` kept its mutable
 # state (DB-path globals ``_SETTINGS_DB_PATH`` / ``_STATS_DB_PATH`` /

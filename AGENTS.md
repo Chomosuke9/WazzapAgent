@@ -176,6 +176,8 @@ src/                          Node.js gateway runtime (WS SERVER, TypeScript)
       reset.ts                /reset — Clear chat memory (/reset global = all chats)
       revoke.ts               /revoke — Revoke activation code(s) from /generate: single id, list (1,2,3), or 'unused' (owner only)
       scheduleTask.ts         /schedule-task <nnHnnM> <prompt> — Persist a one-shot task
+      dailyTask.ts            /daily-task <HH:MM> <prompt> — Persist a recurring daily task
+      group.ts                /group ... — Admin-only group management command family
       setting.ts              /setting — Show/edit per-chat settings
       sticker.ts              /sticker [upper#lower] — Create meme sticker (ffmpeg/sharp)
       subagent.ts             /subagent <on|off> — Toggle sub-agent per chat
@@ -218,6 +220,7 @@ python/                       Python bridge + WaSocket SDK (WS CLIENTS)
       event_router.py         EventRouter — control-event (clear_history/invalidate_*) handling
       chat_reinvoker.py       ChatReinvoker — shared "inject a #system turn + re-invoke LLM2 (always responds) + dispatch reply" engine
       scheduled_task_runner.py ScheduledTaskRunner — /schedule-task persistence + one-shot timers (delegates the fire to ChatReinvoker)
+      daily_task_runner.py    DailyTaskRunner — /daily-task persistence + recurring timers (delegates the fire to ChatReinvoker)
       direct_invoke.py        DirectInvokeServer — authenticated HTTP /post endpoint that makes the bot send a message first (re-invokes via ChatReinvoker)
     db/                       Per-domain repositories over the shared per-tenant core
       core.py                 Per-tenant connection routing (ContextVar) + tenant-keyed caches
@@ -271,10 +274,10 @@ CONTRACT.md  README.md  AGENTS.md
 | **contextMsgId** | A 6-digit per-chat monotonically increasing sequence number (`000000`–`999999`). Used as the canonical message reference across the system instead of WhatsApp's opaque `wamid-*` IDs. Wraps at 999999. |
 | **senderRef** | A short, deterministic reference string per sender in each chat (e.g., `u8k2d1`). LLM moderation uses this instead of JIDs. |
 | **LLM1** | Decision/gating model. Determines whether the bot should respond, express-only (emoji/sticker), or skip. Also called "the router". Skipped entirely in private chats and prefix mode. |
-| **LLM2** | Response generation model. Produces the actual text reply plus tool calls (`reply_message`, `delete_messages`, etc.). Also called "the responder". |
+| **LLM2** | Response generation model. Produces the actual text reply plus tool calls (`reply_message`, `react_to_message`, etc.). Also called "the responder". |
 | **burst** | A group of messages collected during the debounce window before processing as a batch. |
 | **session** | A WhatsApp session (Baileys multi-file auth stored in `data/auth/`). Deleting this forces re-pairing via QR code. |
-| **tool** | A function the LLM can invoke, defined as JSON Schema. Permission-gated: `reply_message`, `react_to_message`, `send_sticker`, `send_quiz` are always available; `delete_messages`, `mute_member`, `kick_members` depend on chat permission level; `execute_subtask` depends on sub-agent being enabled for the chat. |
+| **tool** | A function the LLM can invoke, defined as JSON Schema. `reply_message`, `react_to_message`, `send_sticker`, and `send_quiz` are always available; `execute_subtask` depends on the sub-agent being enabled. Delete/mute/kick use `/group ...` through `reply_message.command`, not separate tools. |
 | **route** | Not a formal concept in this codebase. When you see "routing" it refers to LLM1's decision of whether to respond. |
 | **context window** | The rolling history of messages passed to the LLM (capped by `HISTORY_LIMIT`, default 20). |
 | **interactive message** | A WhatsApp NativeFlow message (buttons, carousels, lists). Requires special protobuf wrapping and binary XML nodes. |
@@ -412,6 +415,8 @@ claiming a durable receipt so the same request ID remains retryable after open.
 | `invalidate_chat_settings` | reliable | After `/setting` mode change, `/prompt`, `/permission`, `/trigger`, `/idle`, `/announcement`, `/memory` (top-level) |
 | `set_subagent_enabled` | reliable | After `/subagent` toggle: `{folderPath, chatId, enabled}` (top-level) |
 | `schedule_task` | reliable | After `/schedule-task <nnHnnM> <prompt>`: `{folderPath, chatId, taskId, fireAtMs, prompt}` (top-level). Bridge persists + re-arms; on fire re-invokes LLM2 (always responds, no LLM1). |
+| `daily_task` | reliable | After `/daily-task <HH:MM> <prompt>`: `{folderPath, chatId, taskId, timeOfDay, prompt}` (top-level). Bridge persists and re-arms after each daily fire. |
+| `set_chat_mute` | reliable | After `/group mute ...`: `{folderPath, chatId, senderRef, senderName, durationMinutes}` (top-level). The bridge updates the tenant-scoped mute database; `0` unmutes. |
 
 | Type | Description |
 |------|-------------|
@@ -457,9 +462,6 @@ claiming a durable receipt so the same request ID remains retryable after open.
 | `react_to_message` | Always | React with a single emoji. Parameters: `context_msg_id` (6-digit), `emoji` (single character). |
 | `send_sticker` | Always (dynamic) | Send a catalog sticker. `sticker_name` must match an entry in the sticker catalog. |
 | `send_quiz` | Always | Send multiple-choice quiz with tappable buttons (2-5 choices). Parameters: `context_msg_id`, `question`, `choices[{label, text}]`, `footer` (null allowed). |
-| `delete_messages` | Permission-gated | Delete one or more messages by contextMsgId. Requires `permission_allows_delete`. |
-| `mute_member` | Permission-gated | Mute/unmute a member. `duration_minutes` > 0 mutes, 0 unmutes. |
-| `kick_members` | Permission-gated | Remove members from group. Cannot kick admins or bot. Parameters: `targets: [{sender_ref}]`. |
 | `execute_subtask` | Sub-agent enabled | Delegate complex task to sub-agent. Supports correction re-dispatch (LLM2 can re-invoke with revised instruction). |
 
 ---
@@ -639,8 +641,10 @@ these for exact cost calculation.
 - **Private chats skip debounce** — messages are processed immediately.
 - **Group chats** use prefix/hybrid/auto modes set via the `/setting` menu (mode
   section) and the `/trigger` command.
-- **Permission tools** (`delete_messages`, `mute_member`, `kick_members`) are
-  only available if the bot is an admin in the group.
+- **Group management** uses `/group close|open|pin|delete|description|kick|mute`.
+  The sender must be a group admin (or the self-triggered bot), and the bot must
+  also be a group admin. Permission 0/1/2/3 restricts bot-initiated moderation
+  to none/delete/delete+mute/delete+mute+kick; human admins bypass that level.
 - **Interactive messages** (`sendRichMessage`, `sendCarousel`, etc.) don't render
   on WhatsApp Web — only mobile clients support `viewOnceMessage` interactive
   content.

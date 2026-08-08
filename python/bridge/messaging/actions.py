@@ -8,12 +8,11 @@ from .processing import (
   _normalize_context_msg_id,
   _normalize_preview_text,
   EMPTY_TARGET_TOKENS,
-  SENDER_REF_RE,
 )
 
 logger = setup_logging()
 
-ACTION_LINE_RE = re.compile(r"^\[?\s*(REPLY_TO|DELETE|KICK|REACT_TO|STICKER)\s*[:=]\s*(.*?)\s*\]?$", re.IGNORECASE)
+ACTION_LINE_RE = re.compile(r"^\[?\s*(REPLY_TO|REACT_TO|STICKER)\s*[:=]\s*(.*?)\s*\]?$", re.IGNORECASE)
 REACT_TOKEN_RE = re.compile(r"^(.+?)@(\d{6})$")
 
 
@@ -58,76 +57,6 @@ def _resolve_reply_target(
     logger.warning("reply target ignored: context id %s not present in allowed context ids", normalized)
     return None
   return normalized
-
-
-def _resolve_delete_target(
-  token: str | None,
-  *,
-  allowed_context_ids: set[str],
-) -> str | None:
-  if _is_empty_target_token(token):
-    return None
-  normalized = _normalize_context_msg_id(token)
-  if not normalized:
-    return None
-  if allowed_context_ids and normalized not in allowed_context_ids:
-    return None
-  return normalized
-
-
-def _parse_delete_targets(
-  token: str | None,
-  *,
-  allowed_context_ids: set[str],
-) -> list[str]:
-  token_value = _unwrap_angle_group(token)
-  if not token_value:
-    return []
-  if _is_empty_target_token(token_value):
-    return []
-  parsed_targets: list[str] = []
-  dedup: set[str] = set()
-  parts = re.split(r"[,\s]+", token_value)
-  for part in parts:
-    normalized = _resolve_delete_target(part, allowed_context_ids=allowed_context_ids)
-    if not normalized:
-      continue
-    if normalized in dedup:
-      continue
-    dedup.add(normalized)
-    parsed_targets.append(normalized)
-  return parsed_targets
-
-
-def _parse_kick_targets(
-  token: str | None,
-  *,
-  allowed_context_ids: set[str],
-) -> list[dict[str, str]]:
-  token_value = _unwrap_angle_group(token)
-  if not token_value:
-    return []
-  if _is_empty_target_token(token_value):
-    return []
-
-  parsed_targets: list[dict[str, str]] = []
-  dedup: set[str] = set()
-  segments = [segment.strip() for segment in token_value.split(",")]
-  for segment in segments:
-    cleaned_segment = _unwrap_angle_group(segment)
-    if not cleaned_segment:
-      continue
-
-    # Anchor syntax (``senderRef@...``) is legacy; the anchor is ignored.
-    sender_part = cleaned_segment.split("@", 1)[0] if "@" in cleaned_segment else cleaned_segment
-    sender_ref = _unwrap_angle_group(sender_part).strip().lower()
-    if not SENDER_REF_RE.match(sender_ref):
-      continue
-    if sender_ref in dedup:
-      continue
-    dedup.add(sender_ref)
-    parsed_targets.append({"senderRef": sender_ref})
-  return parsed_targets
 
 
 def _parse_react_context_ids(
@@ -258,29 +187,6 @@ def _extract_actions(
         fallback_reply_to=fallback_reply_to,
         allowed_context_ids=allowed_context_ids,
       )
-      continue
-
-    if control == "DELETE":
-      for target in _parse_delete_targets(
-        value,
-        allowed_context_ids=allowed_context_ids,
-      ):
-        actions.append({"type": "delete_message", "contextMsgId": target})
-      continue
-
-    if control == "KICK":
-      kick_targets = _parse_kick_targets(
-        value,
-        allowed_context_ids=allowed_context_ids,
-      )
-      if kick_targets:
-        actions.append(
-          {
-            "type": "kick_member",
-            "targets": kick_targets,
-            "mode": "partial_success",
-          }
-        )
       continue
 
     if control == "REACT_TO":
@@ -564,58 +470,6 @@ def _extract_actions_from_tool_calls(
         "type": "send_sticker",
         "stickerName": sticker_name,
         "replyTo": reply_to,
-      })
-
-    elif name == "delete_messages":
-      raw_ids = args.get("context_msg_ids") or []
-      if isinstance(raw_ids, str):
-        raw_ids = [raw_ids]
-      seen: set[str] = set()
-      for raw_id in raw_ids:
-        ctx_id = _normalize_context_msg_id(raw_id)
-        if not ctx_id or ctx_id in seen:
-          continue
-        if allowed_context_ids and ctx_id not in allowed_context_ids:
-          continue
-        seen.add(ctx_id)
-        actions.append({"type": "delete_message", "contextMsgId": ctx_id})
-
-    elif name == "kick_members":
-      raw_targets = args.get("targets") or []
-      kick_targets: list[dict[str, str]] = []
-      dedup: set[str] = set()
-      for target in raw_targets:
-        if not isinstance(target, dict):
-          continue
-        sender_ref = str(target.get("sender_ref") or "").strip().lower()
-        if not sender_ref or not SENDER_REF_RE.match(sender_ref):
-          continue
-        if sender_ref in dedup:
-          continue
-        dedup.add(sender_ref)
-        kick_targets.append({"senderRef": sender_ref})
-      if kick_targets:
-        actions.append({
-          "type": "kick_member",
-          "targets": kick_targets,
-          "mode": "partial_success",
-        })
-
-    elif name == "mute_member":
-      sender_ref = str(args.get("sender_ref") or "").strip().lower()
-      duration = args.get("duration_minutes")
-      if not sender_ref or not SENDER_REF_RE.match(sender_ref):
-        logger.warning("mute ignored: invalid sender_ref %r", sender_ref)
-        continue
-      try:
-        duration = int(duration)
-      except (TypeError, ValueError):
-        duration = 30
-      duration = max(0, min(1440, duration))
-      actions.append({
-        "type": "mute_member",
-        "senderRef": sender_ref,
-        "durationMinutes": duration,
       })
 
     elif name == "send_quiz":

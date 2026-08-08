@@ -17,8 +17,8 @@ const DEVICE_LABELS: Record<string, string> = {
 const PERMISSION_LABELS: Record<number, string> = {
   0: '0 (no moderation)',
   1: '1 (delete)',
-  2: '2 (delete & mute)',
-  3: '3 (delete, mute & kick)',
+  2: '2 (delete + mute)',
+  3: '3 (delete + mute + kick)',
 };
 
 /**

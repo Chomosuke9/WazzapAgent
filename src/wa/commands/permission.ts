@@ -6,8 +6,8 @@ import type { CommandContext, CommandHandler } from '../command/CommandContext.j
 const PERMISSION_LABELS: Record<number, string> = {
   0: "0 (all moderation forbidden)",
   1: "1 (delete allowed)",
-  2: "2 (delete & mute allowed)",
-  3: "3 (delete, mute & kick allowed)",
+  2: "2 (delete and mute allowed)",
+  3: "3 (delete, mute, and kick allowed)",
 };
 
 async function handlePermission({
@@ -57,7 +57,7 @@ async function handlePermission({
   if (level < 0 || level > 3) {
     try {
       await sock.sendMessage(chatId, {
-        text: "Level must be 0-3.\n0: all forbidden\n1: delete\n2: delete & mute\n3: delete, mute & kick",
+        text: "Level must be 0-3.\n0: bot moderation disabled\n1: bot may delete\n2: bot may delete and mute\n3: bot may delete, mute, and kick\nHuman group admins may still use `/group` at any level.",
       });
     } catch (err) {
       /* ignore */
@@ -120,7 +120,7 @@ export { handlePermission };
 
 export const permissionCommand: CommandHandler = {
   commands: ["permission", "permissions"],
-  description: "Set the moderation permission level for this chat. Level 0 = no moderation; level 1 = bot can delete messages; level 2 = + mute members; level 3 = + kick members. Without arguments it shows the current level. Example: /permission 2.",
+  description: "Configure which /group moderation actions the bot may execute: 0 none, 1 delete, 2 delete+mute, 3 delete+mute+kick. Human group admins are not restricted by this level.",
   permission: "isGroup and (isAdmin or isOwner)",
   run: (_sock, _message, ctx) => handlePermission(ctx),
 };

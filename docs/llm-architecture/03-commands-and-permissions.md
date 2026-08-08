@@ -9,7 +9,8 @@
 | **Information** | `/help`, `/info`, `/debug`, `/dashboard`, `/monitor`, `/owner-contact` |
 | **Management** | `/reset`, `/broadcast`, `/join`, `/revoke`, `/announcement`, `/generate`, `/activate`, `/update` |
 | **Stickers** | `/sticker`, `/add-sticker`, `/remove-sticker` |
-| **Utility** | `/catch`, `/download`, `/dump`, `/lid`, `/memory`, `/schedule-task` |
+| **Utility** | `/catch`, `/download`, `/dump`, `/lid`, `/memory`, `/schedule-task`, `/daily-task` |
+| **Group management** | `/group close|open|pin|delete|description|kick|mute` |
 
 ## Canonical command list
 
@@ -53,6 +54,8 @@ cannot drift into a separate alias table.
 | `announcement` | `announcements` | Toggle announcement broadcast opt-in per group |
 | `bot-conf` | `botconf` | Owner-only bot-wide config (activation-msg, prompt-override, require-activation) |
 | `schedule-task` | — | Persist a one-shot prompt for later execution |
+| `daily-task` | — | Persist and re-arm a recurring daily prompt |
+| `group` | — | Admin-gated group management; bot must also be admin |
 | `update` | — | Safe fast-forward update and restart (owner only, hidden) |
 
 Total: 34 canonical commands.
@@ -145,15 +148,19 @@ from Baileys group participant role metadata.
 
 ### Moderation level (`/permission`)
 
-| Level | Label | Moderation tools available |
-|:-----:|-------|---------------------------|
-| 0 | Moderation forbidden | None |
-| 1 | Delete allowed | `delete_messages` |
-| 2 | Delete + mute allowed | `delete_messages`, `mute_member` |
-| 3 | Delete + mute + kick allowed | `delete_messages`, `mute_member`, `kick_members` |
+| Level | Bot moderation commands allowed |
+|:-----:|---------------------------------|
+| 0 | None |
+| 1 | `/group delete` |
+| 2 | `/group delete`, `/group mute` |
+| 3 | `/group delete`, `/group mute`, `/group kick` |
 
 > **Note**: For levels > 0, the bot must have admin role in the group. If the bot
 > is demoted, permission is automatically reset to 0.
+
+The level restricts commands executed by the bot through
+`reply_message.command`. A human group admin may execute `/group` directly at
+any level, including level 0, as long as the bot is also a group admin.
 
 ### Available LLM2 tools by permission level
 
@@ -163,10 +170,10 @@ from Baileys group participant role metadata.
 | `react_to_message` | ✅ | ✅ | ✅ | ✅ |
 | `send_sticker` | ✅ | ✅ | ✅ | ✅ |
 | `send_quiz` | ✅ | ✅ | ✅ | ✅ |
-| `delete_messages` | ❌ | ✅ | ✅ | ✅ |
-| `mute_member` | ❌ | ❌ | ✅ | ✅ |
-| `kick_members` | ❌ | ❌ | ❌ | ✅ |
 | `execute_subtask` | ✅ (if sub-agent enabled) | ✅ | ✅ | ✅ |
+
+Delete, mute, and kick are not standalone LLM tools. They run through the
+admin-gated `/group ...` command family.
 
 ## Command processing
 
@@ -284,6 +291,8 @@ Only the bot owner can use the `global` variant.
 | `/dump` | Everyone | Python | Export full LLM context as .txt |
 | `/lid <number>` | Owner / own phone | Node | Resolve a WhatsApp LID |
 | `/schedule-task <nnHnnM> <prompt>` | Everyone | Node + Python | Persist and fire a one-shot task |
+| `/daily-task <HH:MM> <prompt>` | Everyone | Node + Python | Persist and fire a recurring daily task |
+| `/group <action>` | Group admin/bot | Node (+ Python for mute persistence) | Manage group state and moderation |
 | `/sticker [upper#lower]` | Everyone | Node + Python | Create sticker from image/video |
 | `/trigger <type>` | Admin/owner | Node | Set prefix triggers |
 | `/prompt [text\|clear]` | Admin/owner | Node | Set/view/clear per-chat prompt |

@@ -60,7 +60,7 @@ test('/info (group) adds Device, Mode, Permission and Uptime; drops Description'
   const text = sent[0].text;
   assert.match(text, /Device: /);
   assert.match(text, /Mode: hybrid/);
-  assert.match(text, /Permission: 2 \(delete & mute\)/);
+  assert.match(text, /Permission: 2 \(delete \+ mute\)/);
   assert.match(text, /Bot status:/);
   assert.match(text, /Uptime: /);
   assert.doesNotMatch(text, /Description:/);

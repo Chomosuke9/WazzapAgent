@@ -70,6 +70,9 @@ from .db import (
   get_prompt as db_get_prompt,
   get_bot_config as db_get_bot_config,
   ScheduledTasksRepository,
+  DailyTasksRepository,
+  add_mute as db_add_mute,
+  remove_mute as db_remove_mute,
   set_tenant_db_dir as db_set_tenant_db_dir,
   reset_tenant_db_dir as db_reset_tenant_db_dir,
   tenant_db_context as db_tenant_db_context,
@@ -115,6 +118,7 @@ from .agent.event_router import EventRouter
 from .agent.ack_hydrator import AckHydrator
 from .agent.subagent_coordinator import SubAgentCoordinator
 from .agent.scheduled_task_runner import ScheduledTaskRunner
+from .agent.daily_task_runner import DailyTaskRunner
 from .agent.chat_reinvoker import ChatReinvoker
 from .agent.direct_invoke import DirectInvokeServer
 
@@ -264,6 +268,17 @@ class AgentSession:
     # runner stays INSTANCE-scoped and unit-testable; it shares the reinvoker above.
     self._scheduled = ScheduledTaskRunner(
       repository=ScheduledTasksRepository(),
+      ws=self.sock,
+      responder=self._llm2,
+      per_chat=self.per_chat,
+      per_chat_lock=self.per_chat_lock,
+      track_task=self._track_task,
+      get_prompt=db_get_prompt,
+      record_stat=self._dashboard.record_stat,
+      reinvoker=self._reinvoker,
+    )
+    self._daily = DailyTaskRunner(
+      repository=DailyTasksRepository(),
       ws=self.sock,
       responder=self._llm2,
       per_chat=self.per_chat,
@@ -425,6 +440,7 @@ class AgentSession:
       # account's settings.db; armed timers inherit the context for their own
       # DB access.
       self._scheduled.rearm_pending()
+      self._daily.rearm_pending()
 
       # Direct-invoke HTTP endpoint: bind only once outbound delivery is ready
       # (no-op unless DIRECT_INVOKE_API_KEY is set). Its background re-invokes
@@ -572,6 +588,27 @@ def _register_handlers(session) -> None:
   async def _on_schedule_task(evt):
     # Feature 5: persist + arm a one-shot scheduled task (re-invokes LLM2 on fire).
     await session._scheduled.schedule(evt)
+
+  @ws.on("daily_task")
+  async def _on_daily_task(evt):
+    await session._daily.schedule(evt)
+
+  @ws.on("set_chat_mute")
+  async def _on_set_chat_mute(evt):
+    chat_id = evt.get("chatId")
+    sender_ref = str(evt.get("senderRef") or "").strip().lower()
+    sender_name = str(evt.get("senderName") or "").strip() or None
+    try:
+      duration = int(evt.get("durationMinutes"))
+    except (TypeError, ValueError):
+      duration = -1
+    if not chat_id or not sender_ref or duration < 0 or duration > 43200:
+      logger.warning("set_chat_mute: dropped malformed event=%s", evt)
+      return
+    if duration == 0:
+      db_remove_mute(chat_id, sender_ref)
+    else:
+      db_add_mute(chat_id, sender_ref, duration, sender_name=sender_name)
 
   @ws.on("message")
   async def _on_message(msg):

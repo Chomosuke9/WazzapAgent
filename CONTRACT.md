@@ -284,6 +284,8 @@ the top level so the SDK can assert ownership.
 { type: "invalidate_chat_settings", folderPath: string, chatId: string | "global" }
 { type: "set_subagent_enabled",     folderPath: string, chatId: string | "global", enabled: boolean }
 { type: "schedule_task",            folderPath: string, chatId: string, taskId: string, fireAtMs: number, prompt: string }
+{ type: "daily_task",               folderPath: string, chatId: string, taskId: string, timeOfDay: string, prompt: string }
+{ type: "set_chat_mute",            folderPath: string, chatId: string, senderRef: string, senderName: string | null, durationMinutes: number }
 ```
 
 ### 1.6 Delivery guarantee summary
@@ -591,7 +593,10 @@ export type OutboundFrame =
   | { type: "invalidate_llm2_model"; folderPath: string; chatId: string }
   | { type: "invalidate_default_model"; folderPath: string }
   | { type: "invalidate_chat_settings"; folderPath: string; chatId: string }
-  | { type: "set_subagent_enabled"; folderPath: string; chatId: string; enabled: boolean };
+  | { type: "set_subagent_enabled"; folderPath: string; chatId: string; enabled: boolean }
+  | { type: "schedule_task"; folderPath: string; chatId: string; taskId: string; fireAtMs: number; prompt: string }
+  | { type: "daily_task"; folderPath: string; chatId: string; taskId: string; timeOfDay: string; prompt: string }
+  | { type: "set_chat_mute"; folderPath: string; chatId: string; senderRef: string; senderName: string | null; durationMinutes: number };
 
 // ---- registry & factory ----
 export interface AccountEntry {
