@@ -4,6 +4,10 @@ data/
 tenants/
 accounts.json
 .env
+# Temporary swap files created while editing the ignored .env (including the
+# Pterodactyl file manager's `..env.swp` variant) must not block safe updates.
+.env.swp
+..env.swp
 *.pyc
 .venv/
 __pycache__/

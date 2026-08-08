@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 import {
   parseReleaseMetadata,
@@ -37,6 +38,30 @@ test('update status fails closed outside a Git checkout', async () => {
     assert.equal(status.repositoryAvailable, false);
     assert.equal(status.canUpdate, false);
     assert.equal(status.current.compatibilityVersion, '1');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('ignored .env swap files do not make an otherwise clean checkout dirty', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wazzap-update-env-swap-'));
+  const git = (args: string[]) => execFileSync('git', args, { cwd: root, stdio: 'pipe' });
+  try {
+    fs.writeFileSync(
+      path.join(root, 'package.json'),
+      JSON.stringify({ version: '1.1.0', compatibilityVersion: 1 }),
+      'utf8',
+    );
+    fs.writeFileSync(path.join(root, '.gitignore'), '.env\n.env.swp\n..env.swp\n', 'utf8');
+    git(['init', '--quiet']);
+    git(['config', 'user.email', 'test@example.invalid']);
+    git(['config', 'user.name', 'WazzapAgents test']);
+    git(['add', 'package.json', '.gitignore']);
+    git(['commit', '--quiet', '-m', 'initial']);
+    fs.writeFileSync(path.join(root, '..env.swp'), 'temporary editor state', 'utf8');
+
+    const status = await new ProjectUpdateManager(root).getStatus(false);
+    assert.equal(status.dirty, false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
