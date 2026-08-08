@@ -10,10 +10,13 @@ import { sendOutgoing } from '../outbound.js';
 import { detectMimeFromFile } from '../../mediaHandler.js';
 
 import { execFile } from 'node:child_process';
+import { createWriteStream } from 'node:fs';
 import { promisify } from 'node:util';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import logger from '../../logger.js';
 
 const execFileAsync = promisify(execFile);
@@ -96,7 +99,7 @@ async function downloadMedia(url: string): Promise<{
 }
 
 
-function getYtDlpError(error: unknown): string {
+function getCommandError(error: unknown): string {
   if (
     typeof error === 'object' &&
     error !== null
@@ -130,7 +133,7 @@ const URL_REGEX = /https?:\/\/[^\s<>"'`]+/gi;
 export function downloadErrorForWhatsApp(
   error: unknown,
 ): string {
-  const raw = getYtDlpError(error).replace(ANSI_ESCAPE_REGEX, '');
+  const raw = getCommandError(error).replace(ANSI_ESCAPE_REGEX, '');
   const lines = raw
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -151,8 +154,171 @@ function urlHostForLog(url: string): string {
   }
 }
 
+function directDownloadFileName(response: Response, requestedUrl: string): string {
+  const disposition = response.headers.get('content-disposition') || '';
+  const utf8Name = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  const quotedName = disposition.match(/filename="([^"]+)"/i)?.[1];
+  const plainName = disposition.match(/filename=([^;]+)/i)?.[1]?.trim();
+  let candidate = utf8Name || quotedName || plainName || '';
+
+  if (candidate) {
+    try {
+      candidate = decodeURIComponent(candidate);
+    } catch {
+      // Keep the original header value when it is not URI encoded.
+    }
+  } else {
+    try {
+      const finalUrl = new URL(response.url || requestedUrl);
+      const finalSegment = finalUrl.pathname.split('/').filter(Boolean).at(-1);
+      candidate = finalSegment ? decodeURIComponent(finalSegment) : '';
+    } catch {
+      candidate = '';
+    }
+  }
+
+  const safeName = basename(candidate)
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+    .trim()
+    .slice(0, 180);
+  return safeName && safeName !== '.' && safeName !== '..'
+    ? safeName
+    : 'download';
+}
+
+export async function downloadDirectFile(url: string): Promise<{
+  filePath: string;
+  tempDir: string;
+}> {
+  const parsedUrl = new URL(url);
+  if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+    throw new Error('Direct download only supports HTTP and HTTPS URLs.');
+  }
+
+  const tempDir = await mkdtemp(join(tmpdir(), 'direct-download-'));
+
+  try {
+    const response = await fetch(parsedUrl, {
+      headers: {
+        accept: '*/*',
+        'user-agent': 'WazzapAgents/1.2',
+      },
+      redirect: 'follow',
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Direct download failed with HTTP ${response.status} ${response.statusText}.`,
+      );
+    }
+    if (!response.body) {
+      throw new Error('Direct download returned an empty response body.');
+    }
+
+    const filePath = join(tempDir, directDownloadFileName(response, url));
+    const source = Readable.from(
+      response.body as unknown as AsyncIterable<Uint8Array>,
+    );
+    await pipeline(source, createWriteStream(filePath, { flags: 'wx' }));
+    if ((await stat(filePath)).size === 0) {
+      throw new Error('Direct download returned an empty file.');
+    }
+
+    return { filePath, tempDir };
+  } catch (error) {
+    await rm(tempDir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+const SPOTDL_AUDIO_EXTENSIONS = new Set([
+  '.mp3',
+  '.flac',
+  '.ogg',
+  '.opus',
+  '.m4a',
+  '.wav',
+]);
+
+function isSpotifyTrackUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname.toLowerCase() === 'open.spotify.com'
+      && /^\/track\/[^/]+\/?$/i.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function isDrmError(errorText: string): boolean {
+  const normalized = errorText.toLowerCase();
+  return normalized.includes('[drm]')
+    || normalized.includes('drm protection');
+}
+
+export async function downloadSpotifyMedia(url: string): Promise<{
+  filePath: string;
+  tempDir: string;
+}> {
+  if (!isSpotifyTrackUrl(url)) {
+    throw new Error(
+      'SpotDL fallback only supports individual open.spotify.com track URLs.',
+    );
+  }
+
+  const tempDir = await mkdtemp(join(tmpdir(), 'spotdl-'));
+
+  try {
+    await execFileAsync(
+      'spotdl',
+      [
+        'download',
+        '--format',
+        'mp3',
+        '--output',
+        join(tempDir, '{artists} - {title}.{output-ext}'),
+        '--restrict',
+        'ascii',
+        '--simple-tui',
+        '--print-errors',
+        '--log-level',
+        'ERROR',
+        url,
+      ],
+      {
+        cwd: tempDir,
+        maxBuffer: 10 * 1024 * 1024,
+      },
+    );
+
+    const entries = await readdir(tempDir, { withFileTypes: true });
+    const audioFiles = entries.filter((entry) => {
+      if (!entry.isFile()) return false;
+      const extension = entry.name.slice(entry.name.lastIndexOf('.')).toLowerCase();
+      return SPOTDL_AUDIO_EXTENSIONS.has(extension);
+    });
+    if (audioFiles.length !== 1) {
+      throw new Error(
+        `SpotDL produced ${audioFiles.length} audio files; expected exactly one.`,
+      );
+    }
+
+    const filePath = join(tempDir, audioFiles[0].name);
+    if ((await stat(filePath)).size === 0) {
+      throw new Error('SpotDL returned an empty audio file.');
+    }
+
+    return { filePath, tempDir };
+  } catch (error) {
+    await rm(tempDir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
 interface DownloadCommandDeps {
   downloadMedia: typeof downloadMedia;
+  downloadDirectFile: typeof downloadDirectFile;
+  downloadSpotifyMedia: typeof downloadSpotifyMedia;
   sendOutgoing: typeof sendOutgoing;
   wait: (milliseconds: number) => Promise<void>;
 }
@@ -170,6 +336,7 @@ const WA_INLINE_IMAGE_MIMES = new Set([
 const WA_INLINE_VIDEO_MIMES = new Set(['video/mp4']);
 const WA_INLINE_AUDIO_MIMES = new Set([
   'audio/mpeg',
+  'audio/mp3',
   'audio/mp4',
   'audio/aac',
   'audio/ogg',
@@ -200,6 +367,9 @@ export async function handleDownload(
   dependencies: Partial<DownloadCommandDeps> = {},
 ): Promise<void> {
   const runDownload = dependencies.downloadMedia ?? downloadMedia;
+  const runDirectDownload = dependencies.downloadDirectFile ?? downloadDirectFile;
+  const runSpotifyDownload = dependencies.downloadSpotifyMedia
+    ?? downloadSpotifyMedia;
   const sendReply = dependencies.sendOutgoing ?? sendOutgoing;
   const wait = dependencies.wait ?? (
     (milliseconds: number) => new Promise<void>((resolve) => {
@@ -246,10 +416,39 @@ export async function handleDownload(
   logger.info({ chatId, urlHost }, 'download: started');
 
   let tempDir: string | undefined;
+  let source: 'yt-dlp' | 'direct' | 'spotdl' = 'yt-dlp';
 
   try {
     await reactWithProgress('⬇️');
-    const result = await runDownload(url);
+    let result: Awaited<ReturnType<typeof downloadMedia>>;
+    try {
+      result = await runDownload(url);
+    } catch (ytDlpError) {
+      const rawYtDlpError = getCommandError(ytDlpError).toLowerCase();
+      const errorContext = {
+        chatId,
+        urlHost,
+        errorMessage: downloadErrorForWhatsApp(ytDlpError),
+      };
+
+      if (rawYtDlpError.includes('unsupported url')) {
+        source = 'direct';
+        logger.warn(
+          errorContext,
+          'download: yt-dlp does not support URL; trying direct download',
+        );
+        result = await runDirectDownload(url);
+      } else if (isDrmError(rawYtDlpError) && isSpotifyTrackUrl(url)) {
+        source = 'spotdl';
+        logger.warn(
+          errorContext,
+          'download: yt-dlp reported Spotify DRM; trying SpotDL',
+        );
+        result = await runSpotifyDownload(url);
+      } else {
+        throw ytDlpError;
+      }
+    }
 
     tempDir = result.tempDir;
     const sniffed = await detectMimeFromFile(result.filePath);
@@ -271,6 +470,7 @@ export async function handleDownload(
         fileName: basename(result.filePath),
         mime,
         kind,
+        source,
       },
       'download: media ready to send',
     );
@@ -285,11 +485,11 @@ export async function handleDownload(
     );
     await reactWithProgress('✅');
     logger.info(
-      { chatId, urlHost, durationMs: Date.now() - startedAt },
+      { chatId, urlHost, source, durationMs: Date.now() - startedAt },
       'download: completed',
     );
   } catch (error) {
-    const rawError = getYtDlpError(error);
+    const rawError = getCommandError(error);
     const errorMessage = downloadErrorForWhatsApp(error);
     const unsupported = rawError.toLowerCase().includes('unsupported url');
     await reactWithProgress('❌');

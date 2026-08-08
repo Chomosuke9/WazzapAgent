@@ -9,3 +9,6 @@ Pillow>=10.0.0
 # complete/progress callbacks from WazzapSubAgents. Without it the bridge
 # silently falls back to 120 s polling for every sub-agent task.
 aiohttp>=3.9.0
+# Spotify DRM fallback for /download. SpotDL uses Spotify metadata and fetches
+# a matching audio source rather than attempting to decrypt Spotify streams.
+spotdl>=4.5.2,<5.0.0

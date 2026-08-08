@@ -6,15 +6,15 @@ prebuilt **"NodeJS Generic"** egg — i.e. a typical locked-down managed host wh
 you can only pick an image from a dropdown and fill in variables. **No custom
 image, no custom egg, no root required.**
 
-A small bootstrap provisions a **portable Python**, a **static ffmpeg** and
-**qrencode** into
+A small bootstrap provisions a **portable Python**, a **static ffmpeg**,
+**qrencode**, and **Deno** into
 the persistent volume on first boot, then runs the Node gateway and the Python
 bridge together.
 
 | File | Purpose |
 |------|---------|
 | `ptero-boot.mjs` | Entrypoint set as the run command (`CMD_RUN`). The egg runs it as `/usr/local/bin/node …`; it hands off to the bootstrap. |
-| `ptero-bootstrap.sh` | Provisions Python + ffmpeg + qrencode into the volume (cached), installs deps, then runs the gateway + bridge with tied lifecycles. |
+| `ptero-bootstrap.sh` | Provisions Python + ffmpeg + qrencode + Deno into the volume (cached), installs deps, then runs the gateway + bridge with tied lifecycles. |
 | `../.env.minimal.example` | Minimal env template (LLM2 key/model, owner JID, pairing number). Copy to `.env`. Full reference: [`../.env.example`](../.env.example). |
 
 > Scope: **single account**, sub-agent integration **not** included.
@@ -32,19 +32,21 @@ The generic Node egg's startup does `git pull` → `npm install` →
 first boot:
 
 1. Downloads a relocatable standalone **CPython** into `/home/container/.python`.
-2. `pip install`s the bridge's `requirements.txt` into it (cached by hash).
+2. `pip install`s the bridge's `requirements.txt` into it (cached by hash),
+   including SpotDL for the Spotify `/download` fallback.
 3. Downloads a **static ffmpeg** into `/home/container/.ffmpeg` (best-effort;
    only used by `/sticker` video).
 4. Downloads **qrencode** (+ its libs) into `/home/container/.qrencode`
    (best-effort; renders the WhatsApp login QR in the console).
-5. Ensures Node deps are present (incl. `tsx`).
-6. Runs the **Node gateway** (`node --import tsx src/index.ts`) and the
+5. Installs **Deno** into `/home/container/.deno` and adds it to `PATH`.
+6. Ensures Node deps are present (incl. `tsx`).
+7. Runs the **Node gateway** (`node --import tsx src/index.ts`) and the
    **Python bridge** (`python -m bridge.main`) together, communicating over
    loopback (`ws://127.0.0.1:${SERVER_PORT}`). If either process exits, the
    other is stopped so Pterodactyl restarts the whole server.
 
-Everything — Baileys auth, SQLite DBs, media, the portable Python, ffmpeg and
-qrencode —
+Everything — Baileys auth, SQLite DBs, media, the portable Python, ffmpeg,
+qrencode, and Deno —
 lives under the persistent `/home/container` volume, so **you pair once** and the
 heavy provisioning is cached (it re-runs only when `requirements.txt` changes).
 
@@ -85,7 +87,7 @@ heavy provisioning is cached (it re-runs only when `requirements.txt` changes).
    ```
    (LLM1 router vars are optional — see [`../.env.minimal.example`](../.env.minimal.example);
    full reference in [`../.env.example`](../.env.example).)
-5. **Start.** First boot downloads Python + ffmpeg + qrencode + deps (a minute or two,
+5. **Start.** First boot downloads Python + ffmpeg + qrencode + Deno + deps (a minute or two,
    cached afterwards), then runs both processes.
 
 ---
@@ -128,12 +130,19 @@ only pair once.
   Code-based login via `WA_PAIRING_NUMBER` needs **no** QR, so this is optional.
   Override `QRENCODE_DEB_URL` / `LIBQRENCODE_DEB_URL` / `LIBPNG_DEB_URL` if your
   provider uses an incompatible base or an asset 404s.
+- **Spotify DRM fallback:** when `yt-dlp` reports DRM for an individual
+  `open.spotify.com/track/...` URL, `/download` uses SpotDL to find a matching
+  audio source and sends that MP3. It does not decrypt or copy Spotify's DRM
+  stream. Album, artist, and playlist URLs are intentionally excluded because
+  one `/download` request must produce exactly one WhatsApp attachment.
 - **Network on first boot** fetches Python from
   [`astral-sh/python-build-standalone`](https://github.com/astral-sh/python-build-standalone/releases)
-  and ffmpeg from johnvansickle. Override with `PBS_RELEASE` / `PYTHON_VERSION`
+  and ffmpeg from johnvansickle, and runs Deno's official installer from
+  `https://deno.land/install.sh`. Override with `PBS_RELEASE` / `PYTHON_VERSION`
   / `FFMPEG_STATIC_URL` env vars if an asset ever 404s.
 - **Updating:** the generic egg `git pull`s on each start; the bootstrap re-uses
-  the cached Python/ffmpeg. The control panel also offers a fast-forward-only
+  the cached Python, ffmpeg, qrencode, and Deno tools. The control panel also
+  offers a fast-forward-only
   **Update & restart** action and warns before crossing the project's
   `compatibilityVersion`. Your `data/` and `.env` are preserved.
 - **Ports.** The primary allocation remains the internal WS port (loopback

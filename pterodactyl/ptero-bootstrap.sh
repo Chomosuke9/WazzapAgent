@@ -8,8 +8,9 @@
 #   1. Provision a relocatable standalone CPython (python-build-standalone).
 #   2. pip install the bridge's Python requirements into that Python.
 #   3. Provision a static ffmpeg (best-effort; only needed for /sticker video).
-#   4. Ensure Node deps are present (incl. tsx) via pnpm.
-#   5. Run the Node gateway + the Python bridge together (loopback), and tie
+#   4. Provision Deno in the persistent volume.
+#   5. Ensure Node deps are present (incl. tsx) via pnpm.
+#   6. Run the Node gateway + the Python bridge together (loopback), and tie
 #      their lifecycles so Pterodactyl restarts the whole server cleanly.
 #
 # Config is read from env vars (set them via the egg's CUSTOM_ENVIRONMENT_VARIABLES
@@ -124,6 +125,7 @@ fi
 
 # --- 2) Python deps (cached by requirements.txt hash) -----------------------
 if [ -x "$PY_BIN" ]; then
+  export PATH="$PY_DIR/bin:$PATH"
   req_hash="$( (sha1sum requirements.txt 2>/dev/null || shasum requirements.txt 2>/dev/null) | awk '{print $1}')"
   marker="$PY_DIR/.deps-${req_hash}"
   if [ ! -f "$marker" ]; then
@@ -247,6 +249,23 @@ fi
 if [ -x "$QR_BIN" ]; then
   export PATH="$QR_DIR/usr/bin:$PATH"
   export LD_LIBRARY_PATH="$QR_DIR/usr/lib/${DEB_TRIPLET}:$QR_DIR/usr/lib:${LD_LIBRARY_PATH:-}"
+fi
+
+# --- 3d) Deno (cached in the persistent volume) -----------------------------
+DENO_INSTALL="${DENO_INSTALL:-/home/container/.deno}"
+export DENO_INSTALL
+export PATH="$DENO_INSTALL/bin:$PATH"
+if ! command -v deno >/dev/null 2>&1; then
+  log "provisioning Deno..."
+  if command -v curl >/dev/null 2>&1; then
+    if curl -fsSL https://deno.land/install.sh | sh; then
+      log "Deno ready at $DENO_INSTALL/bin/deno"
+    else
+      log "WARN: Deno installation failed"
+    fi
+  else
+    log "WARN: curl is unavailable; cannot install Deno"
+  fi
 fi
 
 # --- 4) Node deps via pnpm (respects pnpm-lock.yaml; ensures tsx too) -------
