@@ -36,11 +36,12 @@ if [ -z "$PYTHON" ]; then
   fi
 fi
 
-# Resolve aliases, symlinks, and pyenv shims to the interpreter that Python
-# itself reports. Node inherits this absolute path through PY_BIN, so its
-# Python-backed tools use the exact same executable as the bridge below.
+# Resolve pyenv shims to the interpreter that Python itself reports. Keep the
+# executable path inside a virtualenv intact: realpath would follow its symlink
+# to the base Python and silently drop the virtualenv's installed packages.
+# Node inherits this path through PY_BIN and uses the same executable below.
 if [ -n "$PYTHON" ]; then
-  RESOLVED_PYTHON="$("$PYTHON" -c 'import os, sys; print(os.path.realpath(sys.executable))' 2>/dev/null || true)"
+  RESOLVED_PYTHON="$("$PYTHON" -c 'import os, sys; print(os.path.abspath(sys.executable))' 2>/dev/null || true)"
   if [ -n "$RESOLVED_PYTHON" ] && [ -x "$RESOLVED_PYTHON" ]; then
     PYTHON="$RESOLVED_PYTHON"
   fi
