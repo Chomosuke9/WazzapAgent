@@ -41,6 +41,10 @@ pnpm install                      # Node gateway
 pip install -r requirements.txt   # Python bridge (Python 3.10+)
 ```
 
+When launched through `start.sh`, a production checkout that predates the
+SpotDL dependency is repaired automatically on restart using the same Python
+interpreter as the bridge.
+
 ### 2. Configure
 
 Copy the minimal env template and fill in your keys:

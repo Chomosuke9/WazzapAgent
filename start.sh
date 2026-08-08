@@ -46,6 +46,24 @@ fi
 # ── Ensure PYTHONPATH includes our python/ dir ─────────────────────────────
 export PYTHONPATH="${PYTHONPATH:-$SCRIPT_DIR/python}"
 
+# ── Ensure optional Python-backed command tools are installed ──────────────
+# Normal bridge setup already installs requirements.txt. Production updates,
+# however, may only git-pull + restart start.sh, so a newly-added tool can be
+# absent from the otherwise healthy bridge interpreter. Repair only that stale
+# state; the fast import check makes subsequent starts effectively free.
+if [ -n "$PYTHON" ] && ! "$PYTHON" -c "import spotdl" >/dev/null 2>&1; then
+  log "SpotDL missing from $PYTHON; installing updated Python requirements..."
+  if "$PYTHON" -m pip install --disable-pip-version-check -r requirements.txt; then
+    if "$PYTHON" -c "import spotdl" >/dev/null 2>&1; then
+      log "SpotDL ready in $PYTHON"
+    else
+      log "WARN: Python requirements installed but SpotDL is still unavailable"
+    fi
+  else
+    log "WARN: failed to install Python requirements; Spotify DRM fallback remains unavailable"
+  fi
+fi
+
 # ── Graceful shutdown ──────────────────────────────────────────────────────
 GRACE_SECONDS="${NODE_GRACE_S:-10}"
 NODE_PID=""
