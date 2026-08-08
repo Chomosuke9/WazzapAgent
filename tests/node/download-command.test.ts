@@ -23,7 +23,13 @@ test('SpotDL runs through the selected bridge Python, not a spotdl shim', () => 
   );
 
   assert.equal(invocation.file, '/runtime/python3');
-  assert.deepEqual(invocation.args.slice(0, 3), ['-m', 'spotdl', 'download']);
+  assert.deepEqual(invocation.args.slice(0, 4), [
+    '-m',
+    'spotdl',
+    'download',
+    'https://open.spotify.com/track/track-id',
+  ]);
+  assert.equal(invocation.args.at(-1), 'ERROR');
   assert.notEqual(invocation.file, 'spotdl');
 });
 

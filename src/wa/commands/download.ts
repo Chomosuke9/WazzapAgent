@@ -268,6 +268,7 @@ export function buildSpotDlInvocation(
       '-m',
       'spotdl',
       'download',
+      url,
       '--format',
       'mp3',
       '--output',
@@ -278,7 +279,6 @@ export function buildSpotDlInvocation(
       '--print-errors',
       '--log-level',
       'ERROR',
-      url,
     ],
   };
 }
