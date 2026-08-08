@@ -176,15 +176,20 @@
 /* Ensure sidebar drawer is usable on mobile */
 @media (max-width: 996px) {
   .navbar-sidebar {
-    /* Ensure sidebar drawer fully covers viewport */
-    width: 100% !important;
-    max-width: 100% !important;
+    /* Keep Infima's drawer, panels, and carousel translation in sync. */
+    --ifm-navbar-sidebar-width: 100vw;
+    width: var(--ifm-navbar-sidebar-width);
+    max-width: 100%;
     min-height: 100dvh;
   }
 
   .navbar-sidebar__items {
-    /* Prevent items overflow */
-    overflow-y: auto;
+    /* The child menu panels own vertical scrolling. Clipping this moving
+       carousel causes the secondary docs menu to collapse on mobile. */
+    overflow: visible;
+  }
+
+  .navbar-sidebar__item {
     -webkit-overflow-scrolling: touch;
   }
 
