@@ -218,8 +218,11 @@ function detectMimeFromHeader(header: Buffer | null | undefined): string | null 
     && (header[3] === 0x04 || header[3] === 0x06 || header[3] === 0x08)
   ) return 'application/zip';
   if (header.length >= 4 && header.toString('ascii', 0, 4) === 'OggS') return 'audio/ogg';
-  if (header.length >= 3 && header.toString('ascii', 0, 3) === 'ID3') return 'audio/mp3';
-  if (header.length >= 2 && header[0] === 0xFF && (header[1] & 0xE0) === 0xE0) return 'audio/mp3';
+  // `audio/mp3` is a commonly-used alias, but WhatsApp clients expect the
+  // registered MP3 media type. A non-standard mimetype can upload correctly
+  // while leaving recipients with an audioMessage they cannot play.
+  if (header.length >= 3 && header.toString('ascii', 0, 3) === 'ID3') return 'audio/mpeg';
+  if (header.length >= 2 && header[0] === 0xFF && (header[1] & 0xE0) === 0xE0) return 'audio/mpeg';
   if (header.length >= 8 && header.toString('ascii', 4, 8) === 'ftyp') return 'video/mp4';
 
   return null;

@@ -227,7 +227,7 @@ test('/download uses SpotDL for a Spotify track rejected as DRM', async () => {
   assert.equal(outgoing.length, 0);
   assert.equal(mediaMessages.length, 1);
   assert.equal(mediaMessages[0].fileName, 'Artist - Track.mp3');
-  assert.equal(mediaMessages[0].mimetype, 'audio/mp3');
+  assert.equal(mediaMessages[0].mimetype, 'audio/mpeg');
   assert.ok(mediaMessages[0].audio);
 });
 
