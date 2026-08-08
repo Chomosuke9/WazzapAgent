@@ -36,27 +36,32 @@ async function downloadMedia(url: string): Promise<{
       [
         '--quiet',
 
-        // Jangan download seluruh playlist.
+        // Don't download the whole playlist.
         '--no-playlist',
 
-        // Kualitas terbaik yang tersedia.
+        // Group best-video + best-audio formats, fall back to best.
         '--format',
         'bv*+ba/b',
 
-        // Simpan hasil ke temporary directory.
+        // Prefer h264/aac mp4 formats over others,
+        // so the final result is most likely mp4.
+        '--format-sort',
+        'vcodec:h264,res,acodec:m4a',
+
+        // Save the output to a temporary directory.
         '--output',
         join(
           tempDir,
           '%(title)s [%(id)s].%(ext)s',
         ),
 
-        // Print lokasi file final setelah processing/merge.
+        // Print the final file location after processing/merge.
         '--print',
         'after_move:filepath',
 
         '--no-simulate',
 
-        // Semua argument setelah ini dianggap positional argument.
+        // Everything after this is treated as a positional argument.
         '--',
         url,
       ],
@@ -83,8 +88,8 @@ async function downloadMedia(url: string): Promise<{
       tempDir,
     };
   } catch (error) {
-    // Kalau download gagal sebelum fungsi selesai,
-    // langsung bersihkan temporary directory.
+    // If the download fails before the function finishes,
+    // clean up the temporary directory right away.
     await rm(tempDir, {
       recursive: true,
       force: true,
@@ -238,7 +243,7 @@ async function handleDownload({
       text: 'Failed to download media.',
     });
   } finally {
-    // File baru dihapus setelah selesai dikirim.
+    // The file is removed once it has been sent.
     if (tempDir) {
       await rm(tempDir, {
         recursive: true,
