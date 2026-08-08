@@ -36,33 +36,20 @@ if [ -z "$PYTHON" ]; then
   fi
 fi
 
-# Node invokes Python-backed command tools (currently SpotDL) through PY_BIN.
-# Export the interpreter resolved above so both processes use the exact same
-# environment instead of a potentially stale pyenv/launcher shim.
+# Resolve aliases, symlinks, and pyenv shims to the interpreter that Python
+# itself reports. Node inherits this absolute path through PY_BIN, so its
+# Python-backed tools use the exact same executable as the bridge below.
 if [ -n "$PYTHON" ]; then
+  RESOLVED_PYTHON="$("$PYTHON" -c 'import os, sys; print(os.path.realpath(sys.executable))' 2>/dev/null || true)"
+  if [ -n "$RESOLVED_PYTHON" ] && [ -x "$RESOLVED_PYTHON" ]; then
+    PYTHON="$RESOLVED_PYTHON"
+  fi
   export PY_BIN="$PYTHON"
+  log "using Python interpreter: $PY_BIN"
 fi
 
 # ── Ensure PYTHONPATH includes our python/ dir ─────────────────────────────
 export PYTHONPATH="${PYTHONPATH:-$SCRIPT_DIR/python}"
-
-# ── Ensure optional Python-backed command tools are installed ──────────────
-# Normal bridge setup already installs requirements.txt. Production updates,
-# however, may only git-pull + restart start.sh, so a newly-added tool can be
-# absent from the otherwise healthy bridge interpreter. Repair only that stale
-# state; the fast import check makes subsequent starts effectively free.
-if [ -n "$PYTHON" ] && ! "$PYTHON" -c "import spotdl" >/dev/null 2>&1; then
-  log "SpotDL missing from $PYTHON; installing updated Python requirements..."
-  if "$PYTHON" -m pip install --disable-pip-version-check -r requirements.txt; then
-    if "$PYTHON" -c "import spotdl" >/dev/null 2>&1; then
-      log "SpotDL ready in $PYTHON"
-    else
-      log "WARN: Python requirements installed but SpotDL is still unavailable"
-    fi
-  else
-    log "WARN: failed to install Python requirements; Spotify DRM fallback remains unavailable"
-  fi
-fi
 
 # ── Graceful shutdown ──────────────────────────────────────────────────────
 GRACE_SECONDS="${NODE_GRACE_S:-10}"

@@ -4,6 +4,10 @@ import { fileURLToPath } from 'url';
 import { config as dotenvConfig } from 'dotenv';
 
 const ENV_PATH = path.resolve(process.cwd(), '.env');
+// start.sh exports the exact bridge interpreter before launching Node. Keep
+// that supervisor-owned value authoritative even when `.env` is hot-reloaded
+// with override=true later in this module.
+const SUPERVISOR_PY_BIN = (process.env.PY_BIN || '').trim();
 dotenvConfig({ path: ENV_PATH });
 
 const __filename = fileURLToPath(import.meta.url);
@@ -132,7 +136,7 @@ function buildConfig(): Config {
   instanceId: process.env.INSTANCE_ID || 'default',
   // Keep Node-side Python tools (currently SpotDL) on the exact interpreter
   // used by start.sh/the bridge instead of relying on an ambiguous CLI shim.
-  pythonBin: (process.env.PY_BIN || '').trim()
+  pythonBin: SUPERVISOR_PY_BIN || (process.env.PY_BIN || '').trim()
     || (process.platform === 'win32' ? 'python' : 'python3'),
   // Optional WhatsApp pairing-code flow (no QR). When set, the gateway requests
   // an 8-char pairing code for this number instead of printing a QR. Must be

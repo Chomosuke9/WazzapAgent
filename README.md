@@ -41,9 +41,9 @@ pnpm install                      # Node gateway
 pip install -r requirements.txt   # Python bridge (Python 3.10+)
 ```
 
-When launched through `start.sh`, a production checkout that predates the
-SpotDL dependency is repaired automatically on restart using the same Python
-interpreter as the bridge.
+`start.sh` resolves the bridge's absolute Python executable and exports it as
+`PY_BIN`; Node uses that same interpreter for Python-backed tools such as
+SpotDL. Dependency installation remains an explicit setup/deployment step.
 
 ### 2. Configure
 
