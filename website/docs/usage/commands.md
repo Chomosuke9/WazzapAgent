@@ -12,19 +12,23 @@ All commands start with `/` (forward slash). In groups, most commands can only b
 |---------|----------|-------------|
 | `/activate <code>` | Activate chat with an activation code | Everyone |
 | `/add-sticker <name>` | Add a sticker to the catalog (reply to a sticker) | Admin (group), Anyone (private) |
-| `/announcement [message]` | Send an announcement to all members (@all) | Group admin |
+| `/announcement <on\|off>` | Opt this group in or out of owner broadcasts | Group admin |
 | `/bot-conf` | Global bot configuration (owner) | Bot owner only |
 | `/broadcast <message>` | Send a message to all groups | Bot owner only |
 | `/catch` | Mark a message for reprocessing by the bot | Everyone |
+| `/compat <auto\|full\|semi\|safe>` | Set interactive-message compatibility | Admin (group), Anyone (private) |
 | `/dashboard` | Show usage statistics | Everyone |
 | `/debug` | Show debug info | Bot owner only |
+| `/download <url>` | Download media or a direct HTTP(S) file | Everyone |
 | `/dump` | Build the full LLM context into a .txt file (debugging) | Everyone |
-| `/generate <prompt>` | Generate an image from a text prompt | Bot owner only |
+| `/generate <private\|group\|all> <days>` | Generate an activation code | Bot owner only |
 | `/help` | Show the command list | Everyone |
 | `/idle <n\|min-max\|off>` | Configure the idle trigger | Admin / Owner |
 | `/info` | User & chat/group info | Everyone |
-| `/join <link>` | Tell the bot to join a group via invite link | Everyone |
+| `/join <link>` | Tell the bot to join a group via invite link | Bot owner only |
 | `/lid <number>` | Fetch the LID for a number | Owner / own phone |
+| `/mode <auto\|prefix\|hybrid>` | View or set the response mode | Admin (group), Anyone (private) |
+| `/model [id]` | List or switch the model for this chat | Admin (group), Anyone (private) |
 | `/modelcfg` | Configure the default model | Bot owner only |
 | `/monitor` | Monitor dashboard across all chats | Bot owner only |
 | `/owner-contact` | Send the bot owner contact card | Everyone |
@@ -35,13 +39,16 @@ All commands start with `/` (forward slash). In groups, most commands can only b
 | `/reset` | Reset bot memory | Admin (group), Anyone (private) |
 | `/revoke <id\|ids\|unused>` | Revoke activation code(s) from /generate | Bot owner only |
 | `/schedule-task <nnHnnM> <prompt>` | Schedule the bot to run a prompt later | Everyone |
-| `/setting` | View/edit per-chat settings (incl. response mode) | Admin (group), Anyone (private) |
-| `/sticker [bottom#top]` | Create a sticker from an image/video | Everyone |
+| `/setting` | View/edit per-chat settings | Admin (group), Anyone (private) |
+| `/sticker [top#bottom]` | Create a sticker from an image/video | Everyone |
 | `/subagent <on\|off>` | Enable/disable the sub-agent per chat | Bot owner only |
 | `/trigger <type>` | Check/change prefix-mode triggers | Group admin |
+| `/update` | Safely update and restart the bot | Bot owner only |
 
 :::note
-Response mode (auto/prefix) **no longer** uses the `/mode` command. It is now configured through the interactive **`/setting`** menu.
+Interactive settings are available through **`/setting`**. Text commands such as
+`/mode`, `/model`, and `/compat` provide the same core controls on devices where
+WhatsApp menus do not render reliably.
 :::
 
 ---
@@ -70,11 +77,16 @@ Use `/add-sticker default <name>` (or `global`) to add to the shared catalog for
 
 ## `/announcement`
 
-Sends an announcement message to all group members with an `@all` mention. With no argument, shows the current on/off status.
+Controls whether this group receives messages sent with `/broadcast`. With no
+argument, shows the current status.
 
 ```
-/announcement Meeting tonight at 8 PM
+/announcement on
+/announcement off
 ```
+
+The bot owner can also use `/announcement global on|off` or
+`/announcement default on|off`.
 
 ---
 
@@ -118,6 +130,24 @@ Marks the message you reply to so it can be **reprocessed** by the bot. Useful w
 
 ---
 
+## `/compat`
+
+Controls which interactive-message features the bot uses in this chat:
+
+- `auto` — match the caller's device automatically
+- `full` — use all interactive features (best on Android)
+- `semi` — avoid list menus (iOS-safe)
+- `safe` — use plain text only (works on WhatsApp Web/Desktop)
+
+```
+/compat
+/compat safe
+```
+
+The bot owner can use `/compat global <mode>` or `/compat default <mode>`.
+
+---
+
 ## `/dashboard`
 
 Shows usage statistics for this chat.
@@ -129,9 +159,9 @@ Shows usage statistics for this chat.
 Shows:
 - Number of messages processed
 - Number of responses sent
-- Tokens used (LLM1 & LLM2)
-- Average response time
-- Other info depending on configuration
+- Router and main-agent call counts
+- Completed sub-agent tasks
+- Top monthly users
 
 **Can be used by everyone**, no admin required.
 
@@ -151,6 +181,23 @@ Can only be used by the **bot owner**.
 
 ---
 
+## `/download`
+
+Downloads media from a URL and sends the resulting file to the chat. The
+command uses `yt-dlp` for supported media sites, can fall back to a direct
+HTTP(S) file download for unsupported URLs, and uses SpotDL for Spotify tracks
+when the required dependencies are installed.
+
+```
+/download https://example.com/media
+/dl https://example.com/file.pdf
+```
+
+Temporary files are removed after the send completes. Errors returned to the
+chat are bounded and redact URLs that may contain signed query parameters.
+
+---
+
 ## `/dump`
 
 Builds the **full LLM context** — system prompt, group description, chat state, history, and the current message — into a `.txt` file and sends it as a document. Handled on the Python side. Useful for debugging the context the bot sees.
@@ -165,10 +212,13 @@ Builds the **full LLM context** — system prompt, group description, chat state
 
 ## `/generate`
 
-Generates an **image** from a text prompt.
+Generates an **activation code** for private chats, groups, or both. The number
+of days controls its lifetime; `0` creates a permanent code.
 
 ```
-/generate astronaut cat wearing a helmet
+/generate private 30
+/generate group 0
+/generate all 7
 ```
 
 :::warning
@@ -224,6 +274,10 @@ Tells the bot to **join a group** via an invite link. The bot joins under its ow
 /join https://chat.whatsapp.com/AbCdEfGhIjK
 ```
 
+:::warning
+Can only be used by the **bot owner**.
+:::
+
 ---
 
 ## `/lid`
@@ -240,9 +294,41 @@ Can only be used by the **bot owner** or from your **own phone**.
 
 ---
 
+## `/mode`
+
+Shows or sets the response mode for this chat:
+
+- `prefix` — respond only when a configured trigger matches
+- `auto` — let LLM1 decide whether to respond
+- `hybrid` — try prefix triggers first, then fall back to LLM1
+
+```
+/mode
+/mode hybrid
+```
+
+`auto` and `hybrid` require an LLM1 endpoint. The bot owner can use
+`/mode global <mode>` or `/mode default <mode>` for broader scopes.
+
+---
+
+## `/model`
+
+Lists the active LLM2 models or switches this chat to a model by ID. This is the
+text fallback for WhatsApp clients that cannot render the model picker.
+
+```
+/model
+/model gpt-4o
+```
+
+---
+
 ## `/modelcfg`
 
-Configures the **default model** for LLM2 (via an interactive menu).
+Manages available LLM2 models and the default model. The owner can list, add,
+edit, remove, and select model configurations, including temperature, token
+limits, and vision support.
 
 ```
 /modelcfg
@@ -420,21 +506,24 @@ Schedules the bot to **run a prompt later**. Time format `nnHnnM` (e.g. `2H30M` 
 
 ## `/setting`
 
-Shows and edits **per-chat settings** through an interactive menu: response mode (auto/prefix), model, permission level, idle trigger, and activation status.
+Shows and edits **per-chat settings** through an interactive menu: response mode
+(`auto`, `prefix`, or `hybrid`), model, prompt, moderation permission, idle
+trigger, activation status, and interactive-message compatibility.
 
 ```
 /setting
 ```
 
-:::info
-**Response mode** (auto/prefix) is now configured here, replacing the old `/mode` command.
+:::tip
+If a menu or button does not render on your WhatsApp client, use `/mode`,
+`/model`, or `/compat safe`. Safe compatibility mode uses plain text only.
 :::
 
 ---
 
 ## `/sticker`
 
-Creates a **WhatsApp sticker** from an image or video. Send an image with the caption `/sticker`, or reply to an image/video with `/sticker`. Add meme text with the format `/sticker bottom_text#top_text`.
+Creates a **WhatsApp sticker** from an image or video. Send an image with the caption `/sticker`, or reply to an image/video with `/sticker`. Add meme text with the format `/sticker top_text#bottom_text`.
 
 ```
 /sticker so me#when monday arrives
@@ -483,4 +572,20 @@ Available triggers:
 
 :::note
 Only applies in **prefix/hybrid** mode. In auto mode, triggers are ignored.
+:::
+
+---
+
+## `/update`
+
+Checks for a safe fast-forward update, applies it, and restarts the supervised
+bot processes. Updates that change `compatibilityVersion` are blocked until the
+owner reviews and confirms them in **Control Panel → System → Runtime & updates**.
+
+```
+/update
+```
+
+:::warning
+This hidden maintenance command can only be used by the **bot owner**.
 :::

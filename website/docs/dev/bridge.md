@@ -20,12 +20,17 @@ Internal documentation for the Python LLM Bridge (`python/bridge/`). The bridge 
 
 ### WaSocket Client
 
-The bridge runs as a **WaSocket client** that dials the Node gateway at `NODE_URL` (the gateway is the WebSocket server). `main.py` loads the accounts list (`accounts.py`) and runs one `AgentSession` (`session.py`) per account (`folder_path`). Each `AgentSession` is a composition root that wires the collaborators in the `agent/` package (e.g. `batch_processor.py`, `llm1_router.py`, `llm2_responder.py`, `subagent_coordinator.py`, `mute_gate.py`, `reply_dedup.py`, `idle_trigger.py`, `ack_hydrator.py`, `event_router.py`). When receiving an `incoming_message`, the bridge:
+The bridge runs as a **WaSocket client** that dials the Node gateway at `NODE_URL` (the gateway is the WebSocket server). `main.py` starts `AccountSupervisor`, which watches the managed account catalog and hot-adds or removes one `AgentSession` (`session.py`) per `folder_path`. Each `AgentSession` is a composition root that wires the collaborators in the `agent/` package (including batching, LLM routing/responding, Sub-Agent coordination, mute/dedup/idle gates, ack hydration, event routing, scheduled tasks, and direct invocation). When receiving an `incoming_message`, the bridge:
 
 1. Accumulates messages in a **burst window**.
 2. After debounce, processes the batch as a whole.
 3. Runs the LLM1 → LLM2 pipeline.
 4. Sends commands back to the gateway.
+
+Transport readiness and WhatsApp readiness are separate. `hello_ack.waStatus`
+and subsequent `whatsapp_status` events are authoritative; cold Sub-Agent
+recovery, scheduled tasks, and direct-invoke delivery remain parked until the
+tenant's WhatsApp status is `open`.
 
 ### Message Batching
 
@@ -165,6 +170,24 @@ Callers can provide a `result_validator` function. If validation fails, the resu
 Slash commands (e.g. `/prompt`, `/reset`, `/permission`, `/broadcast`) are **no longer handled by the bridge**. All command dispatch now lives on the Node gateway side (`src/wa/command/` for the `CommandRegistry`/`CommandContext` infrastructure and `src/wa/commands/` for the per-command handlers). There is no longer a `commands.py` module on the Python side.
 
 The bridge only receives state synchronization after the gateway executes a command, via control events (`clear_history`, `invalidate_chat_settings`, `set_llm2_model`, `set_subagent_enabled`, etc.). See [WebSocket Protocol](./protocol) for details.
+
+## Scheduled Tasks and Direct Invoke
+
+`ChatReinvoker` is the shared engine for proactive turns: it injects a system
+turn, invokes LLM2 without LLM1 gating, and dispatches the reply. The persisted
+`ScheduledTaskRunner` uses it for one-shot `/schedule-task` events.
+
+`DirectInvokeServer` exposes an authenticated `POST /post` endpoint for trusted
+local automation. It is disabled unless `DIRECT_INVOKE_API_KEY` is configured,
+binds to `127.0.0.1` by default, limits prompt length, and uses
+`DIRECT_INVOKE_PORT + account.slot` in multi-account mode.
+
+## Configuration Reloading
+
+The bridge watches the active `.env` file. Provider endpoints, keys, models,
+temperatures, and other call-time LLM settings apply to the next request.
+Transport addresses, bound HTTP ports, tenant paths, and import-time constants
+still require a process restart.
 
 ## Database (`db/`)
 

@@ -4,16 +4,19 @@
 
 | Category | Commands |
 |----------|----------|
-| **Configuration** | `/trigger`, `/prompt`, `/modelcfg`, `/setting`, `/subagent`, `/idle`, `/bot-conf` |
+| **Configuration** | `/trigger`, `/prompt`, `/mode`, `/model`, `/modelcfg`, `/compat`, `/setting`, `/subagent`, `/idle`, `/bot-conf` |
 | **Moderation** | `/permission` |
 | **Information** | `/help`, `/info`, `/debug`, `/dashboard`, `/monitor`, `/owner-contact` |
-| **Management** | `/reset`, `/broadcast`, `/join`, `/revoke`, `/announcement`, `/generate`, `/activate` |
+| **Management** | `/reset`, `/broadcast`, `/join`, `/revoke`, `/announcement`, `/generate`, `/activate`, `/update` |
 | **Stickers** | `/sticker`, `/add-sticker`, `/remove-sticker` |
-| **Utility** | `/catch`, `/dump` |
+| **Utility** | `/catch`, `/download`, `/dump`, `/lid`, `/memory`, `/schedule-task` |
 
 ## Canonical command list
 
-The following commands are registered as per-command handler modules under `src/wa/commands/*.ts` (parsed by `src/wa/commands/parseCommand.ts` via the `COMMAND_ALIASES` map) and dispatched by the `CommandRegistry` in `src/wa/command/CommandRegistry.ts`:
+The following commands are registered as per-command handler modules under
+`src/wa/commands/*.ts`. The `CommandRegistry` auto-discovers each descriptor and
+builds one token map from its `commands` array, so canonical names and aliases
+cannot drift into a separate alias table.
 
 | Command | Alias(es) | Description |
 |---------|-----------|-------------|
@@ -27,14 +30,21 @@ The following commands are registered as per-command handler modules under `src/
 | `permission` | `permissions` | Set moderation permission level (0–3) |
 | `trigger` | `triggers` | Set prefix triggers for prefix/hybrid mode |
 | `dashboard` | `dashboards` | Display usage statistics |
+| `download` | `dl` | Download media or a direct HTTP(S) file |
+| `dump` | — | Export the full LLM context as text |
 | `broadcast` | `broadcasts` | Send broadcast to all groups (owner only) |
 | `info` | `infos` | Show user/chat/group info |
 | `debug` | `debugs` | Send test interactive payload |
 | `join` | `joins` | Join a group via invite link |
+| `lid` | — | Resolve the LID for a number |
+| `memory` | `memo` | Manage durable per-chat memory |
 | `sticker` | `stickers` | Create sticker from image/video |
 | `add-sticker` | `addsticker`, `addstickers`, `add-stickers` | Add sticker to catalog |
 | `remove-sticker` | `removesticker`, `remove-stickers`, `removestickers` | Remove sticker from catalog |
 | `modelcfg` | `modelcfgs` | Configure model list (owner only) |
+| `model` | — | List or switch the per-chat LLM2 model |
+| `mode` | — | Set `auto`, `prefix`, or `hybrid` response mode |
+| `compat` | `compatibility` | Set interactive-message compatibility |
 | `setting` | `settings` | Interactive settings menu |
 | `catch` | `catches` | Catch/forward quoted message |
 | `owner-contact` | — | Show bot owner contact info |
@@ -42,8 +52,10 @@ The following commands are registered as per-command handler modules under `src/
 | `idle` | — | Configure idle trigger range |
 | `announcement` | `announcements` | Toggle announcement broadcast opt-in per group |
 | `bot-conf` | `botconf` | Owner-only bot-wide config (activation-msg, prompt-override, require-activation) |
+| `schedule-task` | — | Persist a one-shot prompt for later execution |
+| `update` | — | Safe fast-forward update and restart (owner only, hidden) |
 
-Total: 25 canonical commands.
+Total: 34 canonical commands.
 
 ## Singular/plural aliases
 
@@ -61,7 +73,9 @@ has at least a singular/plural pair. Examples:
 
 ### Activation gate
 
-When `REQUIRE_ACTIVATION=true` (env var), only two commands are exempt:
+When `REQUIRE_ACTIVATION=true`, `/info` and `/activate` are exempt in groups;
+private chats allow only `/activate` before activation to avoid sending an
+unsolicited reply from an unactivated account.
 
 | Command | Reason |
 |---------|--------|
@@ -71,7 +85,7 @@ When `REQUIRE_ACTIVATION=true` (env var), only two commands are exempt:
 All other commands are blocked for unactivated chats. The gate is enforced at
 two levels:
 1. **Node.js** (`src/wa/command/CommandRegistry.ts`, `dispatchCommand`): checks `ACTIVATION_EXEMPT_COMMANDS` set before dispatch.
-2. **Python bridge** (`main.py`): drops `incoming_message` payloads from unactivated
+2. **Python bridge** (`agent/batch_processor.py`): drops `incoming_message` payloads from unactivated
    chats before they enter the debounce/batch pipeline.
 
 Expired activations show an expiry notification message once.
@@ -83,15 +97,18 @@ The following commands are restricted to JIDs listed in `BOT_OWNER_JIDS`:
 | Command | Reason |
 |---------|--------|
 | `/broadcast` | Sends a message to every group — destructive if abused |
+| `/bot-conf` | Changes tenant-wide bot configuration |
 | `/generate` | Generates activation codes for chat activation |
+| `/join` | Makes the bot account join a WhatsApp group |
 | `/revoke` | Revokes activation code(s) by ID, a comma list (`1,2,3`), or `unused` |
 | `/monitor` | Shows sensitive dashboard data |
 | `/modelcfg` | Manages the global model registry |
 | `/debug` | Sends test interactive payloads; exposes internal state |
+| `/subagent` | Enables or disables external task execution |
+| `/update` | Updates code and restarts the supervised runtime |
 
-The owner check is performed in each handler's guard clause (dispatched via
-`src/wa/command/CommandRegistry.ts`) before the handler runs. Non-owner senders receive an
-Indonesian-language rejection message.
+Permissions are declared on each handler and enforced centrally by the shared
+permission DSL before the handler runs.
 
 ### Admin-only commands in groups
 
@@ -104,6 +121,10 @@ In group chats, the following commands require sender to be a group admin (or bo
 | `/reset` | ✅ |
 | `/permission` | ✅ |
 | `/setting` | ✅ |
+| `/mode` | ✅ |
+| `/model` | ✅ |
+| `/compat` | ✅ |
+| `/memory` | ✅ |
 | `/subagent` | ✅ (owner only) |
 | `/idle` | ✅ |
 | `/announcement` | ✅ |
@@ -116,7 +137,8 @@ from Baileys group participant role metadata.
 
 ### General access rules
 
-- **Private chat**: Most commands are allowed freely.
+- **Private chat**: Most non-owner commands are allowed when
+  `PRIVATE_CHAT_ENABLED=true` and the activation gate passes.
 - **Group chat**: Configuration commands require admin or owner role (see table above).
 - **Owner-only commands** (table above) are restricted to bot owner regardless of
   chat type.
@@ -256,15 +278,22 @@ Only the bot owner can use the `global` variant.
 | `/debug` | Owner only | Node | Send test interactive payload |
 | `/catch` | Everyone | Node | Catch/forward quoted message |
 | `/owner-contact` | Everyone | Node | Show bot owner contact info |
-| `/join <link>` | Everyone | Node | Join group via invite link |
+| `/join <link>` | Owner only | Node | Join group via invite link |
 | `/dashboard` | Everyone | Node | Display usage statistics |
+| `/download <url>` | Everyone | Node | Download media or a direct HTTP(S) file |
 | `/dump` | Everyone | Python | Export full LLM context as .txt |
+| `/lid <number>` | Owner / own phone | Node | Resolve a WhatsApp LID |
+| `/schedule-task <nnHnnM> <prompt>` | Everyone | Node + Python | Persist and fire a one-shot task |
 | `/sticker [upper#lower]` | Everyone | Node + Python | Create sticker from image/video |
 | `/trigger <type>` | Admin/owner | Node | Set prefix triggers |
 | `/prompt [text\|clear]` | Admin/owner | Node | Set/view/clear per-chat prompt |
 | `/reset` | Admin/owner | Node | Clear chat history |
 | `/permission <0-3>` | Admin/owner | Node | Set moderation permission level |
 | `/setting` | Admin/owner | Node | Interactive settings menu |
+| `/mode <auto\|prefix\|hybrid>` | Admin/owner | Node | Set response mode without a menu |
+| `/model [id]` | Admin/owner | Node | List or switch the per-chat model |
+| `/compat <mode>` | Admin/owner | Node | Set interactive-message compatibility |
+| `/memory` | Admin/owner/private | Node + Python | Manage durable chat memory |
 | `/subagent <on\|off>` | Owner only | Node | Toggle sub-agent per chat |
 | `/idle <min-max>` | Admin/owner | Node | Configure idle trigger range |
 | `/announcement <on\|off>` | Admin/owner | Node | Toggle announcement broadcast opt-in per group |
@@ -276,3 +305,4 @@ Only the bot owner can use the `global` variant.
 | `/generate <type> <days>` | Owner only | Node | Generate activation code |
 | `/revoke` | Owner only | Node | Revoke activation code |
 | `/monitor` | Owner only | Node | Show monitor dashboard |
+| `/update` | Owner only | Node | Safe fast-forward update and restart |

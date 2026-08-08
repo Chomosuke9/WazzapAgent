@@ -394,8 +394,8 @@ export const compatSelectButton: ButtonHandler = {
   },
 };
 
-/** `mode_select:<mode>` → set the chat's response mode (replaces the removed
- * `/mode` command; the mode-setting section of `/setting` routes here). */
+/** `mode_select:<mode>` → set the chat's response mode. This mirrors the
+ * text-based `/mode` command for clients that support the interactive menu. */
 export const modeSelectButton: ButtonHandler = {
   prefixes: ["mode_select:"],
   permission: "owner or (isGroup and isAdmin)",

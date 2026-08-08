@@ -7,7 +7,8 @@ sidebar_position: 2
 ## Adding the Bot to a Group
 
 1. **Add the bot's number** to your WhatsApp group just like adding a regular member.
-2. The bot will automatically activate and be ready to use.
+2. If the owner enabled activation protection, activate the group with
+   `/activate <code>`. Otherwise the bot is ready immediately.
 3. **Optional but important for moderation:** Make the bot a **group admin** if you want it to delete messages or kick members.
 
 :::note
@@ -31,7 +32,7 @@ After the bot joins the group, follow these steps in order:
 
 ## How the Bot Responds in Groups
 
-The bot has two **response modes**, configured through the interactive `/setting` menu:
+The bot has three **response modes**, configured through `/setting` or `/mode`:
 
 ### `auto` mode
 - The bot **analyzes the context** of every message with AI
@@ -48,12 +49,19 @@ The bot has two **response modes**, configured through the interactive `/setting
 - **More token-efficient**, faster responses
 - Configure triggers with `/trigger`
 
-In **private chats**, the bot always responds to every message **regardless of mode**.
+### `hybrid` mode
+- Checks prefix triggers first
+- Falls back to LLM1 when no prefix trigger matches
+- Useful when you want predictable direct calls plus selective proactive replies
+
+In **private chats**, the bot responds to every accepted message regardless of
+mode. The owner can disable private-chat ingress entirely with
+`PRIVATE_CHAT_ENABLED=false`.
 
 :::tip
-For busy groups, use **prefix mode** so the bot isn't too noisy and saves tokens. Open `/setting` to choose the mode, then configure its triggers:
+For busy groups, use **prefix mode** so the bot isn't too noisy and saves tokens. Open `/setting` or use `/mode`, then configure its triggers:
 ```
-/setting                        # Choose the response mode (auto/prefix)
+/mode prefix                    # Or choose the mode from /setting
 /trigger reply on               # Respond when replied to
 /trigger tag on                 # Respond when tagged
 ```

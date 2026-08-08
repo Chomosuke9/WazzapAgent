@@ -90,9 +90,10 @@
     recorded for later `execute_subtask` resolution.
 
 ## C. Model switching flow
-1. User picks a model from the `/setting` interactive menu (the standalone
-   `/model` command was removed — it is fully superseded by `/setting`).
-2. **Node** (`wa/commands/setting.ts` model_select handler) writes
+1. User picks a model from the `/setting` interactive menu or uses
+   `/model <id>` when their WhatsApp client cannot render list menus.
+2. **Node** (`wa/commands/setting.ts` model-select handler or
+   `wa/commands/model.ts`) writes
    `chat_settings.llm2_model` to the tenant's `settings.db`.
 3. **Node → Python** (reliable, via the registry): `set_llm2_model
    { folderPath, chatId, modelId }` (+ `invalidate_llm2_model` as a cache

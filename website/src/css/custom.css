@@ -159,7 +159,18 @@
 
 .navbar {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
-  backdrop-filter: blur(12px);
+}
+
+/*
+ * `backdrop-filter` creates a containing block for fixed descendants. On
+ * mobile that traps Docusaurus' fixed navigation drawer inside the 60px-tall
+ * navbar, leaving its links clipped and untappable. Keep the glass effect on
+ * desktop only, where the drawer is not used.
+ */
+@media (min-width: 997px) {
+  .navbar {
+    backdrop-filter: blur(12px);
+  }
 }
 
 /* Ensure sidebar drawer is usable on mobile */
@@ -168,6 +179,7 @@
     /* Ensure sidebar drawer fully covers viewport */
     width: 100% !important;
     max-width: 100% !important;
+    min-height: 100dvh;
   }
 
   .navbar-sidebar__items {
@@ -191,6 +203,13 @@
     min-height: 44px;
     display: flex;
     align-items: center;
+  }
+
+  /* Home-page CTAs should be easy to tap without overflowing narrow screens. */
+  .hero .button {
+    width: min(100%, 18rem);
+    min-height: 48px;
+    justify-content: center;
   }
 }
 

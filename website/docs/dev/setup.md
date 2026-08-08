@@ -20,8 +20,8 @@ Guide for setting up the WazzapAgents development environment.
 ### 1. Clone Repository
 
 ```bash
-git clone https://github.com/Chomosuke9/WazzapAgents.git
-cd WazzapAgents
+git clone https://github.com/Chomosuke9/WazzapAgent.git
+cd WazzapAgent
 ```
 
 ### 2. Setup Environment Variables
@@ -43,6 +43,11 @@ NODE_URL=ws://localhost:3000
 
 # Optional — shared bearer token enforced by Node and sent by the Python client
 LLM_WS_TOKEN=
+
+# Local control plane (management APIs stay locked until this is non-empty)
+CONTROL_PANEL_HOST=127.0.0.1
+CONTROL_PANEL_PORT=8080
+CONTROL_PANEL_TOKEN=choose-a-private-token
 
 # Optional — API keys for LLM providers
 LLM1_API_KEY=sk-...
@@ -93,17 +98,26 @@ On first run, the gateway will display a QR code in the terminal. Scan it with W
 |----------|---------|-------------|
 | `WS_LISTEN_PORT` | `3000` | WS server listen port (Node is the server) |
 | `WS_BIND_HOST` | `127.0.0.1` | Host the WS server binds to (`0.0.0.0` for cross-host) |
+| `WA_PAIRING_NUMBER` | *(empty)* | Digits-only number for pairing without QR |
+| `WA_PAIRING_RETRY_COOLDOWN_MS` | `900000` | Cooldown after rejected initial pairing |
 | `INSTANCE_ID` | `default` | Gateway instance identifier |
 | `LLM_WS_TOKEN` | *(empty)* | Bearer token for WS authentication |
 | `DATA_DIR` | `./data` | Runtime data directory |
 | `MEDIA_DIR` | `./data/media` | Media storage directory |
 | `LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
+| `LOG_COLOR` | `auto` | Shared Node/Python color mode |
+| `BAILEYS_LOG_LEVEL` | `warn` | Baileys internal log level |
 | `WS_RECONNECT_MS` | `5000` | WS reconnect interval in ms |
 | `GROUP_METADATA_TIMEOUT_MS` | `8000` | Group metadata fetch timeout |
 | `DOWNLOAD_TIMEOUT_MS` | `60000` | Media download timeout |
 | `SEND_TIMEOUT_MS` | `60000` | Message send timeout |
 | `UPSERT_CONCURRENCY` | `2` | Message processing concurrency |
 | `BOT_OWNER_JIDS` | *(empty)* | Owner JIDs, comma-separated |
+| `PRIVATE_CHAT_ENABLED` | `true` | Allow private-chat commands and LLM ingress |
+| `CONTROL_PANEL_ENABLED` | `true` | Serve the management panel |
+| `CONTROL_PANEL_HOST` | `127.0.0.1` | Control panel bind host |
+| `CONTROL_PANEL_PORT` | `8080` | Control panel HTTP port |
+| `CONTROL_PANEL_TOKEN` | *(empty)* | Token required by management APIs |
 
 ### Bridge (Python)
 
@@ -115,6 +129,9 @@ On first run, the gateway will display a QR code in the terminal. Scan it with W
 | `INCOMING_BURST_MAX_SECONDS` | `20` | Maximum burst window duration |
 | `ASSISTANT_NAME` | `LLM` | Bot display name in context |
 | `CONTEXT_TIME_UTC_OFFSET_HOURS` | *(auto)* | UTC offset for timestamps |
+| `DIRECT_INVOKE_API_KEY` | *(empty / disabled)* | Enables authenticated proactive `/post` calls |
+| `DIRECT_INVOKE_HOST` | `127.0.0.1` | Direct-invoke bind host |
+| `DIRECT_INVOKE_PORT` | `8090` | Base port; tenant runtime uses `base + slot` |
 
 ### LLM1 (Gating)
 
@@ -153,7 +170,8 @@ On first run, the gateway will display a QR code in the terminal. Scan it with W
 | `BRIDGE_LOG_LEVEL` | `info` | Bridge log level |
 | `BRIDGE_LOG_PROMPT_FULL` | `0` | Log full LLM2 prompt |
 | `BRIDGE_LOG_EXTRAS_LIMIT` | `4000` | Extras character limit in logs |
-| `BRIDGE_LOG_CHAT_LABEL_WIDTH` | `24` | Chat label width in logs |
+| `BRIDGE_LOG_CHAT_LABEL_WIDTH` | `18` | Chat label width in logs |
+| `BRIDGE_LOG_QUIET_THIRD_PARTY` | `1` | Raise noisy dependency loggers to warning |
 | `BRIDGE_SLOW_BATCH_LOG_MS` | `2000` | Slow batch log threshold |
 
 ## Running Tests
@@ -194,7 +212,9 @@ WazzapAgents/
 │   ├── server/                 # WebSocket server
 │   │   ├── wsServer.ts         # WS server: accept clients on WS_LISTEN_PORT
 │   │   └── accountRegistry.ts  # Bind each client to its folder_path account
+│   ├── controlPanel/           # Authenticated management API + static dashboard
 │   ├── account/                # Per-tenant aggregate (one AccountEntry per folder_path)
+│   │   ├── accountCatalog.ts   # Managed catalog, stable slots, tenant credentials
 │   │   ├── baileysFactory.ts   # Create/resume Baileys socket; owns Database + repos
 │   │   ├── accountContext.ts   # Per-account caches / sendQueue / forwarder
 │   │   ├── actionDispatcher.ts # Dispatch Python→Node actions
@@ -228,8 +248,9 @@ WazzapAgents/
 │   │   ├── protocol.py         # Frame dataclasses
 │   │   └── events.py           # WhatsAppMessage model
 │   ├── bridge/                  # Python LLM Bridge
-│   │   ├── main.py             # Boot: load accounts, one AgentSession per account
-│   │   ├── accounts.py         # Multi-account config loader
+│   │   ├── main.py             # Boot: start the account supervisor
+│   │   ├── account_supervisor.py # Hot-add/remove AgentSessions
+│   │   ├── accounts.py         # Managed/JSON/env multi-account config loader
 │   │   ├── config.py           # Configuration
 │   │   ├── session.py          # AgentSession composition root
 │   │   ├── history.py          # History management

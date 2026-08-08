@@ -33,7 +33,8 @@ Guide for contributing to the WazzapAgents project.
 
 ### General
 
-- Paths in payloads stay workspace-relative (`data/media/...`).
+- Paths are tenant-scoped and must be canonicalized/allowlisted before runtime
+  state is created. Never let one account resolve another tenant's files.
 - Use `senderRef` for user references, **never** raw JIDs in LLM-facing code.
 - `contextMsgId` is a 6-digit per-chat counter.
 
@@ -85,15 +86,18 @@ pnpm test
 
 ### Never Commit
 
-- `data/auth/` — WhatsApp session
+- `<folder_path>/auth/` (for example `data/auth/` or `tenants/acme/auth/`) — WhatsApp sessions
+- `accounts.json` — managed account catalog with per-tenant WebSocket credentials
 - `.env` — Environment variables with secrets
 - API keys in any form
 
 ### Security Rules
 
-- `LLM_WS_TOKEN`, LLM API keys, and Baileys auth are **secrets**.
+- `LLM_WS_TOKEN`, per-tenant `ws_token`, `CONTROL_PANEL_TOKEN`,
+  `DIRECT_INVOKE_API_KEY`, Sub-Agent tokens, LLM API keys, and Baileys auth are
+  **secrets**.
 - Respect media size limits to avoid OOM.
-- Moderation actions (`DELETE`/`KICK`) must go through permission level gating (set via `/permission`).
+- Moderation actions (`DELETE`/`MUTE`/`KICK`) must go through permission level gating (set via `/permission`).
 - Real JIDs must never be exposed to the LLM.
 
 ## Documentation

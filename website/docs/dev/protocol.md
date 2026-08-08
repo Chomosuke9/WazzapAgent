@@ -81,7 +81,10 @@ Sent whenever a message arrives on WhatsApp.
         "mime": "image/jpeg",
         "fileName": "wamid_image.jpg",
         "size": 12345,
-        "path": "data/media/wamid_image.jpg",
+        "path": null,
+        "pending": true,
+        "originalFileName": null,
+        "jpegThumbnail": null,
         "isAnimated": false
       }
     ],
@@ -121,6 +124,8 @@ Sent whenever a message arrives on WhatsApp.
 - Bot messages are sent as `contextOnly: true` and `triggerLlm1: false`.
 - Gateway may emit synthetic events with `messageType: "actionLog"` after successful moderation actions.
 - `mentionedParticipants` resolves JIDs into `{ jid, senderRef, name }`.
+- Inbound media is metadata-only. The bridge requests bytes lazily with
+  `download_media` when a consumer actually needs them.
 ### `action_ack`
 
 Sent as a response whenever an action from the bridge succeeds or fails.

@@ -107,7 +107,7 @@ const config: Config = {
         {
           title: "Guide",
           items: [
-            { label: "Get Started", to: "/" },
+            { label: "Get Started", to: "/installation/getting-started" },
             { label: "All Commands", to: "/usage/commands" },
             { label: "Prompt Examples", to: "/usage/prompt-examples" },
           ],

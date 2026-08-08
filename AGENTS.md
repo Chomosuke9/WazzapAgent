@@ -147,17 +147,23 @@ src/                          Node.js gateway runtime (WS SERVER, TypeScript)
       parseCommand.ts         Raw command text → {command, args} parsing
       activate.ts             /activate <code> — Activate chat with activation code
       addsticker.ts           /addsticker — Add sticker to catalog (static/Lottie)
-      announcement.ts         /announcement — Send group announcement (@all)
+      announcement.ts         /announcement <on|off> — Toggle broadcast opt-in for a group
       broadcast.ts            /broadcast <text> — Broadcast to all groups (owner only)
       catch.ts                /catch — Catch a message for later retrieval
+      compat.ts               /compat <auto|full|semi|safe> — Interactive-message compatibility
       dashboard.ts            /dashboard — Show chat statistics
       debug.ts                /debug — Show debug info
-      generate.ts             /generate <prompt> — Generate image (owner only)
+      download.ts             /download <url> — Download media/direct HTTP files
+      dump.ts                 /dump — Export the full LLM context as text
+      generate.ts             /generate <type> <days> — Generate activation code (owner only)
       help.ts                 /help — Show command list
       idle.ts                 /idle <min-max> — Configure idle trigger range
       info.ts                 /info — Show bot info
-      join.ts                 /join <link> — Join group via invite link
+      join.ts                 /join <link> — Join group via invite link (owner only)
+      lid.ts                  /lid <number> — Resolve a WhatsApp LID (owner/own phone)
       memory.ts               /memory — Long-term memory add/delete/list (owner /memory global); mentions kept stable via stored LID
+      mode.ts                 /mode <auto|prefix|hybrid> — Text response-mode control
+      model.ts                /model [id] — List/switch the per-chat LLM2 model
       modelcfg.ts             /modelcfg — Configure default model config
       botConfig.ts (../)      Owner bot-wide config helpers (activation msg, require-activation)
       bot-conf.ts             /bot-conf — Owner-only bot-wide config (activation-msg, prompt-override, require-activation)
@@ -169,10 +175,12 @@ src/                          Node.js gateway runtime (WS SERVER, TypeScript)
       removesticker.ts        /remove-sticker <name> — Remove sticker from catalog
       reset.ts                /reset — Clear chat memory (/reset global = all chats)
       revoke.ts               /revoke — Revoke activation code(s) from /generate: single id, list (1,2,3), or 'unused' (owner only)
+      scheduleTask.ts         /schedule-task <nnHnnM> <prompt> — Persist a one-shot task
       setting.ts              /setting — Show/edit per-chat settings
       sticker.ts              /sticker [upper#lower] — Create meme sticker (ffmpeg/sharp)
       subagent.ts             /subagent <on|off> — Toggle sub-agent per chat
       trigger.ts              /trigger <type> — Set prefix triggers (tag, tagall, reply, name, join)
+      update.ts               /update — Safe fast-forward update + restart (owner only, hidden)
     interactive/              Interactive message modules (NativeFlow)
       index.ts                Barrel re-export + sendCopyCode
       sendInteractive.ts      Quick reply, CTA URL, copy, call, combined buttons, list, native flow, rich message (sendRichMessage)

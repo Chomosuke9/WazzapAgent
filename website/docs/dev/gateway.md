@@ -9,7 +9,7 @@ Internal documentation for the Node.js Gateway (`src/`, TypeScript). The gateway
 ## Tech Stack
 
 - **Runtime:** Node.js 18+ with ESM (`"type": "module"`)
-- **WhatsApp Library:** Baileys v7 (`baileys@7.0.0-rc12`)
+- **WhatsApp Library:** Baileys v7 (`baileys@7.0.0-rc14`)
 - **WebSocket:** `ws` library
 - **Logging:** Pino (structured JSON logging)
 - **File System:** `fs-extra`
@@ -19,9 +19,10 @@ Internal documentation for the Node.js Gateway (`src/`, TypeScript). The gateway
 `index.ts` is the main composition root:
 
 1. Reads configuration and binds the WebSocket **server** on `WS_BIND_HOST:WS_LISTEN_PORT` (default `127.0.0.1:3000`).
-2. For each tenant `folder_path`, creates/resumes a per-account Baileys socket.
+2. Loads the account catalog and creates/resumes a per-account Baileys socket for each tenant `folder_path`.
 3. Accepts connections from Python `WaSocket` clients that dial in at `NODE_URL`, binding each to its account via the registry after the `hello`/`hello_ack` handshake.
 4. Routes **actions** from the bridge (Python→Node) to the appropriate WhatsApp functions, per account via `src/account/actionDispatcher.ts`.
+5. Serves the authenticated control panel and supervises hot account add/remove operations.
 
 ```js
 // Action dispatch (Python → Node), per account via src/account/actionDispatcher.ts
@@ -34,6 +35,7 @@ Internal documentation for the Node.js Gateway (`src/`, TypeScript). The gateway
 'run_command'           → runCommand(payload)
 'send_quiz' / 'send_copy_code' / 'relay_lottie_sticker'
 'send_buttons' / 'send_carousel'
+'download_media'        → lazily fetch cached inbound media bytes
 ```
 
 Each action returns an `action_ack` to the bridge (Node→Python). For `send_message`, a legacy `send_ack` is also emitted. Every Node→Python frame carries `folderPath` for tenant routing.
@@ -42,7 +44,9 @@ Each action returns an `action_ack` to the bridge (Node→Python). For `send_mes
 
 ### Connection
 
-Uses `makeWASocket` from Baileys with auth state stored in `data/auth/`. On first run, displays a QR code in the terminal.
+Uses `makeWASocket` from Baileys with auth state stored in
+`<folder_path>/auth/`. First pairing can use `WA_PAIRING_NUMBER` for a native
+code, a code requested from the control panel, or a QR code.
 
 ### Event Handling
 
@@ -85,7 +89,7 @@ The parser extracts structured information from raw Baileys messages:
 | `quoted` | `contextInfo.quotedMessage` — sender, text, type, location |
 | `mentionedJids` | `contextInfo.mentionedJid` |
 | `location` | `locationMessage`, `liveLocationMessage` |
-| `attachments` | Downloaded media results (image, video, audio, document, sticker) |
+| `attachments` | Lazy media metadata (image, video, audio, document, sticker) |
 
 ### Text Extraction Priority
 
@@ -121,10 +125,11 @@ The parser tries text sources in priority order:
 
 ### Download Flow
 
-1. Receive media stream from Baileys.
-2. Validate MIME type.
-3. Save to `MEDIA_DIR` (`data/media/`).
-4. Return metadata (kind, mime, fileName, size, path).
+1. Forward attachment metadata with `path: null` and `pending: true`; do not download bytes during normal ingress.
+2. Keep the raw message proto in the bounded per-account cache.
+3. When the bridge needs bytes for vision, stickers, or a Sub-Agent task, it sends `download_media`.
+4. Download through Baileys, validate the detected MIME type, and save under the tenant media directory.
+5. Return the resolved path in `action_ack.result`, or `not_found` if the source proto was evicted.
 
 ### Security
 
@@ -135,9 +140,9 @@ The parser tries text sources in priority order:
 
 | Cache | Type | Max Size | TTL |
 |-------|------|----------|-----|
-| `messageCache` | `Map<messageId, rawMsg>` | 5000 | - |
-| `messageKeyIndex` | `Map<chatId::contextMsgId, entry>` | 10000 | - |
-| `messageIdToContextId` | `Map<chatId::messageId, contextMsgId>` | 20000 | - |
+| `messageCache` | `Map<messageId, rawMsg>` | 1000 | - |
+| `messageKeyIndex` | `Map<chatId::contextMsgId, entry>` | 12000 | - |
+| `messageIdToContextId` | `Map<chatId::messageId, contextMsgId>` | 24000 | - |
 | `contextCounterByChat` | `Map<chatId, counter>` | - | - |
 | `senderRefRegistryByChat` | `Map<chatId, registry>` | - | - |
 | Group metadata | Via `groupContext.ts` | - | 60 seconds |
@@ -155,11 +160,24 @@ Post-migration the topology is **reversed**: **Node is the WebSocket server**, n
 - Binds the `ws` server on `WS_BIND_HOST:WS_LISTEN_PORT` (default `127.0.0.1:3000`).
 - Accepts client connections and runs a per-connection heartbeat (`WS_HEARTBEAT_INTERVAL_MS`).
 - Supports an optional bearer token via `LLM_WS_TOKEN` (enforced by Node, sent by the Python client).
-- `src/server/accountRegistry.ts` binds each client to its `folder_path` after the `hello` handshake (Python→Node, `{folderPath, protocolVersion: "2.0"}`) / `hello_ack` (Node→Python, `{folderPath, waStatus}`).
+- `src/server/accountRegistry.ts` binds each client to its `folder_path` after the `hello` handshake (Python→Node, `{folderPath, protocolVersion: "2.0", authToken?}`) / `hello_ack` (Node→Python, `{folderPath, waStatus}`). Managed accounts must present their own generated credential in addition to any process-level bearer token.
 
 After the handshake: **actions** flow Python→Node; **events**, control events, and acks flow Node→Python. Every Node→Python frame carries `folderPath` for tenant routing.
 
 > Start order: start the **Node gateway first** (the server), then the Python bridge (clients dial in).
+
+## Control Panel (`src/controlPanel/`)
+
+The gateway also owns the control-plane HTTP server. Static assets and the
+setup-status probe can load without a token, but every management API is
+fail-closed until `CONTROL_PANEL_TOKEN` is configured. The panel operates on
+the live account registry and per-tenant repositories, persists a bounded audit
+log, masks secrets in `.env`, and marks settings that require restart.
+
+The managed `accounts.json` catalog assigns every tenant a stable runtime slot
+and unique WebSocket credential. Paths are canonicalized and allowlisted before
+runtime state is created. Removing an account stops its runtime but deliberately
+preserves tenant data.
 
 ## Code Conventions
 

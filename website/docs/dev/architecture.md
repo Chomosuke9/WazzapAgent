@@ -4,7 +4,7 @@ sidebar_position: 1
 
 # Architecture
 
-> For full developer context, see [AGENTS.md](https://github.com/Chomosuke9/WazzapAgents/blob/main/AGENTS.md) and [docs/llm-architecture/](https://github.com/Chomosuke9/WazzapAgents/tree/main/docs/llm-architecture).
+> For full developer context, see [AGENTS.md](https://github.com/Chomosuke9/WazzapAgent/blob/main/AGENTS.md) and [docs/llm-architecture/](https://github.com/Chomosuke9/WazzapAgent/tree/main/docs/llm-architecture).
 
 WazzapAgents consists of two runtime components that communicate over WebSocket:
 
@@ -24,6 +24,7 @@ The gateway is responsible for:
 - **Action execution** — Receives commands from the bridge (send, react, delete, kick, mark read, typing) and executes them on WhatsApp.
 - **Interactive messages** — Sends interactive messages (buttons, carousels, lists) via `relayMessage` + `additionalNodes`.
 - **Caching** — Stores message cache, group metadata (60s TTL), participant names, and sender ref registry in memory.
+- **Control panel** — Serves an authenticated multi-tenant management API and static dashboard for accounts, pairing, configuration, updates, and audit history.
 
 ### 2. Python LLM Bridge (`python/bridge/`)
 
@@ -34,7 +35,9 @@ The bridge is responsible for:
 - **Two-stage LLM pipeline:**
   - **LLM1 (Gating)** — Decides whether the bot should respond. Lightweight and fast.
   - **LLM2 (Responder)** — Generates complete responses with conversation context and system prompt.
-- **Slash commands** — Handles `/prompt`, `/reset`, `/permission` directly.
+- **Account supervision** — Hot-adds and removes `AgentSession` instances as the managed account catalog changes.
+- **Scheduled/direct invocation** — Re-enters LLM2 through the shared `ChatReinvoker` for persisted timers and authenticated proactive HTTP calls.
+- **Slash-command synchronization** — Receives reliable invalidation/control events after the Node gateway executes commands.
 - **Storage** — Five separate per-tenant SQLite databases under `<folder_path>/db`: `settings.db`, `stats.db`, `moderation.db`, `subagent.db`, `stickers.db`.
 - **History management** — Stores conversation history per chat in memory with configurable limits.
 
@@ -102,7 +105,9 @@ src/
 ├── server/
 │   ├── wsServer.ts        ← WS server: accept clients on WS_LISTEN_PORT, heartbeat
 │   └── accountRegistry.ts ← Bind each client to its folder_path AccountEntry
+├── controlPanel/          ← Authenticated multi-tenant HTTP API + static UI
 ├── account/              ← Per-tenant aggregate (one AccountEntry per folder_path)
+│   ├── accountCatalog.ts    ← Managed catalog, stable slots, per-account credentials
 │   ├── baileysFactory.ts   ← Create/resume per-tenant Baileys socket; owns DB + repos
 │   ├── accountContext.ts   ← Per-account caches/identifiers/sendQueue/forwarder/repos
 │   ├── actionDispatcher.ts ← Dispatch Python→Node actions (per-action handlers)
@@ -139,14 +144,15 @@ python/
 │   ├── protocol.py / events.py     ← Frame dataclasses + WhatsAppMessage model
 │   └── correlation.py / errors.py  ← requestId correlation + error hierarchy
 └── bridge/
-    ├── main.py            ← Boot: load accounts, run one AgentSession per account
-    ├── accounts.py         ← Multi-account config loader
+    ├── main.py            ← Boot: start the hot-reload account supervisor
+    ├── account_supervisor.py ← Add/remove AgentSessions as the catalog changes
+    ├── accounts.py         ← Managed/JSON/env multi-account config loader
     ├── config.py           ← Single config source (env reads, constants)
     ├── session.py          ← AgentSession: composition root (wires agent/ collaborators)
     ├── history.py          ← WhatsAppMessage dataclass, history formatting
     ├── dashboard.py        ← Stats buffer + periodic flush
     ├── stickers.py / sticker_db.py ← Sticker catalog + per-tenant sticker DB
-    ├── agent/              ← Injectable per-account collaborators
+    ├── agent/              ← Injectable per-account collaborators (including scheduled/direct re-invocation)
     ├── db/                 ← Per-domain repositories over the per-tenant core
     ├── media/              ← Media + sticker resolution
     ├── llm/                ← LLM pipeline (llm1, llm2, schemas, prompt, client, ...)

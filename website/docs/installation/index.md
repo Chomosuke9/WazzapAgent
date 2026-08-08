@@ -14,13 +14,15 @@ This guide walks you through installing and running WazzapAgents on a server or 
 | pnpm | 9+ | `npm i -g pnpm` or `corepack enable pnpm` |
 | Python | 3.10+ | For the Python bridge |
 | SQLite | 3.x | Usually already installed by the OS |
+| ffmpeg | Current stable | Required for video stickers and media merging |
+| yt-dlp / SpotDL | Current stable | Optional; required by `/download` for supported sites / Spotify tracks |
 
 ## Installation
 
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/Chomosuke9/WazzapAgents.git && cd WazzapAgents
+git clone https://github.com/Chomosuke9/WazzapAgent.git && cd WazzapAgent
 ```
 
 ![Clone Repository](/img/2026-05-05-143910_hyprcap.png)
@@ -36,7 +38,7 @@ If it worked, you will see the project files:
 ### 2. Set Up Environment Variables
 
 ```bash
-cp .env.example .env
+cp .env.minimal.example .env
 ```
 
 Then edit the file with a text editor, for example:
@@ -50,32 +52,25 @@ nano .env
 Fill in at least:
 
 ```bash
-# The Node gateway is the WebSocket SERVER. Port it listens on:
-WS_LISTEN_PORT=3000
+# Pair without a QR code. Leave empty to use QR pairing.
+WA_PAIRING_NUMBER=6281234567890
 
-# URL the Python bridge (client) dials to reach the gateway.
-# Must match WS_LISTEN_PORT above.
-NODE_URL=ws://localhost:3000
-
-# Optional — bearer token for WS authentication (enforced by Node, sent by the Python client)
-LLM_WS_TOKEN=
-# Optional — WS server bind host (default 127.0.0.1; set 0.0.0.0 for cross-host)
-WS_BIND_HOST=127.0.0.1
-
-# Assistant display name and aliases
 ASSISTANT_NAME=LLM
+BOT_OWNER_JIDS=628123456789
 
-# OpenAI-compatible model endpoint and API key
+# LLM2 is the responder and is required for replies.
 LLM2_ENDPOINT=
+LLM2_MODEL=gpt-4o
 LLM2_API_KEY=
+
+# Local control panel login
+CONTROL_PANEL_HOST=127.0.0.1
+CONTROL_PANEL_PORT=8080
+CONTROL_PANEL_TOKEN=choose-a-private-token
 ```
 
-Then add your owner JID or LID:
-
-```bash
-# Examples: 628123456789@s.whatsapp.net, 193058310034@lid
-BOT_OWNER_JIDS=
-```
+Use `.env.example` as the complete reference for optional routing, transport,
+media, logging, Sub-Agent, and multi-account settings.
 
 :::note
 Each owner can use either a phone JID or an LID. If the phone JID does not work, use `/info` to get the LID.
@@ -125,7 +120,34 @@ pnpm dev
 PYTHONPATH=python python -m bridge.main
 ```
 
-On first run, the gateway prints a QR code in the terminal. Scan it with WhatsApp to pair the account.
+When `WA_PAIRING_NUMBER` is set, the gateway prints an 8-character native
+pairing code. In WhatsApp, open **Linked Devices → Link a Device → Link with
+phone number** and enter it. Leave the variable empty to pair with the QR code
+printed in the terminal. A rejected initial attempt is paused to avoid rapid
+rate-limit loops; restart when you intentionally want a fresh attempt.
+
+### Control Panel and Multiple Accounts
+
+The gateway serves the control panel at `http://127.0.0.1:8080` by default.
+Sign in with `CONTROL_PANEL_TOKEN`. Management APIs fail closed when the token
+is empty.
+
+The panel can pair accounts, reconnect or disconnect sessions, edit tenant
+models/settings/prompts/memories, manage activation codes and stickers, inspect
+the Sub-Agent outbox, and perform compatibility-aware updates and restarts.
+
+Use **Accounts → Add account** to add tenants without restarting the gateway or
+bridge. The managed catalog is stored in git-ignored `accounts.json`; each
+tenant receives a stable slot and private WebSocket credential and stores data
+under `tenants/<id>/{auth,db,media,stickers}`. Removing an account stops its
+runtime but preserves its tenant directory. Manual `FOLDER_PATHS` and
+`ACCOUNTS_JSON` deployments remain supported.
+
+:::warning
+The control panel binds to loopback by default. If you expose it through
+Tailscale/LAN, keep the token private and protect it with ACLs, a firewall, or
+an HTTPS reverse proxy.
+:::
 
 ### 5. Add a Model
 
@@ -324,16 +346,25 @@ Sub-Agent runs code inside a Docker sandbox. Although isolated, only run it on a
 | `NODE_URL` | `ws://localhost:3000` | URL the Python bridge dials to reach the gateway |
 | `WS_BIND_HOST` | `127.0.0.1` | WS server bind host (set `0.0.0.0` for cross-host) |
 | `LLM_WS_TOKEN` | *(empty)* | Bearer token for WS authentication |
+| `WA_PAIRING_NUMBER` | *(empty)* | Digits-only phone number for native pairing-code startup |
+| `WA_PAIRING_RETRY_COOLDOWN_MS` | `900000` | Cooldown after a rejected initial pairing attempt |
 | `INSTANCE_ID` | `default` | Gateway instance identifier |
 | `DATA_DIR` | `./data` | Runtime data directory |
 | `MEDIA_DIR` | `./data/media` | Media storage directory |
 | `LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
+| `LOG_COLOR` | `auto` | Shared Node/Python color mode (`auto`, `always`, `never`) |
+| `BAILEYS_LOG_LEVEL` | `warn` | Baileys internal log level |
 | `WS_RECONNECT_MS` | `5000` | WS reconnect interval in ms |
 | `GROUP_METADATA_TIMEOUT_MS` | `8000` | Group metadata fetch timeout |
 | `DOWNLOAD_TIMEOUT_MS` | `60000` | Media download timeout |
 | `SEND_TIMEOUT_MS` | `60000` | Send message timeout |
 | `UPSERT_CONCURRENCY` | `2` | Message processing concurrency |
 | `BOT_OWNER_JIDS` | *(empty)* | Owner JIDs/LIDs, comma-separated |
+| `PRIVATE_CHAT_ENABLED` | `true` | Allow private-chat commands and LLM ingress |
+| `CONTROL_PANEL_ENABLED` | `true` | Serve the local management panel |
+| `CONTROL_PANEL_HOST` | `127.0.0.1` | Control panel bind host |
+| `CONTROL_PANEL_PORT` | `8080` | Control panel HTTP port |
+| `CONTROL_PANEL_TOKEN` | *(empty)* | Required login token for management APIs |
 
 ### Bridge (Python)
 
@@ -344,6 +375,9 @@ Sub-Agent runs code inside a Docker sandbox. Although isolated, only run it on a
 | `INCOMING_BURST_MAX_SECONDS` | `20` | Maximum burst window duration |
 | `ASSISTANT_NAME` | `LLM` | Bot display name in context |
 | `CONTEXT_TIME_UTC_OFFSET_HOURS` | *(auto)* | UTC offset for timestamps |
+| `DIRECT_INVOKE_API_KEY` | *(empty / disabled)* | Enables authenticated proactive `/post` requests |
+| `DIRECT_INVOKE_HOST` | `127.0.0.1` | Direct-invoke bind host |
+| `DIRECT_INVOKE_PORT` | `8090` | Base port; each tenant uses `base + slot` |
 
 ### Sub-Agent (Bridge to WazzapSubAgents)
 

@@ -45,7 +45,7 @@ function HomepageHeader() {
             <div className={styles.buttons}>
               <Link
                 className="button button--secondary button--lg"
-                to="/"
+                to="/installation/getting-started"
               >
                 <Translate id="homepage.cta.getStarted">
                   Get Started
@@ -135,7 +135,7 @@ function HowItWorks() {
       desc: translate({
         id: "homepage.howItWorks.step3.desc",
         message:
-          "The bot is instantly active and ready to chat with all group members.",
+          "Activate the chat if access protection is enabled, then start chatting.",
       }),
     },
   ];

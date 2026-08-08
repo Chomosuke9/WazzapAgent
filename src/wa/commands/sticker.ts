@@ -492,7 +492,7 @@ export const stickerTextInternals = {
 
 export const stickerCommand: CommandHandler = {
   commands: ["sticker", "stickers"],
-  description: "Create a WhatsApp sticker from an image, video, or existing sticker. Send an image with the caption `/sticker` or reply to an image/video/sticker with `/sticker`. Add meme text with the format `/sticker bottom_text#top_text`. Example: `/sticker so me#when monday arrives`.",
+  description: "Create a WhatsApp sticker from an image, video, or existing sticker. Send an image with the caption `/sticker` or reply to an image/video/sticker with `/sticker`. Add meme text with the format `/sticker top_text#bottom_text`. Example: `/sticker so me#when monday arrives`.",
   permission: "public",
   run: (_sock, _message, ctx) => handleSticker(ctx),
 };
