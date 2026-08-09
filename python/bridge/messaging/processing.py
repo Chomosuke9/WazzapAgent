@@ -18,6 +18,11 @@ from ..config import (
   HISTORY_LIMIT,
   ASSISTANT_ECHO_MERGE_WINDOW_MS,
 )
+from .context_guard import (
+  BLOCKED_CONTEXT_INJECTION_TEXT,
+  ContextInjectionResult,
+  detect_context_injection,
+)
 
 logger = setup_logging()
 
@@ -354,6 +359,44 @@ def _is_system_payload(payload: dict) -> bool:
   return False
 
 
+def _context_injection_result(payload: dict) -> ContextInjectionResult | None:
+  """Inspect only untrusted human text, never bridge/bot-generated payloads."""
+  if not isinstance(payload, dict):
+    return None
+  if bool(payload.get("fromMe")) or _is_system_payload(payload):
+    return None
+  raw_text = payload.get("text")
+  if not isinstance(raw_text, str) or not raw_text:
+    return None
+  result = detect_context_injection(raw_text)
+  return result if result.detected else None
+
+
+def _blocked_sender(payload: dict) -> tuple[str, str]:
+  sender = _normalize_preview_text(" ".join(str(
+    payload.get("senderName") or payload.get("senderId") or payload.get("chatId") or "unknown"
+  ).split()), limit=128).lstrip("@") or "unknown"
+  sender_ref = _normalize_preview_text(
+    " ".join(str(payload.get("senderRef") or "unknown").split()),
+    limit=32,
+  ) or "unknown"
+  return sender, sender_ref
+
+
+def _quoted_text_for_context(quoted: dict) -> str | None:
+  """Prevent a blocked message from re-entering context through a quote."""
+  quoted_text = quoted.get("text")
+  if not isinstance(quoted_text, str) or not quoted_text:
+    return quoted_text
+  # Detect before mention resolution.  That resolver intentionally turns a
+  # normal WhatsApp @mention into ``@Name (senderRef)``; scoring the rendered
+  # form could mistake a legitimate mention followed by a colon for a forged
+  # sender line.
+  if not bool(quoted.get("fromMe")) and detect_context_injection(quoted_text).detected:
+    return BLOCKED_CONTEXT_INJECTION_TEXT
+  return _resolve_quoted_mentions(quoted, quoted_text)
+
+
 def _resolve_quoted_mentions(quoted: dict, quoted_text: str | None) -> str | None:
   """Resolve @phone_number mentions in quoted text using mentionedParticipants from the quoted payload.
 
@@ -415,6 +458,18 @@ def _infer_media(payload: dict) -> str | None:
 def _payload_to_message(payload: dict) -> WhatsAppMessage:
   quoted = _quoted_from_payload(payload)
   is_context_only = bool(payload.get("contextOnly"))
+  injection_result = _context_injection_result(payload)
+  if injection_result is not None:
+    sender, sender_ref = _blocked_sender(payload)
+    return WhatsAppMessage(
+      timestamp_ms=int(payload["timestampMs"]),
+      sender=sender,
+      context_msg_id=SYSTEM_CONTEXT_TOKEN,
+      sender_ref=sender_ref,
+      text=BLOCKED_CONTEXT_INJECTION_TEXT,
+      message_id=None if is_context_only else (str(payload.get("messageId")) if payload.get("messageId") else None),
+      role="blocked",
+    )
   normalized_context_msg_id = _normalize_context_msg_id(payload.get("contextMsgId"))
   context_msg_id = SYSTEM_CONTEXT_TOKEN if _is_system_payload(payload) else normalized_context_msg_id
   role = "assistant" if bool(payload.get("fromMe")) else "user"
@@ -447,7 +502,7 @@ def _payload_to_message(payload: dict) -> WhatsAppMessage:
       or (str(quoted.get("messageId")) if quoted.get("messageId") else None)
     ),
     quoted_sender=_q_sender,
-    quoted_text=_resolve_quoted_mentions(quoted, quoted.get("text")),
+    quoted_text=_quoted_text_for_context(quoted),
     quoted_media=_infer_quoted_media(quoted),
     quoted_sender_ref=_q_sender_ref,
     quoted_sender_is_admin=bool(quoted.get("senderIsAdmin")),
@@ -464,18 +519,31 @@ def _build_burst_current(payloads: list[dict]) -> WhatsAppMessage:
 
   lines: list[str] = []
   for item in payloads:
+    injection_result = _context_injection_result(item)
+    timestamp_ms = int(item.get("timestampMs") or last.get("timestampMs") or 0)
+    formatted_time = format_context_time(timestamp_ms)
+    if injection_result is not None:
+      sender, sender_ref = _blocked_sender(item)
+      lines.append(f"[#system] {formatted_time}")
+      lines.append(f"@{sender} ({sender_ref}): {BLOCKED_CONTEXT_INJECTION_TEXT}")
+      lines.append("")
+      continue
+
     context_msg_id = _display_context_msg_id_from_payload(item)
     if bool(item.get("fromMe")):
       sender = assistant_name()
       sender_ref = assistant_sender_ref()
       role_label = ""  # (You) already identifies bot messages
     else:
-      sender = item.get("senderName") or item.get("senderId") or item.get("chatId") or "unknown"
-      sender_ref = _clean_text(item.get("senderRef")) or "unknown"
+      sender = _normalize_preview_text(str(
+        item.get("senderName") or item.get("senderId") or item.get("chatId") or "unknown"
+      ), limit=128) or "unknown"
+      sender_ref = _normalize_preview_text(
+        _clean_text(item.get("senderRef")),
+        limit=32,
+      ) or "unknown"
       role_label = _format_role(bool(item.get("senderIsAdmin")), bool(item.get("senderIsSuperAdmin")))
     
-    timestamp_ms = int(item.get("timestampMs") or last.get("timestampMs") or 0)
-    formatted_time = format_context_time(timestamp_ms)
     text = _normalize_preview_text(_payload_text_with_mentions(item))
     media = _infer_media(item)
     
@@ -486,9 +554,9 @@ def _build_burst_current(payloads: list[dict]) -> WhatsAppMessage:
     quoted = _quoted_from_payload(item)
     if quoted:
       q_id = _normalize_context_msg_id(quoted.get("contextMsgId")) or quoted.get("messageId") or "000000"
-      q_sender = _quoted_sender(quoted) or "someone"
-      q_sender_ref = _quoted_sender_ref(quoted)
-      q_text = _normalize_preview_text(_resolve_quoted_mentions(quoted, quoted.get("text")))
+      q_sender = _normalize_preview_text(_quoted_sender(quoted), limit=128) or "someone"
+      q_sender_ref = _normalize_preview_text(_quoted_sender_ref(quoted), limit=32)
+      q_text = _normalize_preview_text(_quoted_text_for_context(quoted))
       q_media = _infer_quoted_media(quoted)
 
       # Build sender display: "Name (ref) (role)"

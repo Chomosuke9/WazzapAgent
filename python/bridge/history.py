@@ -142,7 +142,7 @@ class WhatsAppMessage:
   quoted_sender_is_admin: bool = False
   quoted_sender_is_super_admin: bool = False
   message_id: Optional[str] = None
-  role: str = "user"  # "user" | "assistant"
+  role: str = "user"  # "user" | "assistant" | "system" | "blocked"
 
 
 def _context_time_utc_offset_hours() -> float | None:
@@ -321,6 +321,18 @@ def format_history(messages: Iterable[WhatsAppMessage], history: list[WhatsAppMe
       # several separate chat lines.
       indented = message_text.replace("\n", "\n  ")
       lines.append(f"SYSTEM: {indented}")
+      lines.append("")
+      continue
+
+    # A blocked turn is untrusted user input that imitated the bridge's own
+    # transcript syntax.  Keep only attribution + a fixed marker.  It gets a
+    # system header (and no reply/media fields) so none of the original text is
+    # interpreted as part of the conversation context.
+    if msg.role == "blocked":
+      sender = (_compact(msg.sender) or "unknown").lstrip("@")
+      sender_ref = _compact(msg.sender_ref) or "unknown"
+      lines.append(f"[#system] {time}")
+      lines.append(f"@{sender} ({sender_ref}): {_message_text(msg)}")
       lines.append("")
       continue
 
