@@ -95,12 +95,6 @@ export async function handleGroup(ctx: CommandContext): Promise<void> {
         ctx.chatId,
         sub === "close" ? "announcement" : "not_announcement",
       );
-      await safeText(
-        ctx,
-        sub === "close"
-          ? "🔒 Group closed. Only admins can send messages."
-          : "🔓 Group opened. All members can send messages.",
-      );
       return;
     }
 
@@ -110,7 +104,6 @@ export async function handleGroup(ctx: CommandContext): Promise<void> {
         return;
       }
       await ctx.sock.groupUpdateDescription(ctx.chatId, restRaw);
-      await safeText(ctx, "✅ Group description updated.");
       return;
     }
 
@@ -126,7 +119,6 @@ export async function handleGroup(ctx: CommandContext): Promise<void> {
         type: 1,
         time: seconds,
       });
-      await safeText(ctx, `📌 Message pinned for ${restRaw} day(s).`);
       return;
     }
 
@@ -138,7 +130,6 @@ export async function handleGroup(ctx: CommandContext): Promise<void> {
         return;
       }
       await ctx.sock.sendMessage(ctx.chatId, { delete: target.key });
-      await safeText(ctx, "🗑️ Message deleted.");
       return;
     }
 
@@ -162,12 +153,6 @@ export async function handleGroup(ctx: CommandContext): Promise<void> {
           "/group kick failed",
         );
       }
-      await safeText(
-        ctx,
-        outcome?.ok
-          ? `✅ @${target[1]} was removed from the group.`
-          : `Failed to remove @${target[1]}. Please verify the target and try again. ❌`,
-      );
       return;
     }
 
@@ -210,7 +195,7 @@ export async function handleGroup(ctx: CommandContext): Promise<void> {
 }
 
 export const groupCommand: CommandHandler = {
-  commands: ["group"],
+  commands: ["group", "g"],
   description:
     "Manage the current group: close/open, pin/delete a replied message, change description, kick, or mute members.",
   permission: "group and (admin or from_me)",
