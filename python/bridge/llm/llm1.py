@@ -40,7 +40,6 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from pydantic import ValidationError
 
-from .. import config
 from ..history import WhatsAppMessage
 from ..log import setup_logging, trunc, dump_json, env_flag
 from ..media import build_visual_parts, llm1_media_enabled, redact_multimodal_content

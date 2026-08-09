@@ -68,6 +68,7 @@ export interface CarouselCard {
 }
 export interface SendCarouselPayload { requestId: string; chatId: string; cards: CarouselCard[]; text?: string; }
 export interface RunCommandPayload { requestId: string; chatId: string; command: string; contextMsgId?: string; }
+export interface GetChatContextPayload { requestId: string; chatId: string; forceRefresh?: boolean; }
 
 export type InboundActionFrame =
   | { type: "send_message"; payload: SendMessagePayload }
@@ -81,7 +82,8 @@ export type InboundActionFrame =
   | { type: "relay_lottie_sticker"; payload: RelayLottieStickerPayload }
   | { type: "send_buttons"; payload: SendButtonsPayload }
   | { type: "send_carousel"; payload: SendCarouselPayload }
-  | { type: "run_command"; payload: RunCommandPayload };
+  | { type: "run_command"; payload: RunCommandPayload }
+  | { type: "get_chat_context"; payload: GetChatContextPayload };
 
 export type InboundFrame = { type: "hello"; payload: HelloPayload } | InboundActionFrame;
 

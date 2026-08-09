@@ -95,6 +95,7 @@ from .agent.reply_dedup import ReplyDedup
 from .agent.mute_gate import MuteGate
 from .agent.llm1_router import Llm1Router
 from .agent.llm2_responder import Llm2Responder
+from .agent.llm_context_builder import LlmContextBuilder
 
 from .subagent import (
   SubTaskTracker,
@@ -224,6 +225,10 @@ class AgentSession:
       extract_actions_from_tool_calls=_extract_actions_from_tool_calls,
       extract_actions=_extract_actions,
     )
+    self._llm_context = LlmContextBuilder(
+      ws=self.sock,
+      get_prompt=db_get_prompt,
+    )
 
     # --- Step 10: orchestration collaborators (composition root) ---
     # Each owns one slice of the former ``_register_handlers`` closures and is
@@ -261,6 +266,8 @@ class AgentSession:
       get_prompt=db_get_prompt,
       record_stat=self._dashboard.record_stat,
       pending_send_request_chat=self.pending_send_request_chat,
+      pending_run_command_chat=self.pending_run_command_chat,
+      context_builder=self._llm_context,
     )
     # --- Feature 5: scheduled-task runner (one-shot timers + re-invoke) ---
     # Persists `/schedule-task` rows in this tenant's settings.db and re-invokes

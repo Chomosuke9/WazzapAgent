@@ -69,9 +69,13 @@
 9. **LLM1** (`bridge/agent/llm1_router.py`) decides respond / express-only /
    skip (bypassed in DMs; disabled when `LLM1_ENDPOINT` is empty). The idle
    trigger can override a skip.
-10. **LLM2** (`bridge/agent/llm2_responder.py`) assembles the system prompt,
-    compact chat information, optional memory/task blocks, and history, then
-    calls the model (LangChain `ChatOpenAI`), with
+10. **LLM2 context** (`bridge/agent/llm_context_builder.py`) resolves the
+    canonical chat metadata, prompt override, memory, and bot roles. Normal
+    inbound turns use their trusted payload; scheduled/daily/direct/sub-agent
+    cold invokes first request a live gateway snapshot. Then
+    `bridge/agent/llm2_responder.py` assembles the system prompt, compact chat
+    information, optional memory/task blocks, and history, then calls the model
+    (LangChain `ChatOpenAI`), with
     fallback provider on failure.
 11. **Action extraction** (`messaging/actions.py`): tool calls →
     `reply_message`, `react_to_message`, `send_quiz`, `send_sticker`,

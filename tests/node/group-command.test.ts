@@ -11,7 +11,13 @@ import assert from 'node:assert/strict';
 import { createAccountContext } from '../../src/account/accountContext.ts';
 import { rememberSenderRef } from '../../src/wa/domain/identifiers.ts';
 import { groupCommand, handleGroup } from '../../src/wa/commands/group.ts';
+import { dispatchRunCommand } from '../../src/wa/runCommand.ts';
+import { initCommandRegistry } from '../../src/wa/command/CommandRegistry.ts';
 import * as registry from '../../src/server/accountRegistry.ts';
+
+test.before(async () => {
+  await initCommandRegistry();
+});
 
 function makeCtx(args: string, folderPath: string) {
   const calls: Array<{ kind: string; value: any }> = [];
@@ -63,6 +69,28 @@ test('group close/open/description call the Baileys group APIs', async () => {
     await handleGroup(ctx);
     assert.ok(calls.some((c) => c.kind === kind && c.value === value));
   }
+});
+
+test('LLM run_command executes group commands with the bot own admin role', async () => {
+  const r = makeCtx('', '/tenants/group-run-command-bot');
+  r.ctx.sock.groupMetadata = async () => ({
+    id: r.ctx.chatId,
+    subject: 'Test group',
+    participants: [
+      { id: 'bot@s.whatsapp.net', admin: 'admin' },
+    ],
+  });
+  r.ctx.account.sock = r.ctx.sock;
+
+  const result = await dispatchRunCommand(r.ctx.account, {
+    chatId: r.ctx.chatId,
+    command: '/group open',
+  });
+
+  assert.equal(result.ok, true);
+  assert.ok(r.calls.some((call) => (
+    call.kind === 'setting' && call.value === 'not_announcement'
+  )));
 });
 
 test('group pin and delete operate on the replied message key', async () => {

@@ -90,6 +90,7 @@ import type {
   MarkReadPayload,
   SendPresencePayload,
   RunCommandPayload,
+  GetChatContextPayload,
   RelayLottieStickerPayload,
   SendQuizPayload,
   SendButtonsPayload,
@@ -520,6 +521,60 @@ const handleRunCommand: ActionHandler = async (entry, _payload, requestId, deps)
   });
 };
 
+const handleGetChatContext: ActionHandler = async (entry, _payload, requestId) => {
+  const payload = _payload as unknown as GetChatContextPayload;
+  const chatId = typeof payload.chatId === 'string' ? payload.chatId.trim() : '';
+  if (!chatId) {
+    emitActionAck(entry, {
+      requestId,
+      action: 'get_chat_context',
+      ok: false,
+      detail: 'missing chatId',
+      code: 'invalid_target',
+    });
+    return;
+  }
+
+  const isGroup = chatId.endsWith('@g.us');
+  if (!isGroup) {
+    emitActionAck(entry, {
+      requestId,
+      action: 'get_chat_context',
+      ok: true,
+      detail: 'resolved',
+      result: {
+        chatId,
+        chatName: chatId,
+        chatType: 'private',
+        isGroup: false,
+        groupDescription: null,
+        botIsAdmin: false,
+        botIsSuperAdmin: false,
+      },
+    });
+    return;
+  }
+
+  const group = await getGroupContext(entry.ctx, chatId, {
+    forceRefresh: Boolean(payload.forceRefresh),
+  });
+  emitActionAck(entry, {
+    requestId,
+    action: 'get_chat_context',
+    ok: true,
+    detail: 'resolved',
+    result: {
+      chatId,
+      chatName: group.name || chatId,
+      chatType: 'group',
+      isGroup: true,
+      groupDescription: group.description || null,
+      botIsAdmin: Boolean(group.botIsAdmin),
+      botIsSuperAdmin: Boolean(group.botIsSuperAdmin),
+    },
+  });
+};
+
 const handleRelayLottieSticker: ActionHandler = async (entry, _payload, requestId, deps) => {
   // Relay a Lottie/premium sticker using its stored JSON payload.
   // Python bridge sends this when resolve_sticker() returns a lottie_payload.
@@ -820,6 +875,7 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
   mark_read: handleMarkRead,
   send_presence: handleSendPresence,
   run_command: handleRunCommand,
+  get_chat_context: handleGetChatContext,
   relay_lottie_sticker: handleRelayLottieSticker,
   send_quiz: handleSendQuiz,
   send_buttons: handleSendButtons,

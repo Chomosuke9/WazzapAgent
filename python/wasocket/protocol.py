@@ -146,6 +146,13 @@ class RunCommandAction:
 
 
 @dataclass(frozen=True)
+class GetChatContextAction:
+    request_id: str
+    chat_id: str
+    force_refresh: bool = False
+
+
+@dataclass(frozen=True)
 class DownloadMediaAction:
     request_id: str
     chat_id: str
@@ -288,6 +295,7 @@ _FRAME_TABLE: tuple[tuple[type, str, bool], ...] = (
     (SendButtonsAction, "send_buttons", False),
     (SendCarouselAction, "send_carousel", False),
     (RunCommandAction, "run_command", False),
+    (GetChatContextAction, "get_chat_context", False),
     (DownloadMediaAction, "download_media", False),
     # acks / errors (Node -> Python)
     (AckResult, "action_ack", False),
@@ -430,6 +438,7 @@ __all__ = [
     "SendButtonsAction",
     "SendCarouselAction",
     "RunCommandAction",
+    "GetChatContextAction",
     # events
     "WhatsAppStatusEvent",
     "ClearHistoryEvent",

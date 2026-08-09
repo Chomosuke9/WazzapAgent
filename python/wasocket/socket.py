@@ -497,6 +497,28 @@ class WaSocket:
             frame, rid, caller_supplied=request_id is not None
         )
 
+    async def get_chat_context(
+        self,
+        chat_id: str,
+        *,
+        force_refresh: bool = False,
+        request_id: Optional[str] = None,
+    ) -> dict:
+        """Return the gateway's authoritative current chat/group snapshot.
+
+        Cold/background LLM invocations use this instead of fabricating group
+        metadata when no inbound WhatsApp payload is available.
+        """
+        rid = request_id if request_id is not None else make_request_id("chatctx")
+        frame = protocol.GetChatContextAction(
+            request_id=rid,
+            chat_id=chat_id,
+            force_refresh=force_refresh,
+        )
+        return await self._dispatch_action(
+            frame, rid, caller_supplied=request_id is not None
+        )
+
     async def download_media(
         self,
         chat_id: str,

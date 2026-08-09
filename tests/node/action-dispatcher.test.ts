@@ -196,6 +196,50 @@ test('an action rejected before pairing can reuse its requestId after WhatsApp o
   await rm(folder, { recursive: true, force: true });
 });
 
+test('get_chat_context returns a force-refreshed authoritative group snapshot', async () => {
+  const folder = path.join(TEST_ROOT, 'dispatch-chat-context');
+  const { entry, client } = makeAccount(folder);
+  let metadataCalls = 0;
+  entry.ctx.sock = entry.sock;
+  entry.sock!.groupMetadata = async () => {
+    metadataCalls += 1;
+    return {
+      id: '123@g.us',
+      subject: 'Operators',
+      desc: 'Production operations',
+      participants: [
+        { id: 'bot@s.whatsapp.net', admin: 'admin' },
+        { id: 'admin@s.whatsapp.net', admin: 'superadmin' },
+      ],
+    } as any;
+  };
+
+  await dispatchAction(entry, {
+    type: 'get_chat_context',
+    payload: {
+      requestId: 'chatctx-1',
+      chatId: '123@g.us',
+      forceRefresh: true,
+    },
+  });
+
+  assert.equal(metadataCalls, 1);
+  const ack = client.frames().find((frame) => frame.type === 'action_ack');
+  assert.equal(ack?.payload.ok, true);
+  assert.deepEqual(ack?.payload.result, {
+    chatId: '123@g.us',
+    chatName: 'Operators',
+    chatType: 'group',
+    isGroup: true,
+    groupDescription: 'Production operations',
+    botIsAdmin: true,
+    botIsSuperAdmin: false,
+  });
+
+  remove(folder);
+  await rm(folder, { recursive: true, force: true });
+});
+
 test('legacy sub-agent receipts for the pre-auth Baileys TypeError are retried', async () => {
   const folder = path.join(TEST_ROOT, 'dispatch-legacy-pre-auth');
   const requestId = 'subrec-legacy-pre-auth';

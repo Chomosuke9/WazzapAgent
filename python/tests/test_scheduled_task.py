@@ -226,6 +226,7 @@ class _DispatchingResponder:
 class _CapturingWs:
   def __init__(self):
     self.sent: list[dict] = []
+    self.commands: list[dict] = []
     self.presence: list = []
 
   async def send_presence(self, chat_id, presence):
@@ -235,6 +236,33 @@ class _CapturingWs:
     self.sent.append({
       "chat_id": chat_id, "text": text, "reply_to": reply_to, "request_id": request_id,
     })
+
+  async def get_chat_context(self, chat_id, *, force_refresh=False):
+    return {
+      "chatId": chat_id,
+      "chatName": "Admin group",
+      "chatType": "group",
+      "isGroup": True,
+      "groupDescription": "Live description",
+      "botIsAdmin": True,
+      "botIsSuperAdmin": False,
+    }
+
+  async def run_command(
+    self,
+    chat_id,
+    command,
+    *,
+    context_msg_id=None,
+    request_id=None,
+  ):
+    self.commands.append({
+      "chat_id": chat_id,
+      "command": command,
+      "context_msg_id": context_msg_id,
+      "request_id": request_id,
+    })
+    return {"command": command}
 
 
 def test_runner_fire_registers_send_and_hydrates_via_ack():
@@ -305,6 +333,86 @@ def test_runner_fire_registers_send_and_hydrates_via_ack():
       )
       assert prov[0].context_msg_id == "000777"
       assert rid not in pending
+    finally:
+      await _cancel_all(tasks)
+
+  asyncio.run(asyncio.wait_for(scenario(), timeout=10))
+
+
+class _CommandReply:
+  content = "Opening the group again."
+  tool_calls = [{
+    "name": "reply_message",
+    "args": {
+      "context_msg_id": None,
+      "text": "Opening the group again.",
+      "command": "/group open",
+      "command_context_msg_id": None,
+    },
+  }]
+
+
+class _CommandResponder:
+  def __init__(self):
+    self.calls = []
+
+  async def generate(self, history, current, **kwargs):
+    self.calls.append(kwargs)
+    return _CommandReply()
+
+
+def test_scheduled_group_command_uses_live_admin_context_and_bot_execution():
+  async def scenario():
+    repo = _FakeRepo()
+    ws = _CapturingWs()
+    responder = _CommandResponder()
+    per_chat = defaultdict(deque)
+    per_chat_lock = defaultdict(asyncio.Lock)
+    pending_commands: OrderedDict = OrderedDict()
+    tasks: set = set()
+
+    def track(task):
+      tasks.add(task)
+      task.add_done_callback(tasks.discard)
+
+    reinvoker = ChatReinvoker(
+      ws=ws,
+      responder=responder,
+      per_chat=per_chat,
+      per_chat_lock=per_chat_lock,
+      pending_run_command_chat=pending_commands,
+    )
+    runner = ScheduledTaskRunner(
+      repository=repo,
+      ws=ws,
+      responder=responder,
+      per_chat=per_chat,
+      per_chat_lock=per_chat_lock,
+      track_task=track,
+      get_prompt=lambda _chat: None,
+      reinvoker=reinvoker,
+    )
+    await runner.schedule({
+      "chatId": "group@g.us",
+      "taskId": "open-later",
+      "fireAtMs": int(time.time() * 1000) + 20,
+      "prompt": "Open the group",
+    })
+
+    fired = await _wait_until(lambda: "open-later" not in repo.rows)
+    try:
+      assert fired
+      assert responder.calls[0]["bot_is_admin"] is True
+      assert responder.calls[0]["current_payload"]["chatName"] == "Admin group"
+      assert responder.calls[0]["group_description"] == "Live description"
+      assert ws.commands == [{
+        "chat_id": "group@g.us",
+        "command": "/group open",
+        "context_msg_id": None,
+        "request_id": ws.commands[0]["request_id"],
+      }]
+      rid = ws.commands[0]["request_id"]
+      assert pending_commands[rid] == ("group@g.us", "/group open")
     finally:
       await _cancel_all(tasks)
 

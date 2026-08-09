@@ -211,6 +211,8 @@ python/                       Python bridge + WaSocket SDK (WS CLIENTS)
     agent/                    Injectable per-account collaborators (one responsibility each)
       llm1_router.py          Llm1Router — decision/gating
       llm2_responder.py       Llm2Responder — response generation only
+      llm_context_builder.py  Canonical trusted chat/prompt/memory inputs for every LLM invoke path
+      llm_action_dispatcher.py Shared LLM action dispatch primitives
       batch_processor.py      BatchProcessor — debounce/burst/prefix-interrupt loop
       subagent_coordinator.py SubAgentCoordinator — sub-agent submit/wait/correction/steering
       mute_gate.py            MuteGate — inbound mute enforcement
@@ -414,7 +416,7 @@ claiming a durable receipt so the same request ID remains retryable after open.
 | `invalidate_default_model` | reliable | After `/modelcfg` changes: `{folderPath}` (top-level) |
 | `invalidate_chat_settings` | reliable | After `/setting` mode change, `/prompt`, `/permission`, `/trigger`, `/idle`, `/announcement`, `/memory` (top-level) |
 | `set_subagent_enabled` | reliable | After `/subagent` toggle: `{folderPath, chatId, enabled}` (top-level) |
-| `schedule_task` | reliable | After `/schedule-task <nnHnnM> <prompt>`: `{folderPath, chatId, taskId, fireAtMs, prompt}` (top-level). Bridge persists + re-arms; on fire re-invokes LLM2 (always responds, no LLM1). |
+| `schedule_task` | reliable | After `/schedule-task <nnHnnM> <prompt>`: `{folderPath, chatId, taskId, fireAtMs, prompt}` (top-level). Bridge persists + re-arms; on fire re-invokes LLM2 with live chat context (always responds, no LLM1). |
 | `daily_task` | reliable | After `/daily-task <HH:MM> <prompt>`: `{folderPath, chatId, taskId, timeOfDay, prompt}` (top-level). Bridge persists and re-arms after each daily fire. |
 | `set_chat_mute` | reliable | After `/group mute ...`: `{folderPath, chatId, senderRef, senderName, durationMinutes}` (top-level). The bridge updates the tenant-scoped mute database; `0` unmutes. |
 
@@ -427,6 +429,7 @@ claiming a durable receipt so the same request ID remains retryable after open.
 | `mark_read` | Send read receipt: `{chatId, messageId, participant?}` |
 | `send_presence` | Typing indicator: `{chatId, type: "composing"|"paused"}` |
 | `run_command` | Execute slash command silently (no WhatsApp echo): `{chatId, command, contextMsgId?}` |
+| `get_chat_context` | Resolve an authoritative live chat/group snapshot for cold LLM invokes: `{chatId, forceRefresh?}` |
 | `send_quiz` | Multiple-choice quiz buttons: `{chatId, question, choices[], footer?, replyTo?}` |
 | `send_copy_code` | CTA copy code button: `{chatId, code, displayText?, quotedPreviewText?}` |
 | `relay_lottie_sticker` | Relay Lottie sticker from stored JSON: `{chatId, lottiePayload, replyTo?}` |

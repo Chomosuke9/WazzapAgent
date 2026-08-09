@@ -25,6 +25,7 @@ import type {
   SendButtonsPayload,
   SendCarouselPayload,
   RunCommandPayload,
+  GetChatContextPayload,
   // outbound payloads
   HelloAckPayload,
   ActionAckPayload,
@@ -96,6 +97,9 @@ const sendCarouselPayload: SendCarouselPayload = {
 const runCommandPayload: RunCommandPayload = {
   requestId: 'cmd-1715097600000-000010', chatId: '12345@g.us', command: '/sticker', contextMsgId: '000125',
 };
+const getChatContextPayload: GetChatContextPayload = {
+  requestId: 'chatctx-1715097600000-000011', chatId: '12345@g.us', forceRefresh: true,
+};
 
 // ---- one literal of each outbound *Payload ----
 const helloAckPayload: HelloAckPayload = { folderPath: '/tenants/acme', waStatus: 'open' };
@@ -155,6 +159,7 @@ const inboundFrames: InboundFrame[] = [
   { type: 'send_buttons', payload: sendButtonsPayload },
   { type: 'send_carousel', payload: sendCarouselPayload },
   { type: 'run_command', payload: runCommandPayload },
+  { type: 'get_chat_context', payload: getChatContextPayload },
 ];
 
 const outboundFrames: OutboundFrame[] = [
@@ -175,7 +180,7 @@ const outboundFrames: OutboundFrame[] = [
 test('protocol types: payload literals assign into InboundFrame/OutboundFrame unions', () => {
   // The compile step is the real assertion. At runtime, just confirm the
   // arrays were constructed so the test is observably executed.
-  assert.equal(inboundFrames.length, 13);
+  assert.equal(inboundFrames.length, 14);
   assert.equal(outboundFrames.length, 12);
   assert.equal(true, true);
 });

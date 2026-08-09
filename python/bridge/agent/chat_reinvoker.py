@@ -9,16 +9,16 @@ system turn to the chat history deque, call ``responder.generate(...)`` (ALWAYS
 responding — no LLM1 gating), then dispatch the resulting actions through the
 gateway ``send_*`` helpers.
 
-Two callers share it:
+Cold/system callers share it:
 
   - :class:`ScheduledTaskRunner` — a ``/schedule-task`` timer fires.
+  - :class:`~bridge.agent.daily_task_runner.DailyTaskRunner` — recurring fire.
   - :class:`~bridge.agent.direct_invoke.DirectInvokeServer` — an authenticated
     HTTP ``/post`` request asks the bot to send a message first.
 
-Both differ only in the label shown in history (``[SCHEDULED TASK]`` vs
-``[DIRECT INVOKE]``) and the re-invoke instruction block, so those are
-parameters; everything else (history append, minimal context reconstruction,
-LLM2 call, action extraction + dispatch) is identical.
+They differ only in the label shown in history and the re-invoke instruction
+block. Everything else (history append, canonical live context build, LLM2
+call, action extraction + dispatch) is identical.
 
 Dependencies are injected explicitly (ws / responder / per-chat history+lock /
 get_prompt / record_stat) so the engine is unit-testable with fakes — no live
@@ -37,7 +37,7 @@ from ..history import (
   hydrate_quoted_from_history,
 )
 from ..log import setup_logging
-from ..llm.prompt import build_memory_block, render_stored_mentions
+from ..llm.prompt import render_stored_mentions
 from ..stickers import resolve_sticker
 from ..messaging.processing import (
   _append_history,
@@ -60,6 +60,8 @@ from ..messaging.gateway import (
   send_react_message,
   typing_indicator,
 )
+from .llm_context_builder import LlmContextBuilder
+from .llm_action_dispatcher import dispatch_llm_run_command
 
 logger = setup_logging()
 
@@ -93,14 +95,20 @@ class ChatReinvoker:
     get_prompt: Optional[Callable[[str], Optional[str]]] = None,
     record_stat: Optional[Callable[..., None]] = None,
     pending_send_request_chat: Optional[OrderedDict] = None,
+    pending_run_command_chat: Optional[OrderedDict] = None,
+    context_builder: Optional[LlmContextBuilder] = None,
   ) -> None:
     self._ws = ws
     self._responder = responder
     self._per_chat = per_chat
     self._per_chat_lock = per_chat_lock
-    self._get_prompt = get_prompt
     self._record_stat = record_stat
     self._pending_send_request_chat = pending_send_request_chat
+    self._pending_run_command_chat = pending_run_command_chat
+    self._context_builder = context_builder or LlmContextBuilder(
+      ws=ws,
+      get_prompt=get_prompt,
+    )
 
   async def reinvoke(
     self,
@@ -111,6 +119,8 @@ class ChatReinvoker:
     block_title: str,
     block_instructions: str,
     log_kind: str = "re-invoke",
+    current_payload: dict | None = None,
+    refresh_live_context: bool = True,
   ) -> bool:
     """Inject ``[system_label]\\n<prompt>`` as a system turn, re-invoke LLM2 in
     ``chat_id`` (always responding), and dispatch the reply.
@@ -119,6 +129,11 @@ class ChatReinvoker:
     failed or produced nothing usable. Mentions in ``prompt`` and in the chat's
     stored prompt override are rendered to ``@Name (senderRef)`` first.
     """
+    invocation_context = await self._context_builder.build(
+      chat_id,
+      current_payload,
+      refresh_live=refresh_live_context,
+    )
     lock = self._per_chat_lock[chat_id]
     async with lock:
       history = self._per_chat[chat_id]
@@ -131,15 +146,6 @@ class ChatReinvoker:
         text=system_text,
         role="system",
       ))
-
-      # Reconstruct a MINIMAL context for this cold (non-message) fire.
-      chat_type = "group" if chat_id.endswith("@g.us") else "private"
-      db_prompt = None
-      if self._get_prompt is not None:
-        try:
-          db_prompt = render_stored_mentions(self._get_prompt(chat_id), chat_id)
-        except Exception:  # pylint: disable=broad-except
-          db_prompt = None
 
       current = WhatsAppMessage(
         timestamp_ms=int(time.time() * 1000),
@@ -164,15 +170,9 @@ class ChatReinvoker:
           reply_msg = await self._responder.generate(
             reinvoke_history,
             current,
-            current_payload={"chatId": chat_id, "chatType": chat_type},
-            group_description=None,
-            prompt_override=db_prompt,
-            chat_type=chat_type,
-            bot_is_admin=False,
-            bot_is_super_admin=False,
+            **invocation_context.generation_kwargs(),
             allow_subagent=False,
             scheduled_task_block=reinvoke_block,
-            memory_block=build_memory_block(chat_id),
           )
       except Exception as gen_err:  # pylint: disable=broad-except
         logger.exception(
@@ -205,7 +205,12 @@ class ChatReinvoker:
       await self._dispatch_actions(chat_id, history, actions)
       return True
 
-  async def _dispatch_actions(self, chat_id: str, history, actions: list) -> None:
+  async def _dispatch_actions(
+    self,
+    chat_id: str,
+    history,
+    actions: list,
+  ) -> None:
     """Dispatch the LLM2 actions from a cold re-invoke (subset mirror of the
     sub-agent re-invoke dispatch)."""
     for action in actions:
@@ -292,6 +297,13 @@ class ChatReinvoker:
           self._ws, chat_id, action.get("targets") or [],
           request_id=_make_request_id("kick"),
           mode=action.get("mode") or "partial_success",
+        )
+      elif action_type == "run_command":
+        await dispatch_llm_run_command(
+          ws=self._ws,
+          chat_id=chat_id,
+          action=action,
+          pending_run_command_chat=self._pending_run_command_chat,
         )
       else:
         logger.debug(

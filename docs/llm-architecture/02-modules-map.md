@@ -117,10 +117,14 @@
   (per-tenant sticker DB; WAL + `busy_timeout`, no busy-retry sleeps).
 
 ### Injectable collaborators (`python/bridge/agent/`)
-`llm1_router.py`, `llm2_responder.py`, `batch_processor.py`,
+`llm1_router.py`, `llm2_responder.py`, `llm_context_builder.py` (canonical
+chat metadata/prompt/memory inputs for every LLM2 entry point),
+`llm_action_dispatcher.py` (shared action dispatch primitives), `batch_processor.py`,
 `subagent_coordinator.py`, `mute_gate.py`, `idle_trigger.py`, `reply_dedup.py`,
-`ack_hydrator.py`, `event_router.py` — one responsibility each, wired by
-`AgentSession`.
+`ack_hydrator.py`, `event_router.py`, `chat_reinvoker.py`,
+`scheduled_task_runner.py`, `daily_task_runner.py`, `direct_invoke.py` — one
+responsibility each, wired by `AgentSession`. Cold/background invokes resolve a
+live gateway chat snapshot before rendering the same final LLM2 prompt.
 
 ### Per-tenant DB (`python/bridge/db/`)
 - `core.py` — ContextVar-scoped per-tenant connection routing + tenant-keyed

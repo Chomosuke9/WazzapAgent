@@ -86,6 +86,7 @@ See `README.md` for full payload shape examples for each control event.
 | `send_buttons` | `chatId`, `text`, `buttons` | NativeFlow button message (legacy) |
 | `send_carousel` | `chatId`, `cards[]` | Swipeable carousel cards |
 | `run_command` | `chatId`, `command` | Execute a slash command silently (not posted to WhatsApp). Optional `contextMsgId` for anchor. |
+| `get_chat_context` | `chatId` | Fetch the authoritative current chat/group snapshot. `forceRefresh` refreshes group metadata for cold LLM invokes. |
 | `download_media` | `chatId`, `contextMsgId` \| `messageId` | Lazily fetch the bytes for a previously-forwarded attachment on demand (vision / sticker / sub-agent). Inbound forwards metadata only (`path: null`, `pending: true`). |
 
 ## Ack/Error responses (Node → Python)
@@ -118,6 +119,7 @@ The `result` field is action-specific:
 | `delete_message` | `{ contextMsgId }` |
 | `kick_member` | `{ succeeded: int, failed: int, results: [{ target, ok, detail? }] }` |
 | `run_command` | `{ command: string\|null }` on success, `{ command: null, error: string }` on error |
+| `get_chat_context` | `{ chatId, chatName, chatType, isGroup, groupDescription, botIsAdmin, botIsSuperAdmin }` |
 | `send_quiz` | `{ contextMsgId, messageId }` |
 | `send_copy_code` | Raw Baileys message object from `generateWAMessageFromContent` (the full `msg` with `key`, `message`, etc.) |
 | `relay_lottie_sticker` | `{ contextMsgId, messageId }` |

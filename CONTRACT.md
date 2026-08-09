@@ -202,6 +202,14 @@ At least one of `text` / `attachments` must be non-empty.
   payload: { requestId: string, chatId: string, command: string, contextMsgId?: string } }
 ```
 
+#### `get_chat_context` (→ `action_ack`)
+```ts
+{ type: "get_chat_context"
+  payload: { requestId: string, chatId: string, forceRefresh?: boolean } }
+```
+
+Returns the authoritative current chat/group snapshot used by cold LLM invokes.
+
 ### 1.3 Acks & errors (Node → Python, best-effort)
 
 #### `action_ack`
@@ -225,6 +233,7 @@ react_message       → { contextMsgId: string }
 delete_message      → { contextMsgId: string, messageId?: string }
 kick_member         → { succeeded: number, failed: number, results: { target: object, ok: boolean, detail?: string, error?: string }[] }
 run_command         → { command: string | null, error?: string }
+get_chat_context    → { chatId: string, chatName: string, chatType: "private" | "group", isGroup: boolean, groupDescription: string | null, botIsAdmin: boolean, botIsSuperAdmin: boolean }
 send_quiz           → { contextMsgId: string, messageId: string | null }
 send_copy_code      → object   // raw Baileys message object
 send_buttons        → object   // raw Baileys message object
@@ -478,6 +487,11 @@ class WaSocket:
                           context_msg_id: str | None = None,
                           request_id: str | None = None) -> dict: ...
         # returns ActionResult.run_command; raises InvalidTargetError, TimeoutError
+
+    async def get_chat_context(self, chat_id: str, *,
+                               force_refresh: bool = False,
+                               request_id: str | None = None) -> dict: ...
+        # returns the authoritative chat/group snapshot
 ```
 
 Notes:
@@ -543,6 +557,9 @@ export interface CarouselCard {
 }
 export interface SendCarouselPayload { requestId: string; chatId: string; cards: CarouselCard[]; text?: string; }
 export interface RunCommandPayload { requestId: string; chatId: string; command: string; contextMsgId?: string; }
+export interface GetChatContextPayload {
+  requestId: string; chatId: string; forceRefresh?: boolean;
+}
 
 export type InboundActionFrame =
   | { type: "send_message"; payload: SendMessagePayload }
@@ -556,7 +573,8 @@ export type InboundActionFrame =
   | { type: "relay_lottie_sticker"; payload: RelayLottieStickerPayload }
   | { type: "send_buttons"; payload: SendButtonsPayload }
   | { type: "send_carousel"; payload: SendCarouselPayload }
-  | { type: "run_command"; payload: RunCommandPayload };
+  | { type: "run_command"; payload: RunCommandPayload }
+  | { type: "get_chat_context"; payload: GetChatContextPayload };
 
 export type InboundFrame = { type: "hello"; payload: HelloPayload } | InboundActionFrame;
 

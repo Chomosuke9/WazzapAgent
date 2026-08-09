@@ -38,7 +38,6 @@ from ..history import (
 )
 from ..log import setup_logging, set_chat_log_context, reset_chat_log_context
 from ..llm.llm1 import LLM1Decision
-from ..llm.prompt import build_memory_block
 from ..db import (
   get_mode as db_get_mode,
   get_triggers as db_get_triggers,
@@ -76,7 +75,6 @@ from ..messaging.filtering import (
 )
 from ..llm.metadata import (
   _build_llm1_context_metadata,
-  _resolve_group_prompt_context,
 )
 from ..messaging.moderation import (
   _merge_payload_attachments,
@@ -95,7 +93,6 @@ from ..messaging.gateway import (
   send_message,
   send_quiz,
   send_react_message,
-  send_run_command,
   send_sticker,
   typing_indicator,
 )
@@ -123,6 +120,7 @@ from ..config import (
   REQUIRE_ACTIVATION,
   private_chat_enabled,
 )
+from .llm_action_dispatcher import dispatch_llm_run_command
 
 logger = setup_logging()
 from ..messaging.gateway import _dispatch_sticker
@@ -457,8 +455,7 @@ class BatchProcessor:
       # Handle /dump: build full LLM context and send as a .txt attachment
       # (must run before cmd_handled check since Node marks all slash commands as handled)
       if cmd_name == "dump":
-        p_group_description, p_db_prompt = _resolve_group_prompt_context(payload)
-        p_chat_type, p_bot_is_admin, p_bot_is_super_admin = _chat_state_from_payload(payload)
+        p_context = session._llm_context.from_payload(p_chat_id, payload)
         p_reply_to = _normalize_context_msg_id(payload.get("contextMsgId"))
         # Serialise the SAME messages LLM2 is actually invoked with (via the
         # shared builder) instead of hand-rebuilding a subset. This makes the
@@ -484,15 +481,9 @@ class BatchProcessor:
         p_built = build_llm2_messages(
           p_history,
           p_current,
-          current_payload=payload,
-          group_description=p_group_description,
-          prompt_override=p_db_prompt,
-          chat_type=p_chat_type,
-          bot_is_admin=p_bot_is_admin,
-          bot_is_super_admin=p_bot_is_super_admin,
+          **p_context.generation_kwargs(),
           allow_subagent=p_allow_subagent,
           subagent_context=p_subagent_context,
-          memory_block=build_memory_block(p_chat_id),
         )
         dump_text = serialize_llm2_messages(p_built.messages)
         dump_file = None
@@ -701,8 +692,12 @@ class BatchProcessor:
     idle_msg_count = session.idle_msg_count
     _should_idle_trigger = session._idle.should_trigger
     llm1_ms = 0
-    group_description, db_prompt = _resolve_group_prompt_context(last_payload)
-    chat_type, bot_is_admin, bot_is_super_admin = _chat_state_from_payload(last_payload)
+    invocation_context = session._llm_context.from_payload(chat_id, last_payload)
+    group_description = invocation_context.group_description
+    db_prompt = invocation_context.prompt_override
+    chat_type = invocation_context.chat_type
+    bot_is_admin = invocation_context.bot_is_admin
+    bot_is_super_admin = invocation_context.bot_is_super_admin
     llm_context_metadata = _build_llm1_context_metadata(
       history_before_current,
       trigger_window_payloads,
@@ -1003,11 +998,6 @@ class BatchProcessor:
     last_payload = ctx.last_payload
     llm_context_metadata = ctx.llm_context_metadata
     decision = ctx.decision
-    group_description = ctx.group_description
-    db_prompt = ctx.db_prompt
-    chat_type = ctx.chat_type
-    bot_is_admin = ctx.bot_is_admin
-    bot_is_super_admin = ctx.bot_is_super_admin
     current = ctx.current
     llm2_history = ctx.llm2_history
     media_paths_by_chat = session.media_paths_by_chat
@@ -1030,7 +1020,6 @@ class BatchProcessor:
         "llm1Reason": " ".join((decision.reason or "").split()),
       }
     )
-
     # Determine whether subagent tool should be available for this chat
     allow_subagent = db_get_subagent_enabled(chat_id)
     logger.info(
@@ -1084,6 +1073,9 @@ class BatchProcessor:
       if resolved_atts != (llm2_payload.get("attachments") or []):
         llm2_payload["attachments"] = resolved_atts
       await materialize_visual_media(ws, llm2_payload, session.media_paths_by_chat)
+    # Rebuild after lazy-media materialization so the canonical context bundle
+    # carries the exact payload the prompt builder will inspect.
+    invocation_context = session._llm_context.from_payload(chat_id, llm2_payload)
     async with typing_indicator(ws, chat_id):
       _validate_llm2_result = session._llm2.make_validator(
         fallback_reply_to=fallback_reply_to,
@@ -1093,16 +1085,10 @@ class BatchProcessor:
       reply_msg = await session._llm2.generate(
         llm2_history,
         current,
-        current_payload=llm2_payload,
-        group_description=group_description,
-        prompt_override=db_prompt,
-        chat_type=chat_type,
-        bot_is_admin=bot_is_admin,
-        bot_is_super_admin=bot_is_super_admin,
+        **invocation_context.generation_kwargs(),
         result_validator=_validate_llm2_result,
         allow_subagent=allow_subagent,
         subagent_context=subagent_context,
-        memory_block=build_memory_block(chat_id),
       )
 
     llm2_ms = int((time.perf_counter() - llm2_started) * 1000)
@@ -1439,22 +1425,14 @@ class BatchProcessor:
         action_counts[action_type] += 1
         continue
       if action_type == "run_command":
-        command_text = str(action.get("command") or "").strip()
-        if not command_text:
-          continue
-        request_id = _make_request_id("cmd")
-        await send_run_command(
-          ws,
-          chat_id,
-          command_text,
-          action.get("contextMsgId"),
-          request_id=request_id,
+        dispatched = await dispatch_llm_run_command(
+          ws=ws,
+          chat_id=chat_id,
+          action=action,
+          pending_run_command_chat=pending_run_command_chat,
         )
-        # Track this request so the action_ack handler can append the
-        # corresponding "Command X executed successfully/failed" log
-        # line into per-chat history once Node confirms execution.
-        _remember(pending_run_command_chat, request_id, (chat_id, command_text))
-        action_counts[action_type] += 1
+        if dispatched:
+          action_counts[action_type] += 1
         continue
       logger.warning(
         "unknown action type from parser: %s",
@@ -1598,6 +1576,8 @@ class BatchProcessor:
         system_label="BOT ADDED", block_title="Bot added to group",
         block_instructions="You have just been added to this group chat. Write a short introduction introducing yourself.",
         log_kind="bot_added",
+        current_payload=payload,
+        refresh_live_context=False,
       )
       return
 

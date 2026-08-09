@@ -59,6 +59,7 @@ from ..messaging.gateway import (
   send_react_message,
   typing_indicator,
 )
+from .llm_action_dispatcher import dispatch_llm_run_command
 
 
 from ..media import (
@@ -314,6 +315,8 @@ async def _deliver_subagent_result(
   pending_send_request_chat: OrderedDict[str, str] | None = None,
   media_paths_by_chat: dict | None = None,
   output_staging_base_dir=None,
+  context_builder=None,
+  pending_run_command_chat: OrderedDict[str, str] | None = None,
 ) -> list[dict]:
   """Stage sub-agent outputs, re-invoke LLM2, and dispatch the resulting
   actions for a finalised sub-agent task.
@@ -442,22 +445,36 @@ async def _deliver_subagent_result(
   if visual_outputs:
     reinvoke_payload = dict(current_payload or {})
     reinvoke_payload["attachments"] = list(reinvoke_payload.get("attachments") or []) + visual_outputs
+  invocation_context = None
+  if context_builder is not None:
+    invocation_context = await context_builder.build(
+      chat_id,
+      reinvoke_payload,
+      refresh_live=True,
+    )
   reply_msg = None
   try:
     llm2_reinvoke_started = time.perf_counter()
     async with typing_indicator(ws, chat_id):
+      generation_context = (
+        invocation_context.generation_kwargs()
+        if invocation_context is not None
+        else {
+          "current_payload": reinvoke_payload,
+          "group_description": group_description,
+          "prompt_override": db_prompt,
+          "chat_type": chat_type,
+          "bot_is_admin": bot_is_admin,
+          "bot_is_super_admin": bot_is_super_admin,
+          "memory_block": build_memory_block(chat_id),
+        }
+      )
       reply_msg = await responder.generate(
         reinvoke_history,
         current,
-        current_payload=reinvoke_payload,
-        group_description=group_description,
-        prompt_override=db_prompt,
-        chat_type=chat_type,
-        bot_is_admin=bot_is_admin,
-        bot_is_super_admin=bot_is_super_admin,
+        **generation_context,
         allow_subagent=True,
         subagent_result_block=subagent_result_block,
-        memory_block=build_memory_block(chat_id),
       )
     llm2_reinvoke_ms = int((time.perf_counter() - llm2_reinvoke_started) * 1000)
     logger.info(
@@ -648,6 +665,13 @@ async def _deliver_subagent_result(
             reinvoke_expression,
             request_id=_make_request_id("react"),
           )
+    elif reinvoke_type == "run_command":
+      await dispatch_llm_run_command(
+        ws=ws,
+        chat_id=chat_id,
+        action=reinvoke_action,
+        pending_run_command_chat=pending_run_command_chat,
+      )
     elif reinvoke_type == "delete_message":
       await send_delete_message(
         ws,
@@ -1394,6 +1418,8 @@ context block from ``SubTaskTracker.format_context``).
               output_staging_base_dir=tenant_staging_root(
                 getattr(session, "folder_path", None)
               ),
+              context_builder=session._llm_context,
+              pending_run_command_chat=session.pending_run_command_chat,
             )
             # If LLM2 re-dispatched a correction sub-agent task,
             # process it as a new execute_subtask action. We run
@@ -1594,6 +1620,8 @@ context block from ``SubTaskTracker.format_context``).
                       output_staging_base_dir=tenant_staging_root(
                         getattr(session, "folder_path", None)
                       ),
+                      context_builder=session._llm_context,
+                      pending_run_command_chat=session.pending_run_command_chat,
                     )
                 except asyncio.CancelledError:
                   raise
