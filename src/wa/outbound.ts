@@ -34,6 +34,7 @@ import { lookupParticipantName } from './domain/participants.js';
 import {
   resolveAllowedAttachmentPath,
   detectMimeFromFile,
+  inferMimeFromExtension,
   normalizeMime,
   inferExtension,
 } from '../mediaHandler.js';
@@ -287,6 +288,9 @@ async function resolveAttachmentMimetype(att: { mime?: string; mimetype?: string
 
   const sniffed = await detectMimeFromFile(filePath);
   if (sniffed) return sniffed;
+
+  const inferred = inferMimeFromExtension(filePath);
+  if (inferred) return inferred;
 
   if (declared) return declared;
   if (kind === 'image') return 'image/jpeg';

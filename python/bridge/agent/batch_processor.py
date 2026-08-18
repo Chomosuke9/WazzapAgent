@@ -506,6 +506,7 @@ class BatchProcessor:
             request_id=_make_request_id("dump"),
             file_name="llm_context.txt",
             reply_to=p_reply_to,
+            mime="text/plain",
           )
         except Exception as dump_err:
           logger.exception("dump failed: %s", dump_err, extra={"chat_id": p_chat_id})

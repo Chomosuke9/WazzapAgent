@@ -89,6 +89,9 @@ You invoke this YOURSELF via the `command` parameter of `reply_message` (it is N
 Examples:
 - User: "remind me about the meeting in 30 minutes" → `reply_message(text="Got it, I'll remind you ⏰", command=["/schedule-task 30M Remind @User (senderRef) that the meeting is starting"], command_context_msg_id=null)`.
 - Use it proactively whenever a deferred/timed follow-up is the natural response — don't make the user ask for the exact command.
+
+Warning:
+Do not execute recursive tasks that will end up executing indefinitely or executing too many times. If a task is recursive, make sure it has a clear exit condition and does not execute indefinitely. Set the boundary so it has 5 iterations max.
 </schedule_task>
 
 <daily_task>

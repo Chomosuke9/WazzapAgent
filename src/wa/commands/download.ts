@@ -7,14 +7,18 @@ import type { AnyMessageContent } from 'baileys';
 
 import { sendOutgoing } from '../outbound.js';
 
-import { detectMimeFromFile } from '../../mediaHandler.js';
+import {
+  detectMimeFromFile,
+  inferExtension,
+  inferMimeFromExtension,
+} from '../../mediaHandler.js';
 
 import { execFile } from 'node:child_process';
 import { createWriteStream } from 'node:fs';
 import { promisify } from 'node:util';
 import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, basename } from 'node:path';
+import { join, basename, extname } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import config from '../../config.js';
@@ -467,10 +471,21 @@ export async function handleDownload(
 
     tempDir = result.tempDir;
     const sniffed = await detectMimeFromFile(result.filePath);
-    const mime = sniffed || 'application/octet-stream';
-    const kind = mediaKindForMime(sniffed);
+    const mime = sniffed
+      || inferMimeFromExtension(result.filePath)
+      || 'application/octet-stream';
+    const kind = mediaKindForMime(mime);
+    const originalFileName = basename(result.filePath);
+    const fileName = extname(originalFileName)
+      ? originalFileName
+      : (() => {
+        const extension = inferExtension(mime);
+        return extension === 'bin'
+          ? originalFileName
+          : `${originalFileName}.${extension}`;
+      })();
     const content: Record<string, unknown> = {
-      fileName: basename(result.filePath),
+      fileName,
       mimetype: mime,
     };
     if (kind === 'image') content.image = { url: result.filePath };
@@ -482,7 +497,7 @@ export async function handleDownload(
       {
         chatId,
         urlHost,
-        fileName: basename(result.filePath),
+        fileName,
         mime,
         kind,
         source,

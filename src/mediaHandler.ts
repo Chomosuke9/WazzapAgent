@@ -187,6 +187,52 @@ function normalizeMime(mime: unknown): string | null {
   return normalized || null;
 }
 
+/**
+ * Best-effort MIME fallback for files whose magic bytes are unknown.
+ *
+ * Keep this separate from magic-byte detection: callers can deliberately use
+ * the content signature first, then consult the filename only when sniffing
+ * cannot identify the file. This prevents an incorrect extension from
+ * overriding real file contents while preserving common document/archive
+ * types such as ZIP instead of degrading them to application/octet-stream.
+ */
+function inferMimeFromExtension(filepath: string): string | null {
+  const extension = path.extname(filepath).toLowerCase();
+  const EXT_MIME: Record<string, string> = {
+    '.txt': 'text/plain',
+    '.csv': 'text/csv',
+    '.html': 'text/html',
+    '.htm': 'text/html',
+    '.json': 'application/json',
+    '.xml': 'application/xml',
+    '.pdf': 'application/pdf',
+    '.zip': 'application/zip',
+    '.7z': 'application/x-7z-compressed',
+    '.rar': 'application/vnd.rar',
+    '.gz': 'application/gzip',
+    '.tar': 'application/x-tar',
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    '.odt': 'application/vnd.oasis.opendocument.text',
+    '.ods': 'application/vnd.oasis.opendocument.spreadsheet',
+    '.odp': 'application/vnd.oasis.opendocument.presentation',
+    '.rtf': 'application/rtf',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.mp4': 'video/mp4',
+    '.m4a': 'audio/mp4',
+    '.mp3': 'audio/mpeg',
+    '.ogg': 'audio/ogg',
+    '.wav': 'audio/wav',
+    '.flac': 'audio/flac',
+  };
+  return EXT_MIME[extension] ?? null;
+}
+
 function detectMimeFromHeader(header: Buffer | null | undefined): string | null {
   if (!Buffer.isBuffer(header) || header.length === 0) return null;
 
@@ -414,6 +460,7 @@ export {
   resolveAllowedAttachmentPath,
   inferExtension,
   normalizeMime,
+  inferMimeFromExtension,
   detectMimeFromHeader,
   readFileHeader,
   detectMimeFromFile,

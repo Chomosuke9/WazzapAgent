@@ -134,6 +134,80 @@ test('/download falls back to a direct download for unsupported URLs', async () 
   assert.deepEqual(reactions, ['🔁', '⬇️', '⬆️', '✅', '']);
 });
 
+test('/download preserves ZIP MIME from the filename when magic sniffing is inconclusive', async () => {
+  const mediaMessages: Array<Record<string, unknown>> = [];
+  const ctx = {
+    chatId: '123@g.us',
+    args: 'https://example.com/archive.zip',
+    account: {},
+    msg: { key: { id: 'wamid-download-zip' } },
+    sock: {
+      sendMessage: async (
+        _chatId: string,
+        content: { react?: { text: string } },
+      ) => {
+        if (!content.react) {
+          mediaMessages.push(content as unknown as Record<string, unknown>);
+        }
+        return undefined;
+      },
+    },
+  } as unknown as CommandContext;
+
+  await handleDownload(ctx, {
+    downloadMedia: async () => {
+      const tempDir = await mkdtemp(join(tmpdir(), 'download-zip-test-'));
+      const filePath = join(tempDir, 'archive.zip');
+      // Deliberately omit a recognizable ZIP header to exercise the filename
+      // fallback instead of magic-byte sniffing.
+      await writeFile(filePath, Buffer.from('opaque-archive-payload'));
+      return { filePath, tempDir };
+    },
+    wait: async () => undefined,
+  });
+
+  assert.equal(mediaMessages.length, 1);
+  assert.equal(mediaMessages[0].fileName, 'archive.zip');
+  assert.equal(mediaMessages[0].mimetype, 'application/zip');
+  assert.ok(mediaMessages[0].document);
+});
+
+test('/download adds a ZIP extension when only the file signature identifies it', async () => {
+  const mediaMessages: Array<Record<string, unknown>> = [];
+  const ctx = {
+    chatId: '123@g.us',
+    args: 'https://example.com/download',
+    account: {},
+    msg: { key: { id: 'wamid-download-extensionless-zip' } },
+    sock: {
+      sendMessage: async (
+        _chatId: string,
+        content: { react?: { text: string } },
+      ) => {
+        if (!content.react) {
+          mediaMessages.push(content as unknown as Record<string, unknown>);
+        }
+        return undefined;
+      },
+    },
+  } as unknown as CommandContext;
+
+  await handleDownload(ctx, {
+    downloadMedia: async () => {
+      const tempDir = await mkdtemp(join(tmpdir(), 'download-extensionless-zip-test-'));
+      const filePath = join(tempDir, 'download');
+      await writeFile(filePath, Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00]));
+      return { filePath, tempDir };
+    },
+    wait: async () => undefined,
+  });
+
+  assert.equal(mediaMessages.length, 1);
+  assert.equal(mediaMessages[0].fileName, 'download.zip');
+  assert.equal(mediaMessages[0].mimetype, 'application/zip');
+  assert.ok(mediaMessages[0].document);
+});
+
 test('/download does not use the direct fallback for other yt-dlp errors', async () => {
   const outgoing: Array<Record<string, unknown>> = [];
   let directDownloadCalls = 0;
