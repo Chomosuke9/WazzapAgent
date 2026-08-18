@@ -41,12 +41,15 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 from collections import OrderedDict, defaultdict, deque
 from pathlib import Path
 from typing import Deque, Dict, Set
 
 from .history import (
   WhatsAppMessage,
+  assistant_name,
+  assistant_sender_ref,
   set_tenant_assistant_name,
   reset_tenant_assistant_name,
   update_tenant_assistant_name,
@@ -79,6 +82,7 @@ from .db import (
 )
 from .dashboard import DashboardStats
 from .messaging.processing import (
+  _append_history,
   _make_request_id,
   _reply_signature,
 )
@@ -516,6 +520,38 @@ def _register_handlers(session) -> None:
   events = session._events
   ack = session._ack
 
+  async def _send_command_output(chat_id: str, text: str, request_tag: str) -> None:
+    """Send a bridge-owned command reply and preserve it in LLM history.
+
+    Control events such as ``daily_task_list`` are completed asynchronously
+    by Python after Node's ``run_command`` ACK, so they cannot be included in
+    that ACK's captured outputs. Registering a provisional assistant entry
+    here gives them the same reliable history + ACK hydration path as normal
+    LLM replies without blocking the serialized socket frame pump.
+    """
+    request_id = _make_request_id(request_tag)
+    history = session.per_chat[chat_id]
+    lock = session.per_chat_lock[chat_id]
+    async with lock:
+      _append_history(history, WhatsAppMessage(
+        timestamp_ms=int(time.time() * 1000),
+        sender=assistant_name(),
+        sender_ref=assistant_sender_ref(),
+        text=text,
+        context_msg_id="pending",
+        message_id=f"local-send-{request_id}",
+        role="assistant",
+      ))
+      session.pending_send_request_chat[request_id] = chat_id
+      session.pending_send_request_chat.move_to_end(request_id)
+      while len(session.pending_send_request_chat) > 4096:
+        session.pending_send_request_chat.popitem(last=False)
+    try:
+      await session.sock.send_message(chat_id, text, request_id=request_id)
+    except Exception:
+      session.pending_send_request_chat.pop(request_id, None)
+      raise
+
   @ws.on("ready")
   async def _on_ready(_payload):
     logger.info("Gateway connected (ready)")
@@ -633,11 +669,7 @@ def _register_handlers(session) -> None:
       # This handler runs inside WaSocket's serialized receive/frame pump. A
       # caller-supplied request ID makes send_message return after transport
       # delivery instead of waiting for an ACK that the same pump must read.
-      await session.sock.send_message(
-        chat_id,
-        text,
-        request_id=_make_request_id("daily_task_list"),
-      )
+      await _send_command_output(chat_id, text, "daily_task_list")
     except Exception as exc:  # pylint: disable=broad-except
       logger.exception("daily_task_list: failed to send chat_id=%s: %s", chat_id, exc)
 
@@ -662,11 +694,7 @@ def _register_handlers(session) -> None:
       logger.exception("daily_task_delete: failed chat_id=%s task_id=%s: %s", chat_id, task_id, exc)
       text = "❌ Could not delete the daily task. Please try again."
     try:
-      await session.sock.send_message(
-        chat_id,
-        text,
-        request_id=_make_request_id("daily_task_delete"),
-      )
+      await _send_command_output(chat_id, text, "daily_task_delete")
     except Exception as exc:  # pylint: disable=broad-except
       logger.exception("daily_task_delete: failed to send chat_id=%s: %s", chat_id, exc)
 

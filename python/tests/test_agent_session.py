@@ -401,6 +401,17 @@ def test_daily_task_list_and_delete_do_not_wait_for_action_ack():
     assert all(item["requestId"] for item in sock.sent)
     assert sock.sent[0]["requestId"].startswith("daily_task_list-")
     assert sock.sent[1]["requestId"].startswith("daily_task_delete-")
+    history = session.per_chat["123@g.us"]
+    assert [message.text for message in history] == [
+      sock.sent[0]["text"],
+      sock.sent[1]["text"],
+    ]
+    assert all(message.role == "assistant" for message in history)
+    assert all(message.context_msg_id == "pending" for message in history)
+    assert set(session.pending_send_request_chat) == {
+      sock.sent[0]["requestId"],
+      sock.sent[1]["requestId"],
+    }
 
   asyncio.run(scenario())
 

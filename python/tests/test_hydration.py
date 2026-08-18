@@ -200,6 +200,30 @@ def test_run_command_ack_ok_appends_success_line():
   assert rid not in state["pending_run_command_chat"]
 
 
+def test_run_command_ack_appends_actual_command_output():
+  state = _fresh_state()
+  chat_id = "789@g.us"
+  rid = "cmd-output-1"
+  state["pending_run_command_chat"][rid] = (chat_id, "/daily-task")
+  output = "Daily tasks\n1. ID: abcdef12 - every day at 08:00\n   Send the report"
+
+  ack = AckResult(
+    request_id=rid,
+    action="run_command",
+    ok=True,
+    detail="executed",
+    result={"command": "daily-task", "outputs": [output]},
+  )
+
+  asyncio.run(handle_action_ack(ack, **state))
+
+  history = state["per_chat"][chat_id]
+  assert len(history) == 1
+  assert history[-1].text == output
+  assert history[-1].context_msg_id == "pending"
+  assert history[-1].message_id == f"local-send-{rid}-command-0"
+
+
 def test_run_command_ack_failure_appends_failure_line():
   state = _fresh_state()
   chat_id = "789@g.us"

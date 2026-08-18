@@ -94,7 +94,7 @@ export type ActionResult =
   | { sent: SentEntry[]; replyTo: string | null }     // send_message
   | { contextMsgId: string; messageId?: string | null }
   | { succeeded: number; failed: number; results: Array<{ target: unknown; ok: boolean; detail?: string; error?: string }> }
-  | { command: string | null; error?: string }
+  | { command: string | null; error?: string; outputs?: string[] }
   | Record<string, unknown>;                            // raw Baileys msg objects
 export interface ActionAckPayload {
   requestId: string; action: string; ok: boolean; detail: string;

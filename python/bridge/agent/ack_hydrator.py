@@ -26,7 +26,12 @@ import time
 logger = setup_logging()
 
 
-def _append_sticker_log_to_history(history, log_text: str) -> None:
+def _append_sticker_log_to_history(
+  history,
+  log_text: str,
+  *,
+  message_id: str | None = None,
+) -> None:
   """Append a synthetic assistant entry to the conversation history.
 
   Mirrors ``bridge.main._append_sticker_log_to_history`` exactly so the
@@ -38,6 +43,8 @@ def _append_sticker_log_to_history(history, log_text: str) -> None:
     sender=assistant_name(),
     sender_ref=assistant_sender_ref(),
     text=log_text,
+    context_msg_id="pending" if message_id else None,
+    message_id=message_id,
     role="assistant",
   ))
 
@@ -241,15 +248,37 @@ async def handle_action_ack(
         str(result.get("command") or "").strip().lower()
         or rc_command_text.lstrip("/").split(maxsplit=1)[0].lower()
       )
-      if ok:
-        log_text = f"Command {cmd_name} executed successfully"
+      outputs = result.get("outputs") if isinstance(result.get("outputs"), list) else []
+      clean_outputs = [
+        str(output).strip()
+        for output in outputs
+        if isinstance(output, str) and output.strip()
+      ]
+      if ok and clean_outputs:
+        log_texts = clean_outputs
+      elif ok:
+        log_texts = [f"Command {cmd_name} executed successfully"]
       else:
         detail = str(payload.get("detail") or "unknown error").strip()
-        log_text = f"Command {cmd_name} failed: {detail}"
+        log_texts = [f"Command {cmd_name} failed: {detail}"]
       history = per_chat[rc_chat_id]
       lock = per_chat_lock[rc_chat_id]
       async with lock:
-        _append_sticker_log_to_history(history, log_text)
+        for index, log_text in enumerate(log_texts):
+          # Mark actual command sends as provisional. If Baileys later echoes
+          # the same fromMe text, the normal echo merger hydrates this entry
+          # instead of duplicating it. If no echo arrives, the output still
+          # remains available to the next LLM invocation.
+          message_id = (
+            f"local-send-{rc_request_id}-command-{index}"
+            if ok and clean_outputs
+            else None
+          )
+          _append_sticker_log_to_history(
+            history,
+            log_text,
+            message_id=message_id,
+          )
       logger.info(
         "run_command ack",
         extra={

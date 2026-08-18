@@ -93,6 +93,21 @@ test('LLM run_command executes group commands with the bot own admin role', asyn
   )));
 });
 
+test('LLM run_command returns text sent by the command for LLM history', async () => {
+  const r = makeCtx('', '/tenants/group-run-command-output');
+  r.ctx.account.sock = r.ctx.sock;
+
+  const result = await dispatchRunCommand(r.ctx.account, {
+    chatId: r.ctx.chatId,
+    command: '/group unknown-action',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.command, 'group');
+  assert.equal(result.outputs.length, 1);
+  assert.match(result.outputs[0], /group management/i);
+});
+
 test('group pin and delete operate on the replied message key', async () => {
   let r = makeCtx('pin 7', '/tenants/group-pin');
   await handleGroup(r.ctx);

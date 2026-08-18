@@ -118,7 +118,7 @@ The `result` field is action-specific:
 | `react_message` | `{ contextMsgId }` |
 | `delete_message` | `{ contextMsgId }` |
 | `kick_member` | `{ succeeded: int, failed: int, results: [{ target, ok, detail? }] }` |
-| `run_command` | `{ command: string\|null }` on success, `{ command: null, error: string }` on error |
+| `run_command` | `{ command: string\|null, outputs: string[] }` on success; `outputs` contains bounded text sent synchronously to the invoking chat. Errors use `{ command: null, error: string }`. |
 | `get_chat_context` | `{ chatId, chatName, chatType, isGroup, groupDescription, botIsAdmin, botIsSuperAdmin }` |
 | `send_quiz` | `{ contextMsgId, messageId }` |
 | `send_copy_code` | Raw Baileys message object from `generateWAMessageFromContent` (the full `msg` with `key`, `message`, etc.) |

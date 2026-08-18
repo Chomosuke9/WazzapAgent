@@ -232,7 +232,7 @@ send_message        → { sent: { kind: string, contextMsgId: string, messageId:
 react_message       → { contextMsgId: string }
 delete_message      → { contextMsgId: string, messageId?: string }
 kick_member         → { succeeded: number, failed: number, results: { target: object, ok: boolean, detail?: string, error?: string }[] }
-run_command         → { command: string | null, error?: string }
+run_command         → { command: string | null, outputs?: string[], error?: string }
 get_chat_context    → { chatId: string, chatName: string, chatType: "private" | "group", isGroup: boolean, groupDescription: string | null, botIsAdmin: boolean, botIsSuperAdmin: boolean }
 send_quiz           → { contextMsgId: string, messageId: string | null }
 send_copy_code      → object   // raw Baileys message object

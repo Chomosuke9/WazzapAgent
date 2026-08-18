@@ -23,18 +23,25 @@ async def dispatch_llm_run_command(
   if not command_text:
     return False
   request_id = _make_request_id("cmd")
-  await send_run_command(
-    ws,
-    chat_id,
-    command_text,
-    action.get("contextMsgId"),
-    request_id=request_id,
-  )
   if pending_run_command_chat is not None:
     pending_run_command_chat[request_id] = (chat_id, command_text)
     pending_run_command_chat.move_to_end(request_id)
     while len(pending_run_command_chat) > 4096:
       pending_run_command_chat.popitem(last=False)
+  try:
+    await send_run_command(
+      ws,
+      chat_id,
+      command_text,
+      action.get("contextMsgId"),
+      request_id=request_id,
+    )
+  except Exception:
+    # Register before transport delivery so an exceptionally fast ACK cannot
+    # beat the correlation map. Roll back only if the send itself fails.
+    if pending_run_command_chat is not None:
+      pending_run_command_chat.pop(request_id, None)
+    raise
   return True
 
 

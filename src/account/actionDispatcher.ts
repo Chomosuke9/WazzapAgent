@@ -496,7 +496,7 @@ const handleRunCommand: ActionHandler = async (entry, _payload, requestId, deps)
   // emit an action_ack so Python can append a synthetic "Command X
   // executed/failed" line to LLM history.
   const payload = _payload as unknown as RunCommandPayload;
-  let result: { ok?: boolean; command?: string | null; detail?: string } | undefined;
+  let result: { ok?: boolean; command?: string | null; detail?: string; outputs?: string[] } | undefined;
   try {
     result = await deps.dispatchRunCommand(entry.ctx, payload);
   } catch (err) {
@@ -516,7 +516,10 @@ const handleRunCommand: ActionHandler = async (entry, _payload, requestId, deps)
     action: 'run_command',
     ok: Boolean(result?.ok),
     detail: result?.detail || (result?.ok ? 'executed' : 'failed'),
-    result: { command: result?.command || null },
+    result: {
+      command: result?.command || null,
+      outputs: Array.isArray(result?.outputs) ? result.outputs : [],
+    },
     code: result?.ok ? null : 'invalid_target',
   });
 };

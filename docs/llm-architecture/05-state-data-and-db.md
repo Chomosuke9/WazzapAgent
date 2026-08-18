@@ -29,7 +29,7 @@
 | **Sub-agent state** | `SubTaskTracker` (global) | Global `SubTaskTracker` instance with `_active` dict (in-flight sessions keyed by session_id) and `_history` dict (per-chat deque of completed tasks, max 50 each). Tracks progress steps, final result, steering signals. |
 | **Media paths by chat** | `Dict[chatId → Dict[ctxId → list[dict]]]` | Staged file paths for sub-agent output and downloaded attachments. Keyed by contextMsgId. Entries stale after 24h (`_cleanup_stale_media_paths`). Populated from sub-agent completion webhooks and action_ack hydration. |
 | **Pending sub-agent attachments** | `OrderedDict[str → tuple[chatId, list[dict]]]` | Sub-agent output files awaiting action_ack. LRU-evicted to prevent unbounded growth. |
-| **Pending run command chat** | `OrderedDict[str → tuple[chatId, command]]` | `run_command` actions awaiting action_ack. On ack, synthetic "Command executed" entry appended to history. LRU-evicted. |
+| **Pending run command chat** | `OrderedDict[str → tuple[chatId, command]]` | `run_command` actions awaiting action_ack. Registered before transport delivery so fast ACKs cannot race the map. On ACK, captured command output is appended to history; commands without text fall back to a synthetic success/failure entry. LRU-evicted. |
 
 ## SQLite databases
 

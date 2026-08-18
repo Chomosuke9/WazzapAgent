@@ -39,6 +39,59 @@ import type { GroupContextValue, ParticipantRoleFlags } from './domain/caches.js
 import type { RunCommandPayload } from '../protocol/types.js';
 import type { AccountContext } from '../account/accountContext.js';
 
+const MAX_CAPTURED_COMMAND_OUTPUTS = 20;
+const MAX_CAPTURED_COMMAND_OUTPUT_CHARS = 16_000;
+
+function commandOutputText(content: unknown): string | null {
+  if (!content || typeof content !== 'object') return null;
+  const body = content as { text?: unknown; caption?: unknown };
+  const value = typeof body.text === 'string'
+    ? body.text
+    : typeof body.caption === 'string'
+      ? body.caption
+      : null;
+  const trimmed = value?.trim() || '';
+  return trimmed || null;
+}
+
+/**
+ * Wrap the command-facing socket so text produced synchronously by a command
+ * can be returned to Python in the run_command ACK. Baileys does not
+ * consistently echo gateway-originated sends through messages.upsert, so the
+ * ACK is the reliable place to preserve command output in LLM history.
+ */
+function captureCommandOutputs(
+  sock: NonNullable<AccountContext['sock']>,
+  chatId: string,
+  outputs: string[],
+): NonNullable<AccountContext['sock']> {
+  let capturedChars = 0;
+  return new Proxy(sock, {
+    get(target, property, receiver) {
+      if (property === 'sendMessage') {
+        return async (jid: string, content: unknown, ...args: unknown[]) => {
+          const text = jid === chatId ? commandOutputText(content) : null;
+          if (
+            text
+            && outputs.length < MAX_CAPTURED_COMMAND_OUTPUTS
+            && capturedChars < MAX_CAPTURED_COMMAND_OUTPUT_CHARS
+          ) {
+            const remaining = MAX_CAPTURED_COMMAND_OUTPUT_CHARS - capturedChars;
+            const captured = text.slice(0, remaining);
+            if (captured) {
+              outputs.push(captured);
+              capturedChars += captured.length;
+            }
+          }
+          return Reflect.apply(target.sendMessage, target, [jid, content, ...args] as never);
+        };
+      }
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
 /**
  * Build a fake `msg` object that command handlers can treat like any other
  * incoming WA message. When `contextMsgId` resolves to a cached message we
@@ -142,16 +195,16 @@ async function buildGroupSnapshot(ctx: AccountContext, chatId: string): Promise<
 async function dispatchRunCommand(
   ctx: AccountContext,
   payload: Partial<RunCommandPayload> | null | undefined,
-): Promise<{ ok: boolean; command: string | null; detail: string }> {
+): Promise<{ ok: boolean; command: string | null; detail: string; outputs: string[] }> {
   const chatId = payload?.chatId;
   const rawCommand = payload?.command;
   const contextMsgId = normalizeContextMsgId(payload?.contextMsgId);
 
   if (!chatId || typeof chatId !== 'string') {
-    return { ok: false, command: null, detail: 'missing chatId' };
+    return { ok: false, command: null, detail: 'missing chatId', outputs: [] };
   }
   if (!rawCommand || typeof rawCommand !== 'string') {
-    return { ok: false, command: null, detail: 'missing command text' };
+    return { ok: false, command: null, detail: 'missing command text', outputs: [] };
   }
 
   // Be lenient about the leading slash: the LLM-driven `run_command` path may
@@ -175,7 +228,7 @@ async function dispatchRunCommand(
 
   const slashCommand = parseSlashCommand(normalizedCommand);
   if (!slashCommand) {
-    return { ok: false, command: null, detail: `unrecognised command: ${rawCommand}` };
+    return { ok: false, command: null, detail: `unrecognised command: ${rawCommand}`, outputs: [] };
   }
 
   const isGroup = chatId.endsWith('@g.us');
@@ -210,6 +263,9 @@ async function dispatchRunCommand(
     contextMsgId,
   });
 
+  const outputs: string[] = [];
+  const commandSock = captureCommandOutputs(ctx.sock!, chatId, outputs);
+
   const context = {
     slashCommand,
     chatId,
@@ -230,7 +286,7 @@ async function dispatchRunCommand(
     group,
     msg: fakeMsg,
     account: ctx,
-    sock: ctx.sock,
+    sock: commandSock,
     repos: ctx.repos,
   };
 
@@ -245,6 +301,7 @@ async function dispatchRunCommand(
     ok: true,
     command: slashCommand.command,
     detail: 'executed',
+    outputs,
   };
 }
 

@@ -155,6 +155,36 @@ test('send_message routes to account A and emits action_ack(ok, result.sent) + s
   await rm(folderB, { recursive: true, force: true });
 });
 
+test('run_command action_ack preserves captured command outputs', async () => {
+  const folder = path.join(TEST_ROOT, 'dispatch-run-command-output');
+  const { entry, client } = makeAccount(folder);
+  const outputs = ['Daily tasks\n1. 08:00 Send the report'];
+  const deps: Partial<DispatchDeps> = {
+    dispatchRunCommand: (async () => ({
+      ok: true,
+      command: 'daily-task',
+      detail: 'executed',
+      outputs,
+    })) as DispatchDeps['dispatchRunCommand'],
+  };
+
+  await dispatchAction(
+    entry,
+    {
+      type: 'run_command',
+      payload: { requestId: 'cmd-output-1', chatId: '123@g.us', command: '/daily-task' },
+    },
+    deps,
+  );
+
+  const ack = client.frames().find((frame) => frame.type === 'action_ack');
+  assert.ok(ack);
+  assert.deepEqual(ack.payload.result, { command: 'daily-task', outputs });
+
+  remove(folder);
+  await rm(folder, { recursive: true, force: true });
+});
+
 test('an action rejected before pairing can reuse its requestId after WhatsApp opens', async () => {
   const folder = path.join(TEST_ROOT, 'dispatch-pre-pair');
   const { entry, client } = makeAccount(folder);

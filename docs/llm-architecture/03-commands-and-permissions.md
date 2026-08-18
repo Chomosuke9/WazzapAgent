@@ -255,7 +255,12 @@ LLM2 reply_message tool call:
 ```
 
 Python detects the non-null `command` field, emits a `run_command` WS action, and
-waits for the `action_ack` before appending the command result to the LLM history.
+registers its request before transport delivery. The `action_ack` returns text
+sent synchronously by the command in `result.outputs`; Python appends those real
+outputs to LLM history (falling back to a generic success/failure line when a
+command sends no text). Bridge-owned asynchronous command replies such as
+`/daily-task` list/delete are registered as provisional assistant history at
+send time and hydrated by their later `send_message` ACK.
 The command runs through `src/wa/runCommand.ts` which builds a fake `msg` object with
 `fromMe: true` and `senderIsOwner: true` (the bot is always privileged for
 self-triggered commands).
