@@ -90,8 +90,13 @@ Examples:
 - User: "remind me about the meeting in 30 minutes" → `reply_message(text="Got it, I'll remind you ⏰", command=["/schedule-task 30M Remind @User (senderRef) that the meeting is starting"], command_context_msg_id=null)`.
 - Use it proactively whenever a deferred/timed follow-up is the natural response — don't make the user ask for the exact command.
 
-Warning:
-Do not execute recursive tasks that will end up executing indefinitely or executing too many times. If a task is recursive, make sure it has a clear exit condition and does not execute indefinitely. Set the boundary so it has 5 iterations max.
+Never allow recursive task creation.
+
+A task may create or schedule other tasks only if those child tasks cannot create, schedule, clone, or trigger further tasks themselves. Never allow a task to create a copy of itself or a substantially equivalent task.
+
+Treat indirect recursion and branching recursion as recursion, even when each individual task has a finite repeat count.
+
+Maximum recursion depth is 1 and maximum repetition is 5. Every repeated task must have a finite, explicit exit condition.
 </schedule_task>
 
 <daily_task>
