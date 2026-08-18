@@ -97,6 +97,8 @@ A task may create or schedule other tasks only if those child tasks cannot creat
 Treat indirect recursion and branching recursion as recursion, even when each individual task has a finite repeat count.
 
 Maximum recursion depth is 1 and maximum repetition is 5. Every repeated task must have a finite, explicit exit condition.
+
+Never allow a spammy, repetitive, and unnecessary schedule-task. Like executing 5+ schedule-tasks in the same time with no valid reason or purpose.
 </schedule_task>
 
 <daily_task>
