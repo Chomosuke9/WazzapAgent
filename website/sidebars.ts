@@ -14,7 +14,12 @@ const sidebars: SidebarsConfig = {
         type: "doc",
         id: "installation/index",
       },
-      items: ["installation/getting-started", "installation/how-to-get-lid"],
+      items: [
+        "installation/pterodactyl",
+        "installation/sub-agent",
+        "installation/getting-started",
+        "installation/how-to-get-lid",
+      ],
     },
     {
       type: "category",

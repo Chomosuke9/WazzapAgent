@@ -1,436 +1,210 @@
 ---
 sidebar_position: 1
+description: Install WazzapAgents locally or on a Linux server.
 ---
 
-# Installation Guide
+# Installation
 
-This guide walks you through installing and running WazzapAgents on a server or local machine.
+This guide installs one WhatsApp account on a local machine or Linux server.
+After it works, you can add more accounts from the control panel without
+repeating the installation.
 
-## Prerequisites
+:::tip Choose your deployment
 
-| Software | Version | Notes |
-|----------|---------|-------|
-| Node.js | 20+ | Required by the Docusaurus website; the gateway also runs on Node 18+ |
-| pnpm | 9+ | `npm i -g pnpm` or `corepack enable pnpm` |
-| Python | 3.10+ | For the Python bridge |
-| SQLite | 3.x | Usually already installed by the OS |
-| ffmpeg | Current stable | Required for video stickers and media merging |
-| yt-dlp / SpotDL | Current stable | Optional; required by `/download` for supported sites / Spotify tracks |
+- Continue below for a normal Linux, macOS, or Windows installation.
+- Use the [Pterodactyl guide](/installation/pterodactyl) for a managed panel.
 
-## Installation
+:::
 
-### 1. Clone the Repository
+## Requirements
+
+| Software | Required | Notes |
+|---|---:|---|
+| Node.js 18 or newer | Yes | Node 24 is recommended for deployments |
+| Python 3.10 or newer | Yes | Use a virtual environment when possible |
+| pnpm 9 or newer | Yes | Enable with `corepack enable pnpm` |
+| ffmpeg | No | Only needed for video stickers and some downloads |
+| yt-dlp | No | Only needed by `/download` for supported websites |
+
+You also need a WhatsApp account and an API key for an OpenAI-compatible LLM
+provider.
+
+## 1. Download the project
 
 ```bash
-git clone https://github.com/Chomosuke9/WazzapAgent.git && cd WazzapAgent
+git clone https://github.com/Chomosuke9/WazzapAgent.git
+cd WazzapAgent
 ```
 
-![Clone Repository](/img/2026-05-05-143910_hyprcap.png)
+## 2. Create the configuration
 
-Check that the repository was cloned:
-
-![Check Repository](/img/check_repo.png)
-
-If it worked, you will see the project files:
-
-![Check Repository Success](/img/check_success.png)
-
-### 2. Set Up Environment Variables
+Copy the small starter configuration:
 
 ```bash
 cp .env.minimal.example .env
 ```
 
-Then edit the file with a text editor, for example:
+On Windows PowerShell, use:
 
-```bash
-nano .env
+```powershell
+Copy-Item .env.minimal.example .env
 ```
 
-![Nano .env](/img/nano_env.png)
+Open `.env` and fill in these values:
 
-Fill in at least:
+```dotenv
+# Required for AI replies
+LLM2_API_KEY=your-api-key
 
-```bash
-# Pair without a QR code. Leave empty to use QR pairing.
+# Recommended: your number, digits only with country code
+BOT_OWNER_JIDS=6281234567890
+
+# Recommended: a long private control-panel password/token
+CONTROL_PANEL_TOKEN=replace-with-a-long-random-value
+
+# Optional: set this for pairing by code; leave empty for QR/panel pairing
 WA_PAIRING_NUMBER=6281234567890
-
-ASSISTANT_NAME=LLM
-BOT_OWNER_JIDS=628123456789
-
-# LLM2 is the responder and is required for replies.
-LLM2_ENDPOINT=
-LLM2_MODEL=gpt-4o
-LLM2_API_KEY=
-
-# Local control panel login
-CONTROL_PANEL_HOST=127.0.0.1
-CONTROL_PANEL_PORT=8080
-CONTROL_PANEL_TOKEN=choose-a-private-token
 ```
 
-Use `.env.example` as the complete reference for optional routing, transport,
-media, logging, Sub-Agent, and multi-account settings.
+The built-in defaults use OpenAI's API and the `gpt-4.1` model. For OpenRouter
+or another compatible provider, also set its base URL and model:
+
+```dotenv
+LLM2_ENDPOINT=https://openrouter.ai/api/v1
+LLM2_MODEL=openai/gpt-4.1
+```
+
+The endpoint must be an OpenAI-compatible base URL. Both a base URL and a URL
+ending in `/chat/completions` are accepted.
 
 :::note
-Each owner can use either a phone JID or an LID. If the phone JID does not work, use `/info` to get the LID.
 
-[See the full LID guide here](/installation/how-to-get-lid).
+`.env.minimal.example` contains only the values most installations need. The
+[full `.env.example`](https://github.com/Chomosuke9/WazzapAgent/blob/main/.env.example)
+documents multi-account, networking, fallback-model, media, logging, and
+Sub-Agent options.
+
 :::
 
-### 3. Install Dependencies
+## 3. Install dependencies
 
-**Node.js gateway:**
+Install the Node gateway:
 
 ```bash
 pnpm install
 ```
 
-**Python bridge:**
+Create a Python virtual environment and install the bridge:
 
 ```bash
-pip install -r requirements.txt
-```
-
-Or with a virtual environment (recommended):
-
-```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
-### 4. Run WazzapAgents
+On Windows PowerShell:
 
-Two components must run at the same time. The Node gateway is the WebSocket **server**, so start the **gateway first**, then the Python bridge (the client) that dials into it.
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+```
 
-:::tip
-Use a terminal multiplexer such as Tmux, Zellij, or Byobu so each service can keep running in the background.
-:::
+## 4. Start WazzapAgents
 
-**Terminal 1 — Node.js gateway (WS server):**
+On Linux or macOS, the included supervisor starts both required processes:
+
+```bash
+bash start.sh
+```
+
+For development or Windows, start them separately.
+
+Terminal 1 — Node gateway:
 
 ```bash
 pnpm dev
 ```
 
-**Terminal 2 — Python bridge (WS client):**
+Terminal 2 — Python bridge:
 
 ```bash
+# Linux/macOS
 PYTHONPATH=python python -m bridge.main
 ```
 
-When `WA_PAIRING_NUMBER` is set, the gateway prints an 8-character native
-pairing code. In WhatsApp, open **Linked Devices → Link a Device → Link with
-phone number** and enter it. Leave the variable empty to pair with the QR code
-printed in the terminal. A rejected initial attempt is paused to avoid rapid
-rate-limit loops; restart when you intentionally want a fresh attempt.
+```powershell
+# Windows PowerShell
+$env:PYTHONPATH = "python"
+python -m bridge.main
+```
 
-### Control Panel and Multiple Accounts
+The Node gateway is the WebSocket server, so start it before the Python bridge.
 
-The gateway serves the control panel at `http://127.0.0.1:8080` by default.
-Sign in with `CONTROL_PANEL_TOKEN`. Management APIs fail closed when the token
-is empty.
+## 5. Link WhatsApp
 
-The panel can pair accounts, reconnect or disconnect sessions, edit tenant
-models/settings/prompts/memories, manage activation codes and stickers, inspect
-the Sub-Agent outbox, and perform compatibility-aware updates and restarts.
+Choose one method:
 
-Use **Accounts → Add account** to add tenants without restarting the gateway or
-bridge. The managed catalog is stored in git-ignored `accounts.json`; each
-tenant receives a stable slot and private WebSocket credential and stores data
-under `tenants/<id>/{auth,db,media,stickers}`. Removing an account stops its
-runtime but preserves its tenant directory. Manual `FOLDER_PATHS` and
-`ACCOUNTS_JSON` deployments remain supported.
+1. **Pairing code:** set `WA_PAIRING_NUMBER`. Copy the 8-character code from
+   the console into **WhatsApp → Linked Devices → Link a Device → Link with
+   phone number**.
+2. **QR code:** leave `WA_PAIRING_NUMBER` empty and scan the QR printed in the
+   console.
+3. **Control panel:** leave `WA_PAIRING_NUMBER` empty, open
+   `http://127.0.0.1:8080`, sign in with `CONTROL_PANEL_TOKEN`, and request a
+   pairing code from the account screen.
+
+The session is saved under `data/auth`, so a restart does not require pairing
+again.
+
+## 6. Verify the installation
+
+Before testing a message, confirm that the logs show all three states:
+
+- the Node WebSocket server is listening;
+- the Python bridge is connected; and
+- WhatsApp reports `open` or `WhatsApp socket connected`.
+
+Then send a direct message to the bot. With the minimal configuration, it can
+reply immediately; adding a model through `/modelcfg` is optional. Use
+`/modelcfg` only when you want a different default or a selectable model list.
+
+Useful first checks:
+
+```text
+/info
+/help
+/setting
+```
+
+Owner-only commands require the sender to match `BOT_OWNER_JIDS`. A phone
+number is normally enough because the gateway resolves its WhatsApp LID after
+connecting. See [How to get a LID](/installation/how-to-get-lid) if you need to
+troubleshoot owner detection.
+
+## Control panel and more accounts
+
+The control panel listens on `http://127.0.0.1:8080` by default. Its management
+API stays locked until `CONTROL_PANEL_TOKEN` is set.
+
+Use **Accounts → Add account** to create another isolated tenant. The panel
+stores its managed catalog in the git-ignored `accounts.json`; each account has
+its own `auth`, `db`, `media`, and `stickers` directories. Removing an account
+stops its runtime but preserves its data directory.
 
 :::warning
-The control panel binds to loopback by default. If you expose it through
-Tailscale/LAN, keep the token private and protect it with ACLs, a firewall, or
-an HTTPS reverse proxy.
+
+Loopback is the safe default. If you expose the panel to Tailscale, a LAN, or
+the internet, use a strong token plus network access controls and HTTPS. Never
+publish the internal WebSocket port without `LLM_WS_TOKEN`.
+
 :::
 
-### 5. Add a Model
-
-Add at least one AI model before using the bot. Without a model, the bot cannot do much.
-
-Steps:
-
-1. Make sure your number is registered as an owner. If not, [configure it first](/installation/how-to-get-lid).
-2. Send `/modelcfg add` to the bot with this format:
-
-![model add](/img/slash_model_add.jpg)
-
-```txt
-/modelcfg add <model id>|<model name>|<model description>|<vision support>
-```
-
-:::warning
-1. Use `|` as the separator.
-2. `<model id>` must be accurate; the bot does not automatically fix it.
-3. `<vision support>` must be correct. If the model does not support vision, do not set it to `true`, or the bot may stop responding.
-:::
-
-### Verify the Model
-
-Send `/setting` to open this menu:
-
-![slash setting](/img/slash_setting.jpg)
-
-Tap `Change model`. If the previous step was correct, you should see:
-
-![slash setting model](/img/gpt_model.jpg)
-
-## Sub-Agent
-
-**Sub-Agent** is a separate containerised executor service that runs autonomous agents inside an isolated Docker sandbox. It receives instructions from WazzapAgents, executes tools (bash, Python, JavaScript) inside a sandboxed sidecar, and returns results and output files back to WhatsApp via webhooks.
-
-Unlike the main bot which only replies to chats, Sub-Agent can process heavy tasks that require real code execution.
-
-### When to Enable It
-
-Use Sub-Agent when you want the assistant to handle tasks such as:
-
-- Reading and processing uploaded files (PDF, DOCX, XLSX, PPTX, and more)
-- Extracting tables or summaries from documents
-- Running small scripts (bash, Python, JavaScript) in an isolated sandbox
-- Creating output files (reports, images, documents) and sending them back to WhatsApp
-
-Keep it disabled if you only need normal chat replies or moderation.
-
-:::info
-Sub-Agent **cannot** access the internet directly. It can only process files and run code inside its own sandbox.
-:::
-
-### Architecture Overview
-
-Sub-Agent runs as a separate service ([WazzapSubAgents](https://github.com/Chomosuke9/WazzapSubAgents)) consisting of two containers:
-
-1. **executor-service** (Flask, port 5000) — receives requests from WazzapAgents, runs the agent loop (LLM ReAct), and sends callback webhooks.
-2. **executor-executor** (sidecar, port 5001) — executes bash/Python/JavaScript code produced by the agent inside a sandbox.
-
-WazzapAgents sends tasks to `/execute`, Sub-Agent processes them asynchronously, then sends results back via webhook to WazzapAgents. If there is a queue, users are notified of their queue position.
-
-### 1. Run WazzapSubAgents
-
-Clone and configure the Sub-Agent service:
-
-```bash
-git clone https://github.com/Chomosuke9/WazzapSubAgents.git && cd WazzapSubAgents
-cp .env.example .env
-```
-
-Edit `.env` and set at least:
-
-```bash
-LLM_API_KEY=<your API key>
-AGENT_MODEL_LOW=<model for the sub-agent>
-```
-
-:::note
-`AGENT_MODEL` (without `_LOW`) is still supported for backward compatibility and will be used as `AGENT_MODEL_LOW` if `AGENT_MODEL_LOW` is not set.
-:::
-
-Optionally, configure a higher-quality model for complex tasks:
-
-```bash
-AGENT_MODEL_HIGH=<more powerful model for complex tasks>
-# If unset, falls back to AGENT_MODEL_LOW
-AGENT_TEMPERATURE_LOW=0.7
-AGENT_TEMPERATURE_HIGH=0.3
-```
-
-Run with Docker Compose (recommended):
-
-```bash
-docker-compose up -d
-```
-
-Or run natively (without Docker for the main service, only the sidecar uses Docker):
-
-```bash
-pip install -r requirements.txt
-python main.py
-```
-
-The service exposes:
-
-- Main API: `http://localhost:5000`
-- Executor sidecar: `http://localhost:5001`
-
-### 2. Connect WazzapAgents to the Sub-Agent
-
-In the WazzapAgents `.env`, configure:
-
-```bash
-SUBAGENT_URL=http://localhost:5000
-SUBAGENT_API_TOKEN=<the-same-main-api-token-in-both-services>
-SUBAGENT_WEBHOOK_PORT=8081
-SUBAGENT_WEBHOOK_URL=http://localhost:8081/subagent/callback
-```
-
-If WazzapSubAgents runs in Docker and needs to call back into WazzapAgents on the host, use:
-
-```bash
-SUBAGENT_WEBHOOK_URL=http://host.docker.internal:8081/subagent/callback
-SUBAGENT_WEBHOOK_TOKEN=<the-same-long-random-secret-in-both-services>
-```
-
-This non-loopback callback URL makes the bridge bind `0.0.0.0` automatically.
-Startup fails closed if the token is missing. For multiple accounts, use
-`http://host.docker.internal:{port}/subagent/callback` so each account remains
-routable. Explicit public or reverse-proxy ports are otherwise preserved.
-`SUBAGENT_API_TOKEN` authenticates the opposite direction (main API calls and
-large-output downloads), so use a different random value from
-`SUBAGENT_WEBHOOK_TOKEN`.
-
-:::tip
-The Docker Compose file in WazzapSubAgents already maps `host.docker.internal` on Linux with `host-gateway`.
-:::
-
-### 3. Share Files Between Services
-
-For file tasks, both services must read and write the same host directory. When using Docker Compose, use `/storage` as the shared directory:
-
-```bash
-# In WazzapSubAgents .env:
-SUBAGENT_STORAGE_DIR=/storage
-WORKDIR_BASE=/storage/subagent_work
-```
-
-When running natively (without Docker Compose), leave `SUBAGENT_INPUT_STAGING_DIR` unset and WazzapAgents will use `<project_root>/data/subagent_in` automatically.
-
-Same-host deployments can use the shared directory directly. Cross-host
-deployments stream non-inlined output files through the authenticated Sub-Agent
-API; WazzapAgents verifies the advertised byte count and SHA-256 before sending
-an attachment to WhatsApp.
-
-### 4. Enable Sub-Agent in WhatsApp
-
-Only the bot owner can toggle Sub-Agent:
-
-```txt
-/subagent on
-/subagent off
-/subagent global on
-/subagent global off
-```
-
-Check the current chat setting:
-
-```txt
-/subagent
-```
-
-### 5. Test the Flow
-
-After both services are running:
-
-1. Send `/subagent on` in a chat.
-2. Ask for a task that needs tooling, for example: "Read this document and extract the tables."
-3. The main agent should acknowledge the task.
-4. Sub-Agent processes the task asynchronously. If there is a queue, you will be notified of your position.
-5. Sub-Agent sends progress callbacks via the webhook.
-6. When done, WazzapAgents summarizes the report and sends any output files.
-
-:::warning
-Sub-Agent runs code inside a Docker sandbox. Although isolated, only run it on a server you control, keep API keys private, and only enable it for trusted chats.
-:::
-
-## Environment Variables
-
-### Gateway (Node.js)
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `WS_LISTEN_PORT` | `3000` | Port the WS server (Node gateway) listens on |
-| `NODE_URL` | `ws://localhost:3000` | URL the Python bridge dials to reach the gateway |
-| `WS_BIND_HOST` | `127.0.0.1` | WS server bind host (set `0.0.0.0` for cross-host) |
-| `LLM_WS_TOKEN` | *(empty)* | Bearer token for WS authentication |
-| `WA_PAIRING_NUMBER` | *(empty)* | Digits-only phone number for native pairing-code startup |
-| `WA_PAIRING_RETRY_COOLDOWN_MS` | `900000` | Cooldown after a rejected initial pairing attempt |
-| `INSTANCE_ID` | `default` | Gateway instance identifier |
-| `DATA_DIR` | `./data` | Runtime data directory |
-| `MEDIA_DIR` | `./data/media` | Media storage directory |
-| `LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
-| `LOG_COLOR` | `auto` | Shared Node/Python color mode (`auto`, `always`, `never`) |
-| `BAILEYS_LOG_LEVEL` | `warn` | Baileys internal log level |
-| `WS_RECONNECT_MS` | `5000` | WS reconnect interval in ms |
-| `GROUP_METADATA_TIMEOUT_MS` | `8000` | Group metadata fetch timeout |
-| `DOWNLOAD_TIMEOUT_MS` | `60000` | Media download timeout |
-| `SEND_TIMEOUT_MS` | `60000` | Send message timeout |
-| `UPSERT_CONCURRENCY` | `2` | Message processing concurrency |
-| `BOT_OWNER_JIDS` | *(empty)* | Owner JIDs/LIDs, comma-separated |
-| `PRIVATE_CHAT_ENABLED` | `true` | Allow private-chat commands and LLM ingress |
-| `CONTROL_PANEL_ENABLED` | `true` | Serve the local management panel |
-| `CONTROL_PANEL_HOST` | `127.0.0.1` | Control panel bind host |
-| `CONTROL_PANEL_PORT` | `8080` | Control panel HTTP port |
-| `CONTROL_PANEL_TOKEN` | *(empty)* | Required login token for management APIs |
-
-### Bridge (Python)
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `HISTORY_LIMIT` | `20` | History messages per chat |
-| `INCOMING_DEBOUNCE_SECONDS` | `5` | Debounce window for batching |
-| `INCOMING_BURST_MAX_SECONDS` | `20` | Maximum burst window duration |
-| `ASSISTANT_NAME` | `LLM` | Bot display name in context |
-| `CONTEXT_TIME_UTC_OFFSET_HOURS` | *(auto)* | UTC offset for timestamps |
-| `DIRECT_INVOKE_API_KEY` | *(empty / disabled)* | Enables authenticated proactive `/post` requests |
-| `DIRECT_INVOKE_HOST` | `127.0.0.1` | Direct-invoke bind host |
-| `DIRECT_INVOKE_PORT` | `8090` | Base port; each tenant uses `base + slot` |
-
-### Sub-Agent (Bridge to WazzapSubAgents)
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SUBAGENT_URL` | `http://localhost:5000` | WazzapSubAgents API URL |
-| `SUBAGENT_API_TOKEN` | *(none)* | Bearer token for main API calls and non-inlined output downloads |
-| `SUBAGENT_WEBHOOK_PORT` | `8081` | Local callback webhook port |
-| `SUBAGENT_WEBHOOK_URL` | `http://localhost:8081/subagent/callback` | Callback URL sent to WazzapSubAgents |
-| `SUBAGENT_WEBHOOK_HOST` | *(automatic)* | Loopback for local URLs, `0.0.0.0` for remote/Docker URLs |
-| `SUBAGENT_WEBHOOK_TOKEN` | *(none)* | Shared callback secret; required on non-loopback binds |
-| `SUBAGENT_HTTP_TIMEOUT` | `120` | Timeout for an individual Sub-Agent HTTP request |
-| `SUBAGENT_OUTPUT_DOWNLOAD_TIMEOUT_S` | `900` | Timeout for a streamed non-inlined output |
-| `SUBAGENT_STEER_CONSUME_TIMEOUT_S` | `1800` | Maximum wait for accepted steering to be consumed |
-| `SUBAGENT_ENABLED_DEFAULT` | `false` | Enable Sub-Agent by default for new chats |
-| `SUBAGENT_WAIT_TIMEOUT_S` | `900` | Maximum silent wait for a Sub-Agent completion callback |
-| `SUBAGENT_MAX_WAIT_S` | `7200` | Absolute wall-clock limit for one Sub-Agent task |
-| `SUBAGENT_SUBMIT_RETRY_MAX` | `5` | Retry budget for transient submit and steering failures |
-| `SUBAGENT_SUBMIT_RETRY_BASE_BACKOFF` | `2.0` | Initial retry delay in seconds |
-| `SUBAGENT_SUBMIT_RETRY_MAX_BACKOFF` | `60.0` | Maximum retry delay in seconds |
-
-### LLM1 (Routing)
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LLM1_ENDPOINT` | *(OpenAI default)* | LLM1 API endpoint |
-| `LLM1_MODEL` | `openai/gpt-oss-20b` | Model for routing |
-| `LLM1_API_KEY` | *(empty)* | LLM1 API key |
-| `LLM1_TEMPERATURE` | `0` | LLM1 temperature |
-| `LLM1_TIMEOUT` | `8` | Timeout in seconds |
-| `LLM1_HISTORY_LIMIT` | `20` | History limit for LLM1 context |
-| `LLM1_MESSAGE_MAX_CHARS` | `500` | Max chars per message for LLM1 |
-| `LLM1_ENABLE_MEDIA_INPUT` | `0` | Enable LLM1 multimodal input |
-| `LLM1_FALLBACK_ENDPOINT` | *(reuse LLM1)* | Fallback endpoint |
-| `LLM1_FALLBACK_MODEL` | *(empty)* | Fallback model |
-| `LLM1_FALLBACK_API_KEY` | *(reuse LLM1)* | Fallback API key — set this if the fallback endpoint uses a different key |
-
-### LLM2 (Response)
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LLM2_ENDPOINT` | *(OpenAI default)* | LLM2 API endpoint |
-| `LLM2_MODEL` | `gpt-5.3` | Default model — overridden by the database if a model has been added via `/modelcfg add` |
-| `LLM2_API_KEY` | *(empty)* | LLM2 API key |
-| `LLM2_TEMPERATURE` | `0.5` | LLM2 temperature |
-| `LLM2_TIMEOUT` | `20` | Timeout in seconds |
-| `LLM2_RETRY_MAX` | `0` | Max retries on timeout |
-| `LLM2_RETRY_BACKOFF_SECONDS` | `0.8` | Backoff between retries |
-| `LLM2_ENABLE_MEDIA_INPUT` | `1` | Enable LLM2 multimodal input |
-| `LLM2_FALLBACK_ENDPOINT` | *(reuse LLM2)* | Fallback endpoint — if the primary fails, requests are retried against this endpoint |
-| `LLM2_FALLBACK_API_KEY` | *(reuse LLM2)* | Fallback API key — set this if the fallback endpoint uses a different key |
-| `LLM2_FALLBACK_MODEL` | *(empty)* | Fallback model — **ignored** if a model exists in the database, because the model is always taken from the DB for all targets |
-
-:::info
-**How LLM2 fallback works:** At runtime, the model is always taken from the database (configured via `/modelcfg add` and `/modelcfg`). The `LLM2_MODEL` and `LLM2_FALLBACK_MODEL` env vars are only used as a fallback when the database has no models at all. The endpoint and API key (`LLM2_ENDPOINT`, `LLM2_API_KEY`, `LLM2_FALLBACK_ENDPOINT`, `LLM2_FALLBACK_API_KEY`) remain important because they determine **which provider** receives the request. So if the primary endpoint times out or errors, the system automatically retries against the fallback endpoint using the same model (from the database).
-:::
+## Optional features
+
+- [Configure WazzapSubAgents](/installation/sub-agent) for document processing
+  and code-execution tasks.
+- Read the [Getting Started guide](/installation/getting-started) to add the bot
+  to a group and choose a response mode.
+- Use the [complete environment reference](https://github.com/Chomosuke9/WazzapAgent/blob/main/.env.example)
+  for advanced deployments.

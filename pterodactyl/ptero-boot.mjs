@@ -1,12 +1,11 @@
 // ---------------------------------------------------------------------------
 // ptero-boot.mjs — entrypoint for a FIXED node-only Pterodactyl image.
 //
-// The parkervcp generic egg runs the server as `/usr/local/bin/${CMD_RUN}`,
-// and `node` is the only interpreter guaranteed to live in /usr/local/bin on
-// the yolks node-only images. So we set CMD_RUN="node pterodactyl/ptero-boot.mjs"
-// and this launcher just hands off to the bash bootstrap (which provisions a
-// portable Python + static ffmpeg into the volume, then runs the Node gateway
-// and the Python bridge together).
+// The public generic Node egg needs an administrator-level startup override
+// whose final command invokes this file with /usr/local/bin/node.
+// Some custom eggs expose the equivalent as CMD_RUN. This launcher then hands
+// off to the bash bootstrap, which provisions portable Python and optional
+// media tools before running the Node gateway and Python bridge together.
 //
 // We exec bash directly via its absolute path (/bin/bash) so we don't depend on
 // bash being in /usr/local/bin. Signals are forwarded so Pterodactyl's Stop

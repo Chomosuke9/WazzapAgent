@@ -27,32 +27,21 @@ cd WazzapAgent
 ### 2. Setup Environment Variables
 
 ```bash
-cp .env.example .env
+cp .env.minimal.example .env
 ```
 
 Edit `.env` and fill in at minimum:
 
-```bash
-# Node.js gateway — WebSocket SERVER listen port (default 3000)
-WS_LISTEN_PORT=3000
-# Host the gateway binds to (default 127.0.0.1; use 0.0.0.0 for cross-host)
-WS_BIND_HOST=127.0.0.1
-
-# Python bridge — URL each WaSocket client dials (default ws://localhost:3000)
-NODE_URL=ws://localhost:3000
-
-# Optional — shared bearer token enforced by Node and sent by the Python client
-LLM_WS_TOKEN=
-
-# Local control plane (management APIs stay locked until this is non-empty)
-CONTROL_PANEL_HOST=127.0.0.1
-CONTROL_PANEL_PORT=8080
-CONTROL_PANEL_TOKEN=choose-a-private-token
-
-# Optional — API keys for LLM providers
-LLM1_API_KEY=sk-...
-LLM2_API_KEY=sk-...
+```dotenv
+LLM2_API_KEY=your-api-key
+BOT_OWNER_JIDS=6281234567890
+CONTROL_PANEL_TOKEN=replace-with-a-long-random-value
+WA_PAIRING_NUMBER=
 ```
+
+Transport defaults already connect the local Python bridge to the local Node
+gateway. Copy `.env.example` instead only when working on advanced runtime or
+network settings.
 
 ### 3. Install Dependencies — Node.js Gateway
 
@@ -153,7 +142,7 @@ On first run, the gateway will display a QR code in the terminal. Scan it with W
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LLM2_ENDPOINT` | *(OpenAI default)* | LLM2 API endpoint |
-| `LLM2_MODEL` | `gpt-5.3` | Model for responder |
+| `LLM2_MODEL` | `gpt-4.1` | Model for responder when no database model is configured |
 | `LLM2_API_KEY` | *(empty)* | LLM2 API key |
 | `LLM2_TEMPERATURE` | `0.5` | LLM2 temperature |
 | `LLM2_TIMEOUT` | `20` | Timeout in seconds |

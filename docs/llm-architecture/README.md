@@ -13,6 +13,7 @@ Architecture documentation for **LLM / agent developers** who need to understand
 4. `03-commands-and-permissions.md` — Slash commands, activation gate, role/permission model, mute enforcement
 5. `04-protocol-and-actions.md` — WebSocket contract: message types, action dispatch, action_ack lifecycle, send modes
 6. `05-state-data-and-db.md` — State management, caching (group info, participants, quiz IDs), and SQLite storage
+7. `06-rebuild-from-scratch.md` — Reconstruction guide covering context/history, subagents, rebuild order, and architecture risks
 
 ## Key principles
 

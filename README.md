@@ -54,30 +54,18 @@ Copy the minimal env template and fill in your keys:
 cp .env.minimal.example .env
 ```
 
-Then edit `.env`:
+Then edit `.env`. Only four decisions are shown in the starter file:
 
 ```dotenv
-# Pair without a QR: the bot's WhatsApp number, digits only with country code.
-# Leave empty to pair via QR instead.
-WA_PAIRING_NUMBER=6281234567890
-
-ASSISTANT_NAME=LLM                # bot display name
-BOT_OWNER_JIDS=628123456789       # owner number(s), for owner-only commands
-
-# LLM2 = the responder (required to actually reply).
-LLM2_ENDPOINT=                    # empty = OpenAI default; or e.g. OpenRouter
-LLM2_MODEL=gpt-4o
-LLM2_API_KEY=sk-...
-
-# Control panel network and login.
-CONTROL_PANEL_HOST=127.0.0.1
-CONTROL_PANEL_PORT=8080
-CONTROL_PANEL_TOKEN=choose-a-private-token
+LLM2_API_KEY=your-api-key
+BOT_OWNER_JIDS=6281234567890
+CONTROL_PANEL_TOKEN=replace-with-a-long-random-value
+WA_PAIRING_NUMBER=6281234567890   # optional; leave empty for QR/panel pairing
 ```
 
-That's the minimal set. `.env.minimal.example` documents the optional **LLM1**
-router (a cheap model that gates replies in groups to save cost), and
-[`.env.example`](./.env.example) is the full reference for every setting.
+The defaults use OpenAI and `gpt-4.1`. Add `LLM2_ENDPOINT` and `LLM2_MODEL` only
+for another OpenAI-compatible provider. [`.env.example`](./.env.example) is the
+full reference for routing, networking, multi-account, and optional features.
 
 ### 3. Run the bot
 
