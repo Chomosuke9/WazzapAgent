@@ -7,6 +7,7 @@ from typing import Iterable, Optional
 
 from .. import config
 from ..history import WhatsAppMessage, assistant_name, format_history
+from ..messaging.context_guard import sanitize_display_name
 from .schemas import LLM1_TOOL  # noqa: F401
 
 # --- LLM2 system-prompt assembly (Step 09; moved verbatim from llm2.py) -------
@@ -633,7 +634,11 @@ def render_stored_mentions(text: str | None, chat_id: str | None) -> str | None:
             fresh = get_participant_name(chat_id, sender_ref)
         except Exception:
             fresh = None
-        return f"@{fresh} ({sender_ref})" if fresh else match.group(0)
+        if not fresh:
+            return match.group(0)
+        # The live roster name is user-controlled; strip structural markers so
+        # a pushName cannot forge transcript syntax inside a trusted block.
+        return f"@{sanitize_display_name(fresh)} ({sender_ref})"
 
     return _STORED_MENTION_RE.sub(_swap, text)
 

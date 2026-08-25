@@ -22,6 +22,7 @@ from .context_guard import (
   BLOCKED_CONTEXT_INJECTION_TEXT,
   ContextInjectionResult,
   detect_context_injection,
+  sanitize_display_name,
 )
 
 logger = setup_logging()
@@ -373,9 +374,9 @@ def _context_injection_result(payload: dict) -> ContextInjectionResult | None:
 
 
 def _blocked_sender(payload: dict) -> tuple[str, str]:
-  sender = _normalize_preview_text(" ".join(str(
+  sender = _normalize_preview_text(sanitize_display_name(str(
     payload.get("senderName") or payload.get("senderId") or payload.get("chatId") or "unknown"
-  ).split()), limit=128).lstrip("@") or "unknown"
+  )), limit=128).lstrip("@") or "unknown"
   sender_ref = _normalize_preview_text(
     " ".join(str(payload.get("senderRef") or "unknown").split()),
     limit=32,
@@ -535,9 +536,9 @@ def _build_burst_current(payloads: list[dict]) -> WhatsAppMessage:
       sender_ref = assistant_sender_ref()
       role_label = ""  # 【You】 already identifies bot messages
     else:
-      sender = _normalize_preview_text(str(
+      sender = _normalize_preview_text(sanitize_display_name(str(
         item.get("senderName") or item.get("senderId") or item.get("chatId") or "unknown"
-      ), limit=128) or "unknown"
+      )), limit=128) or "unknown"
       sender_ref = _normalize_preview_text(
         _clean_text(item.get("senderRef")),
         limit=32,
@@ -554,7 +555,7 @@ def _build_burst_current(payloads: list[dict]) -> WhatsAppMessage:
     quoted = _quoted_from_payload(item)
     if quoted:
       q_id = _normalize_context_msg_id(quoted.get("contextMsgId")) or quoted.get("messageId") or "000000"
-      q_sender = _normalize_preview_text(_quoted_sender(quoted), limit=128) or "someone"
+      q_sender = _normalize_preview_text(sanitize_display_name(_quoted_sender(quoted) or ""), limit=128) or "someone"
       q_sender_ref = _normalize_preview_text(_quoted_sender_ref(quoted), limit=32)
       q_text = _normalize_preview_text(_quoted_text_for_context(quoted))
       q_media = _infer_quoted_media(quoted)

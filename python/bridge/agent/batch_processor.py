@@ -455,6 +455,13 @@ class BatchProcessor:
       # Handle /dump: build full LLM context and send as a .txt attachment
       # (must run before cmd_handled check since Node marks all slash commands as handled)
       if cmd_name == "dump":
+        # Owner-only (mirrors the Node registry gate): inbound payloads are
+        # forwarded with commandHandled=true even when dispatch was denied,
+        # so the bridge must refuse non-owner dumps here too. Silent skip —
+        # Node already sent the denial reply for human-typed commands.
+        if not (payload.get("senderIsOwner") or payload.get("fromMe")):
+          logger.info("dump denied for non-owner", extra={"chat_id": p_chat_id})
+          continue
         p_context = session._llm_context.from_payload(p_chat_id, payload)
         p_reply_to = _normalize_context_msg_id(payload.get("contextMsgId"))
         # Serialise the SAME messages LLM2 is actually invoked with (via the

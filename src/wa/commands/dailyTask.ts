@@ -119,6 +119,9 @@ export const dailyTaskCommand: CommandHandler = {
   commands: ["daily-task"],
   description:
     "List, add, or delete recurring daily tasks. Use /daily-task, /daily-task add <HH:MM> <prompt>, or /daily-task delete <taskId>.",
-  permission: "public",
+  // Bot-initiated only (`from_me` via run_command) plus the human owner.
+  // Public access would let any member plant an arbitrary recurring prompt
+  // that the bridge fires as a trusted system turn (context-injection vector).
+  permission: "from_me or isOwner",
   run: (_sock, _message, ctx) => handleDailyTask(ctx),
 };

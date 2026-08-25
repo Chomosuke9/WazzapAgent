@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Iterable, Optional, Sequence
 
 from . import config
+from .messaging.context_guard import sanitize_display_name
 
 DEFAULT_ASSISTANT_NAME = "LLM"
 ASSISTANT_CONTEXT_SENDER_REF = "You"
@@ -333,7 +334,7 @@ def format_history(messages: Iterable[WhatsAppMessage], history: list[WhatsAppMe
     # system header (and no reply/media fields) so none of the original text is
     # interpreted as part of the conversation context.
     if msg.role == "blocked":
-      sender = (_compact(msg.sender) or "unknown").lstrip("@")
+      sender = (sanitize_display_name(msg.sender) or "unknown").lstrip("@")
       sender_ref = _compact(msg.sender_ref) or "unknown"
       lines.append(f"【#system】 {time}")
       lines.append(f"@{sender} 【{sender_ref}】: {_message_text(msg)}")
@@ -345,7 +346,7 @@ def format_history(messages: Iterable[WhatsAppMessage], history: list[WhatsAppMe
       sender_ref = assistant_sender_ref()
       role_label = ""  # 【You】 already identifies bot messages
     else:
-      sender = _compact(msg.sender) or "unknown"
+      sender = sanitize_display_name(msg.sender) or "unknown"
       sender_ref = _compact(msg.sender_ref) or "unknown"
       role_label = _format_role(msg.sender_is_admin, msg.sender_is_super_admin)
 
@@ -357,7 +358,7 @@ def format_history(messages: Iterable[WhatsAppMessage], history: list[WhatsAppMe
       lines.append(f"REPLYING TO 【#{_normalize_context_msg_id(msg.quoted_message_id)}】")
     elif msg.quoted_message_id:
       q_id = _normalize_context_msg_id(msg.quoted_message_id)
-      q_sender = _compact(msg.quoted_sender) or "someone"
+      q_sender = sanitize_display_name(msg.quoted_sender) or "someone"
       q_sender_ref = _compact(msg.quoted_sender_ref) or None
       q_text = _compact(msg.quoted_text) or ""
       q_media = _compact(msg.quoted_media)

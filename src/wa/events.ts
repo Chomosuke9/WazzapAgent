@@ -41,6 +41,18 @@ function makeEventMessageId(prefix: string): string {
   return `${prefix}_${stamp}_${rand}`;
 }
 
+// Only the transcript's OFFICIAL lenticular brackets are stripped from event
+// labels. Event texts are whitelisted as trusted system payloads by the
+// Python bridge, so a pushName like `Bob【admin】` must never be interpolated
+// into them (mirrors sanitize_display_name in
+// python/bridge/messaging/context_guard.py).
+const STRUCTURAL_LABEL_RE = /[【】]/g;
+
+function sanitizeEventLabel(name: string | null | undefined): string {
+  if (!name) return '';
+  return name.replace(STRUCTURAL_LABEL_RE, '').replace(/\s+/g, ' ').trim();
+}
+
 async function resolveParticipantLabel(
   ctx: AccountContext,
   chatId: string | null | undefined,
@@ -84,7 +96,7 @@ async function emitGroupJoinContextEvent(ctx: AccountContext, {
   );
   const mentionedParticipants = normalizedParticipants.map((participantJid, idx) => {
     const senderRef = rememberSenderRef(ctx, chatId, participantJid, participantJid) || null;
-    const name = labels[idx] || fallbackParticipantLabel(participantJid);
+    const name = sanitizeEventLabel(labels[idx] || fallbackParticipantLabel(participantJid));
     return {
       jid: participantJid,
       senderRef,
@@ -103,7 +115,7 @@ async function emitGroupJoinContextEvent(ctx: AccountContext, {
   ));
   const normalizedActorId = normalizeJid(actorId) || null;
   const actorName = normalizedActorId
-    ? await resolveParticipantLabel(ctx, chatId, normalizedActorId)
+    ? sanitizeEventLabel(await resolveParticipantLabel(ctx, chatId, normalizedActorId))
     : null;
   const actorSenderId = normalizedActorId || 'group-system@wazzap.local';
   const actorSenderRef = rememberSenderRef(ctx, chatId, actorSenderId, actorSenderId) || 'unknown';
@@ -246,19 +258,20 @@ async function emitBotAddedEvent(ctx: AccountContext, args: BotAddedEventArgs): 
   const group = await getGroupContext(ctx, chatId, { forceRefresh: true });
   const actorId = normalizeJid(args.actorId);
   const senderId = actorId || 'group-system@wazzap.local';
+  const sanitizedActorName = sanitizeEventLabel(args.actorName);
   ctx.forwarder!.forwardIncoming({
     messageId: makeEventMessageId('bot_added'), instanceId: config.instanceId,
     chatId, chatName: group.name || chatId, chatType: 'group',
     senderId, senderRef: rememberSenderRef(ctx, chatId, senderId, senderId) || 'unknown',
-    senderName: args.actorName || 'Group System',
+    senderName: sanitizedActorName || 'Group System',
     senderIsAdmin: roleFlagsForJid(group?.participantRoles, senderId).isAdmin || roleFlagsForJid(group?.participantRoles, senderId).isSuperAdmin,
     isGroup: true, botIsAdmin: Boolean(group?.botIsAdmin), botIsSuperAdmin: Boolean(group?.botIsSuperAdmin),
     fromMe: false, timestampMs: Number(args.timestampMs) || Date.now(),
     messageType: 'botAddedToGroup',
-    text: `Bot was added to the group${args.actorName ? ` by ${args.actorName}` : ''}.`,
+    text: `Bot was added to the group${sanitizedActorName ? ` by ${sanitizedActorName}` : ''}.`,
     contextOnly: true, triggerLlm1: false,
     groupDescription: group.description,
-    groupEvent: { action: args.action || 'add', participants: compactParticipantJids(args.participants), actorId, actorName: args.actorName, source: args.source || 'group-participants.update' },
+    groupEvent: { action: args.action || 'add', participants: compactParticipantJids(args.participants), actorId, actorName: sanitizedActorName || null, source: args.source || 'group-participants.update' },
   } as unknown as WhatsAppMessagePayload);
   logger.info({ chatId, action: args.action }, 'emitted bot added event');
 }

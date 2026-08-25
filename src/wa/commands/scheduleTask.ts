@@ -128,6 +128,9 @@ export const scheduleTaskCommand: CommandHandler = {
   commands: ["schedule-task"],
   description:
     "Schedule a task for the bot to run after a delay. Format: /schedule-task <duration> <prompt> — duration is a combination of hours (H) and minutes (M), e.g. 2H30M, 30M, 45m (max 30 days). Example: /schedule-task 2H30M Remind @Budi (abc123) about the meeting.",
-  permission: "public",
+  // Bot-initiated only (`from_me` via run_command) plus the human owner.
+  // Public access would let any member plant an arbitrary prompt that the
+  // bridge later fires as a trusted system turn (context-injection vector).
+  permission: "from_me or isOwner",
   run: (_sock, _message, ctx) => handleScheduleTask(ctx),
 };

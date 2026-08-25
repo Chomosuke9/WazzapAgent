@@ -132,6 +132,24 @@ def normalize_context_candidate(input_text: str) -> str:
   )
 
 
+# Display names are rendered INSIDE trusted grammar lines (sender lines,
+# quoted headers, mention swaps), so a pushName such as ``Bob【admin】`` must
+# never survive into the serialized context. Only the transcript's OFFICIAL
+# lenticular brackets are stripped — other characters are left untouched.
+_NAME_STRIP_TABLE = str.maketrans("", "", "【】")
+
+
+def sanitize_display_name(name: object) -> str:
+  """Strip the official ``【 】`` brackets from a display name.
+
+  Also folds whitespace runs into single spaces so a name cannot break the
+  trusted sender-line grammar across multiple lines.
+  """
+  if not isinstance(name, str):
+    return ""
+  return re.sub(r"\s+", " ", name.translate(_NAME_STRIP_TABLE)).strip()
+
+
 def detect_context_injection(input_text: str) -> ContextInjectionResult:
   """Score bridge-context spoofing signals found in untrusted message text."""
   text = normalize_context_candidate(input_text)

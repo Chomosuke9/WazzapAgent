@@ -162,8 +162,9 @@ function buildFakeMessage({
 /**
  * Resolve the bot's own JID for impersonation. Falls back to a generic
  * `bot@s.whatsapp.net` placeholder if the socket isn't fully ready — command
- * handlers only use this for permission checks and `senderIsOwner`, both of
- * which are explicitly forced to true below since the bot is privileged.
+ * handlers only use this for permission checks. `senderIsOwner` is
+ * deliberately NOT granted: model-initiated commands resolve `from_me` /
+ * admin atoms normally but never the `owner` atom.
  */
 function resolveBotSenderId(ctx: AccountContext): string {
   const sock = ctx.sock;
@@ -272,10 +273,12 @@ async function dispatchRunCommand(
     chatType,
     senderId: botSenderId,
     senderIsAdmin,
-    // The bot is privileged by definition for self-triggered commands.
-    // Without this owner-only commands like `/owner-contact`, `/subagent`,
-    // and `/idle` would refuse to run.
-    senderIsOwner: true,
+    // Model-initiated commands run WITHOUT owner privileges: the `owner`
+    // atom resolves false so owner-only commands (/broadcast, /generate,
+    // /bot-conf, …) can never be reached by steering LLM2. Every other
+    // atom still resolves normally — `fromMe`/`senderIsAdmin` below keep
+    // `/group`, `/schedule-task`, admin-gated config, etc. working.
+    senderIsOwner: false,
     senderRole,
     senderDisplay: 'Bot',
     botIsAdmin: Boolean(group?.botIsAdmin),

@@ -24,6 +24,10 @@ export const dumpCommand: CommandHandler = {
   commands: ["dump"],
   description:
     "Export the full LLM context (system prompt, group description, chat state, history, and current message) as a .txt file.",
-  permission: "public",
+  // Owner-only: the dump serialises the full LLM context (system prompt,
+  // overrides, memory, history). The bridge independently re-checks this in
+  // batch_processor because inbound payloads carry commandHandled=true even
+  // when the registry denied dispatch.
+  permission: "isOwner",
   run: (_sock, _message, ctx) => handleDump(ctx),
 };
