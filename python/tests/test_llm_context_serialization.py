@@ -172,18 +172,18 @@ class HistoryFormattingTests(unittest.TestCase):
     with patch.dict(os.environ, {"ASSISTANT_NAME": "Vivy Custom"}, clear=False):
       rendered = format_history(messages)
 
-    self.assertIn("[#001880]", rendered)
-    self.assertIn("Agus Kebab (12lttc) (admin): plain text message", rendered)
-    self.assertIn("[#001881]", rendered)
-    self.assertIn("Agus Kebab (12lttc): [image] media caption", rendered)
+    self.assertIn("【#001880】", rendered)
+    self.assertIn("Agus Kebab 【12lttc】【admin】: plain text message", rendered)
+    self.assertIn("【#001881】", rendered)
+    self.assertIn("Agus Kebab 【12lttc】: 【image】 media caption", rendered)
     self.assertIn("reply to image", rendered)
     self.assertNotIn("| media=image", rendered)
     self.assertNotIn('quoted_text=<media:image>', rendered)
     self.assertIn("hello world", rendered)
-    self.assertIn("[#pending]", rendered)
-    self.assertIn("Vivy Custom (You): assistant provisional", rendered)
-    self.assertIn("[#system]", rendered)
-    self.assertIn("unknown (unknown): system event line", rendered)
+    self.assertIn("【#pending】", rendered)
+    self.assertIn("Vivy Custom 【You】: assistant provisional", rendered)
+    self.assertIn("【#system】", rendered)
+    self.assertIn("unknown 【unknown】: system event line", rendered)
 
   def test_build_burst_current_uses_env_utc_offset_when_set(self) -> None:
     payload = _base_payload()
@@ -335,7 +335,7 @@ class PromptContextTests(unittest.TestCase):
     self.assertIsNotNone(burst.text)
     assert burst.text is not None
     self.assertIn("REPLYING TO", burst.text)
-    self.assertIn("[image]", burst.text)
+    self.assertIn("【image】", burst.text)
     self.assertNotIn("| media=image", burst.text)
     self.assertNotIn("quoted_text=<media:image>", burst.text)
 
@@ -363,7 +363,7 @@ class PromptContextTests(unittest.TestCase):
 
     self.assertNotIn("The latest trigger message has no attached media.", metadata_text)
     # quotedHasMedia is surfaced in llm2 context, not in llm1 metadata block
-    self.assertIn("[image]", context_text)
+    self.assertIn("【image】", context_text)
     self.assertNotIn("| media=image", context_text)
 
   def test_llm2_context_injection_mentions_quoted_vs_current_media(self) -> None:

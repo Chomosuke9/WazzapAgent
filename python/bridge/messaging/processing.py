@@ -207,7 +207,7 @@ def _mentioned_participant_rows(payload: dict) -> list[dict]:
 def _mention_label(row: dict) -> str:
   if bool(row.get("isBot")):
     # The bot's mention label must reflect its CANONICAL identity — the
-    # configured ASSISTANT_NAME (same name used for "(You)" turns and declared
+    # configured ASSISTANT_NAME (same name used for "【You】" turns and declared
     # to the LLM as the "@<name> (bot)" mention token) — NOT the WhatsApp
     # push-name the gateway resolved for the bot's JID. Those two can differ
     # (e.g. a WhatsApp profile literally named "Vivy (bot)"), which made bot
@@ -524,8 +524,8 @@ def _build_burst_current(payloads: list[dict]) -> WhatsAppMessage:
     formatted_time = format_context_time(timestamp_ms)
     if injection_result is not None:
       sender, sender_ref = _blocked_sender(item)
-      lines.append(f"[#system] {formatted_time}")
-      lines.append(f"@{sender} ({sender_ref}): {BLOCKED_CONTEXT_INJECTION_TEXT}")
+      lines.append(f"【#system】 {formatted_time}")
+      lines.append(f"@{sender} 【{sender_ref}】: {BLOCKED_CONTEXT_INJECTION_TEXT}")
       lines.append("")
       continue
 
@@ -533,7 +533,7 @@ def _build_burst_current(payloads: list[dict]) -> WhatsAppMessage:
     if bool(item.get("fromMe")):
       sender = assistant_name()
       sender_ref = assistant_sender_ref()
-      role_label = ""  # (You) already identifies bot messages
+      role_label = ""  # 【You】 already identifies bot messages
     else:
       sender = _normalize_preview_text(str(
         item.get("senderName") or item.get("senderId") or item.get("chatId") or "unknown"
@@ -548,8 +548,8 @@ def _build_burst_current(payloads: list[dict]) -> WhatsAppMessage:
     media = _infer_media(item)
     
     # Header line
-    lines.append(f"[#{context_msg_id}] {formatted_time}")
-    
+    lines.append(f"【#{context_msg_id}】 {formatted_time}")
+
     # Reply line
     quoted = _quoted_from_payload(item)
     if quoted:
@@ -559,7 +559,7 @@ def _build_burst_current(payloads: list[dict]) -> WhatsAppMessage:
       q_text = _normalize_preview_text(_quoted_text_for_context(quoted))
       q_media = _infer_quoted_media(quoted)
 
-      # Build sender display: "Name (ref) (role)"
+      # Build sender display: "Name 【ref】【role】"
       q_is_admin = bool(quoted.get("senderIsAdmin"))
       q_is_super_admin = bool(quoted.get("senderIsSuperAdmin"))
 
@@ -573,12 +573,12 @@ def _build_burst_current(payloads: list[dict]) -> WhatsAppMessage:
 
       q_role_label = ""
       if q_is_super_admin:
-        q_role_label = " (superadmin)"
+        q_role_label = "【superadmin】"
       elif q_is_admin:
-        q_role_label = " (admin)"
+        q_role_label = "【admin】"
 
       if q_sender_ref:
-        q_sender_display = f"{q_sender} ({q_sender_ref}){q_role_label}"
+        q_sender_display = f"{q_sender} 【{q_sender_ref}】{q_role_label}"
       else:
         q_sender_display = f"{q_sender}{q_role_label}"
 
@@ -590,22 +590,21 @@ def _build_burst_current(payloads: list[dict]) -> WhatsAppMessage:
         if not is_named_sticker:
           q_text = ""
 
-      q_content = f"[{q_media}] " if q_media else ""
+      q_content = f"【{q_media}】 " if q_media else ""
       if q_text:
         q_content += f'"{q_text}"'
       elif not q_media:
-        q_content = "(empty)"
+        q_content = "【empty】"
 
-      lines.append(f"REPLYING TO [#{q_id}] {q_sender_display}: {q_content}")
+      lines.append(f"REPLYING TO 【#{q_id}】 {q_sender_display}: {q_content}")
 
     # Content line
-    media_part = f"[{media}] " if media else ""
-    content_text = text or (media_part.strip() if media_part else "(empty)")
+    media_part = f"【{media}】 " if media else ""
+    content_text = text or (media_part.strip() if media_part else "【empty】")
     if media and text:
-      content_text = f"[{media}] {text}"
-    
-    role_suffix = f" {role_label}" if role_label else ""
-    lines.append(f"{sender} ({sender_ref}){role_suffix}: {content_text}")
+      content_text = f"【{media}】 {text}"
+
+    lines.append(f"{sender} 【{sender_ref}】{role_label}: {content_text}")
     lines.append("") # Spacer
 
   burst_text = (

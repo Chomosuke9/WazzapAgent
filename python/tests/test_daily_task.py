@@ -96,7 +96,7 @@ def test_daily_runner_persists_fires_and_rearms(monkeypatch):
       assert responder.calls
       call = responder.calls[0]
       assert call["kwargs"]["scheduled_task_block"]
-      assert any("[DAILY TASK]" in (m.text or "") for m in call["history"])
+      assert any("【DAILY TASK】" in (m.text or "") for m in call["history"])
     finally:
       for task in list(tasks):
         task.cancel()

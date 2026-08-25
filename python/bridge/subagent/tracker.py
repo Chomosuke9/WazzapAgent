@@ -721,7 +721,7 @@ class SubTaskTracker:
         )
         lines.append(
             "- The sub-agent's final report will be delivered to you on the next "
-            "turn as a `[SUBTASK FINISHED]` system message; that's when you "
+            "turn as a `【SUBTASK FINISHED】` system message; that's when you "
             "summarise the result for the user."
         )
 
@@ -735,7 +735,7 @@ class SubTaskTracker:
 
         This exists so a follow-up message (e.g. user replying to the report)
         in a fresh burst still has a clear, prompt-level signal of what just
-        happened. The persistent history already carries the [SUBTASK FINISHED]
+        happened. The persistent history already carries the 【SUBTASK FINISHED】
         line, but the model is more reliable when we surface it as a dedicated
         context slot rather than relying on it being noticed inside a chat
         transcript.

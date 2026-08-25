@@ -145,8 +145,8 @@ def test_runner_schedule_fires_invokes_responder_and_deletes_row():
       assert kwargs.get("scheduled_task_block")
       assert "remind everyone" in kwargs["scheduled_task_block"]
       assert kwargs.get("chat_type") == "group"  # c@g.us -> group
-      # the [SCHEDULED TASK] system turn was appended to history
-      assert any("[SCHEDULED TASK]" in (m.text or "") for m in per_chat["c@g.us"])
+      # the 【SCHEDULED TASK】 system turn was appended to history
+      assert any("【SCHEDULED TASK】" in (m.text or "") for m in per_chat["c@g.us"])
     finally:
       await _cancel_all(tasks)
 

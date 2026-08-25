@@ -161,7 +161,7 @@ def _kick_history_note(targets, name_lookup) -> str | None:
     if not ref:
       continue
     who = name_lookup(ref) or ref
-    kicked.append(f"{who} ({ref})" if who != ref else ref)
+    kicked.append(f"{who} 【{ref}】" if who != ref else ref)
   if not kicked:
     return None
   return f"Removed from the group: {', '.join(kicked)}."
@@ -1354,9 +1354,9 @@ class BatchProcessor:
           f"{ch['label']}. {ch['text']}" for ch in _quiz_choices
         )
         _quiz_history_text = (
-          f"[QUESTION SENT]\n"
+          f"【QUESTION SENT】\n"
           f"{action.get('question', '')}\n"
-          f"[BUTTONS] {_choice_summary}"
+          f"【BUTTONS】 {_choice_summary}"
         )
         _prov_quiz_msg = _assistant_provisional(
           _quiz_history_text,

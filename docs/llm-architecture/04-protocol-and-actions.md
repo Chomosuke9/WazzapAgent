@@ -143,7 +143,7 @@ replies from settings menu replies (both use the same button interaction
 path). Quiz button replies are forwarded to the LLM; settings menu replies
 are handled locally and suppressed.
 
-Bots send a synthetic `[QUESTION SENT]` history entry so LLM2 sees its own
+Bots send a synthetic `【QUESTION SENT】` history entry so LLM2 sees its own
 quiz on the next turn.
 
 ## Reliability contract

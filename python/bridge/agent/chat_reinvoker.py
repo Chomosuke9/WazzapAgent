@@ -137,9 +137,9 @@ class ChatReinvoker:
     lock = self._per_chat_lock[chat_id]
     async with lock:
       history = self._per_chat[chat_id]
-      system_text = f"[{system_label}]\n{render_stored_mentions(prompt, chat_id)}"
+      system_text = f"【{system_label}】\n{render_stored_mentions(prompt, chat_id)}"
       # Append the instruction to history as a system turn so the model sees it
-      # as the latest context (mirrors [SUBTASK FINISHED] / [SCHEDULED TASK]).
+      # as the latest context (mirrors 【SUBTASK FINISHED】 / 【SCHEDULED TASK】).
       history.append(WhatsAppMessage(
         timestamp_ms=int(time.time() * 1000),
         sender="system",

@@ -13,7 +13,7 @@ Covers:
   - _hydrate_quoted_from_history hydration from history
   - format_history with one-shot iterator
   - _is_media_stub helper
-  - (superadmin) role label rendering
+  - 【superadmin】 role label rendering
 """
 from __future__ import annotations
 
@@ -85,7 +85,7 @@ class TestMessageTextMediaStubSuppression(unittest.TestCase):
     )
     result = _message_text(msg)
     # Stub text dropped, only media token remains
-    self.assertEqual(result, "[image]")
+    self.assertEqual(result, "【image】")
 
   def test_media_stub_preserved_when_no_media(self) -> None:
     """Regression test: <media:...> text must NOT be silently dropped when
@@ -98,7 +98,7 @@ class TestMessageTextMediaStubSuppression(unittest.TestCase):
       media=None,
     )
     result = _message_text(msg)
-    # Text must be preserved because there's no [media] prefix to duplicate
+    # Text must be preserved because there's no 【media】 prefix to duplicate
     self.assertEqual(result, "<media:photo>")
 
   def test_regular_text_preserved_with_media(self) -> None:
@@ -110,7 +110,7 @@ class TestMessageTextMediaStubSuppression(unittest.TestCase):
       media="image",
     )
     result = _message_text(msg)
-    self.assertEqual(result, "[image] Nice sunset!")
+    self.assertEqual(result, "【image】 Nice sunset!")
 
   def test_regular_text_preserved_without_media(self) -> None:
     msg = WhatsAppMessage(
@@ -132,7 +132,7 @@ class TestMessageTextMediaStubSuppression(unittest.TestCase):
       media="video",
     )
     result = _message_text(msg)
-    self.assertEqual(result, "[video]")
+    self.assertEqual(result, "【video】")
 
   def test_no_text_no_media(self) -> None:
     msg = WhatsAppMessage(
@@ -141,7 +141,7 @@ class TestMessageTextMediaStubSuppression(unittest.TestCase):
       context_msg_id="001000",
     )
     result = _message_text(msg)
-    self.assertEqual(result, "(empty)")
+    self.assertEqual(result, "【empty】")
 
 
 # ---------------------------------------------------------------------------
@@ -178,8 +178,8 @@ class TestFormatHistoryIteratorExhaustion(unittest.TestCase):
     # Must contain both messages, not be empty
     self.assertIn("hello", result)
     self.assertIn("world", result)
-    self.assertIn("[#001000]", result)
-    self.assertIn("[#001001]", result)
+    self.assertIn("【#001000】", result)
+    self.assertIn("【#001001】", result)
 
   def test_format_history_with_explicit_history(self) -> None:
     """format_history with explicit history= should work normally."""
@@ -194,7 +194,7 @@ class TestFormatHistoryIteratorExhaustion(unittest.TestCase):
     ]
     result = format_history(messages, history=messages)
     self.assertIn("hello", result)
-    self.assertIn("[#001000]", result)
+    self.assertIn("【#001000】", result)
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +207,7 @@ class TestReplyingToMediaStubSuppression(unittest.TestCase):
 
   def test_quoted_media_stub_suppressed_with_media(self) -> None:
     """When quoted has both media type and <media:...> text, the stub text
-    should be suppressed in the REPLYING TO line, leaving just [image]."""
+    should be suppressed in the REPLYING TO line, leaving just 【image】."""
     messages = [
       WhatsAppMessage(
         timestamp_ms=1730000000000,
@@ -223,10 +223,10 @@ class TestReplyingToMediaStubSuppression(unittest.TestCase):
       ),
     ]
     result = format_history(messages, history=messages)
-    # Should show [image] but NOT the literal "<media:image>" text
-    self.assertIn("[image]", result)
+    # Should show 【image】 but NOT the literal "<media:image>" text
+    self.assertIn("【image】", result)
     self.assertNotIn("<media:image>", result)
-    # The REPLYING TO line should show just [image]
+    # The REPLYING TO line should show just 【image】
     self.assertIn("REPLYING TO", result)
 
   def test_quoted_real_text_preserved_with_media(self) -> None:
@@ -246,7 +246,7 @@ class TestReplyingToMediaStubSuppression(unittest.TestCase):
       ),
     ]
     result = format_history(messages, history=messages)
-    self.assertIn("[image]", result)
+    self.assertIn("【image】", result)
     self.assertIn("Beautiful sunset", result)
 
   def test_quoted_media_stub_preserved_when_no_media(self) -> None:
@@ -314,7 +314,7 @@ class TestReplyingToMediaStubSuppression(unittest.TestCase):
     burst = _build_burst_current([first, second])
     self.assertIsNotNone(burst.text)
     assert burst.text is not None
-    self.assertIn("[image]", burst.text)
+    self.assertIn("【image】", burst.text)
     # The literal <media:image> stub should be suppressed in the REPLYING TO line
     self.assertNotIn("<media:image>", burst.text)
 
@@ -486,16 +486,16 @@ class TestHydrateQuotedFromHistory(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestFormatRole(unittest.TestCase):
-  """Verify _format_role returns correct labels with parentheses."""
+  """Verify _format_role returns correct labels with lenticular brackets."""
 
   def test_superadmin(self) -> None:
-    self.assertEqual(_format_role(False, True), "(superadmin)")
+    self.assertEqual(_format_role(False, True), "【superadmin】")
 
   def test_admin(self) -> None:
-    self.assertEqual(_format_role(True, False), "(admin)")
+    self.assertEqual(_format_role(True, False), "【admin】")
 
   def test_superadmin_overrides_admin(self) -> None:
-    self.assertEqual(_format_role(True, True), "(superadmin)")
+    self.assertEqual(_format_role(True, True), "【superadmin】")
 
   def test_normal_user(self) -> None:
     self.assertEqual(_format_role(False, False), "")
@@ -557,8 +557,8 @@ class TestFormatHistoryRoleLabels(unittest.TestCase):
         ),
       ]
       result = format_history(messages)
-      self.assertIn("(admin)", result)
-      self.assertIn("AdminUser (adm1) (admin)", result)
+      self.assertIn("【admin】", result)
+      self.assertIn("AdminUser 【adm1】【admin】", result)
 
   def test_superadmin_label_in_history(self) -> None:
     with patch.dict(os.environ, {"ASSISTANT_NAME": "Bot"}, clear=False):
@@ -573,7 +573,7 @@ class TestFormatHistoryRoleLabels(unittest.TestCase):
         ),
       ]
       result = format_history(messages)
-      self.assertIn("(superadmin)", result)
+      self.assertIn("【superadmin】", result)
 
   def test_assistant_message_format(self) -> None:
     with patch.dict(os.environ, {"ASSISTANT_NAME": "TestBot"}, clear=False):
@@ -588,9 +588,9 @@ class TestFormatHistoryRoleLabels(unittest.TestCase):
         ),
       ]
       result = format_history(messages)
-      self.assertIn("TestBot (You)", result)
-      # Assistant messages should NOT have "(assistant)" label
-      self.assertNotIn("(assistant)", result)
+      self.assertIn("TestBot 【You】", result)
+      # Assistant messages should NOT have "【assistant】" label
+      self.assertNotIn("【assistant】", result)
 
   def test_quoted_sender_ref_in_reply_line(self) -> None:
     """REPLYING TO should include senderRef if available."""
@@ -608,10 +608,10 @@ class TestFormatHistoryRoleLabels(unittest.TestCase):
       ),
     ]
     result = format_history(messages, history=messages)
-    self.assertIn("Bob (b2)", result)
+    self.assertIn("Bob 【b2】", result)
 
   def test_quoted_sender_admin_in_reply_line(self) -> None:
-    """REPLYING TO should include (admin) label for quoted admin."""
+    """REPLYING TO should include 【admin】 label for quoted admin."""
     messages = [
       WhatsAppMessage(
         timestamp_ms=1730000000000,
@@ -627,10 +627,10 @@ class TestFormatHistoryRoleLabels(unittest.TestCase):
       ),
     ]
     result = format_history(messages, history=messages)
-    self.assertIn("AdminUser (adm1) (admin)", result)
+    self.assertIn("AdminUser 【adm1】【admin】", result)
 
   def test_quoted_sender_superadmin_in_reply_line(self) -> None:
-    """REPLYING TO should include (superadmin) label for quoted superadmin."""
+    """REPLYING TO should include 【superadmin】 label for quoted superadmin."""
     messages = [
       WhatsAppMessage(
         timestamp_ms=1730000000000,
@@ -646,7 +646,7 @@ class TestFormatHistoryRoleLabels(unittest.TestCase):
       ),
     ]
     result = format_history(messages, history=messages)
-    self.assertIn("SuperUser (su1) (superadmin)", result)
+    self.assertIn("SuperUser 【su1】【superadmin】", result)
 
 
 # ---------------------------------------------------------------------------
@@ -672,7 +672,7 @@ class TestFormatHistoryQuotedMediaStubSuppression(unittest.TestCase):
       ),
     ]
     result = format_history(messages, history=messages)
-    self.assertIn("[video]", result)
+    self.assertIn("【video】", result)
     self.assertNotIn("<media:video>", result)
 
   def test_quoted_media_stub_preserved_without_quoted_media(self) -> None:
@@ -736,21 +736,21 @@ class TestBuildBurstCurrentQuotedFields(unittest.TestCase):
     burst = _build_burst_current(payloads)
     self.assertIsNotNone(burst.text)
     assert burst.text is not None
-    self.assertIn("Bob (b2ref)", burst.text)
+    self.assertIn("Bob 【b2ref】", burst.text)
 
   def test_burst_shows_quoted_admin_label(self) -> None:
     payloads = self._make_two_payloads_with_quoted(senderIsAdmin=True)
     burst = _build_burst_current(payloads)
     self.assertIsNotNone(burst.text)
     assert burst.text is not None
-    self.assertIn("(admin)", burst.text)
+    self.assertIn("【admin】", burst.text)
 
   def test_burst_shows_quoted_superadmin_label(self) -> None:
     payloads = self._make_two_payloads_with_quoted(senderIsSuperAdmin=True)
     burst = _build_burst_current(payloads)
     self.assertIsNotNone(burst.text)
     assert burst.text is not None
-    self.assertIn("(superadmin)", burst.text)
+    self.assertIn("【superadmin】", burst.text)
 
   def test_burst_bot_fromme_quoted_uses_you(self) -> None:
     """When the quoted message is from the bot (fromMe), the senderRef
@@ -759,7 +759,7 @@ class TestBuildBurstCurrentQuotedFields(unittest.TestCase):
     burst = _build_burst_current(payloads)
     self.assertIsNotNone(burst.text)
     assert burst.text is not None
-    self.assertIn("(You)", burst.text)
+    self.assertIn("【You】", burst.text)
 
 
 # ---------------------------------------------------------------------------
@@ -819,7 +819,7 @@ class TestFormatHistoryHydration(unittest.TestCase):
       ),
     ]
     result = format_history(messages)
-    self.assertIn("(admin)", result)
+    self.assertIn("【admin】", result)
 
   def test_format_history_hydrates_quoted_text(self) -> None:
     """When quoted_text is missing but the referenced message has text,

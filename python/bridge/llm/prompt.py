@@ -180,7 +180,7 @@ def _files_for_subagent_block(
     finds no attachment for that ID and the sub-agent silently receives nothing
     (user-visible symptom: "the bot ignored the file I sent").
 
-    Listing the exact ``[#NNNNNN] -> file`` mapping removes the inference the
+    Listing the exact ``【#NNNNNN】 -> file`` mapping removes the inference the
     model keeps getting wrong: it can copy the right ID rather than guess. We
     read ``msg.media`` (the SENDER's own attachment) — never ``quoted_media`` —
     so a ``REPLYING TO`` line that mentions a file can never be mistaken for the
@@ -206,7 +206,7 @@ def _files_for_subagent_block(
         caption = _compact(msg.text)
         if caption and not (caption.startswith("<media:") and caption.endswith(">")):
             label = f'{media} "{caption}"'
-        entries.append(f"- [#{cid}] {label} (from {sender})")
+        entries.append(f"- 【#{cid}】 {label} 【from {sender}】")
 
     # ``history`` passed to LLM2 intentionally excludes the current burst.
     # The merged payload carries every burst attachment stamped with its owning
@@ -237,7 +237,7 @@ def _files_for_subagent_block(
                 or ""
             )
             label = f'{media} "{caption}"' if caption else media
-            entries.append(f"- [#{cid}] {label} (from {sender})")
+            entries.append(f"- 【#{cid}】 {label} 【from {sender}】")
 
     if not entries:
         return None
@@ -357,9 +357,9 @@ sticker_name = exact sticker name from the sticker catalog below. Reason: Do NOT
 - `Current message metadata`: mention/reply signals, recency, window size, chat state
 - `Group description`: use to judge topic relevance
 - `Older messages` = background; `Current messages (burst)` = trigger window
-- Message IDs: 6-digit inside `[#...]`. `[#system]`/`[#pending]` = non-actionable.
-- Roles: `(admin)`, `(superadmin)` are shown next to the name. Bot's own messages use `(You)` as senderRef. Normal members have no role label.
-- Stickers you previously sent appear as `[sticker] name` (e.g. `[sticker] thumbs_up`).
+- Message IDs: 6-digit inside 【#...】. 【#system】/【#pending】 = non-actionable.
+- Roles: 【admin】, 【superadmin】 are shown next to the name. Bot's own messages use 【You】 as senderRef. Normal members have no role label.
+- Stickers you previously sent appear as 【sticker】 name (e.g. 【sticker】 thumbs_up).
 
 ---
 

@@ -223,16 +223,18 @@ blocked marker. Original blocked content is not sent to the LLM.
 ### Rendered format
 
 ```text
-[#004231] 14:07
-Alice (u8k2d1) (admin): Can you summarize this?
+【#004231】 14:07
+Alice 【u8k2d1】【admin】: Can you summarize this?
 
-[#004232] 14:08
-REPLYING TO [#004231]
-Bob (p91cz0): Yes, and make it short.
+【#004232】 14:08
+REPLYING TO 【#004231】
+Bob 【p91cz0】: Yes, and make it short.
 ```
 
-Assistant messages use the bot name and `(You)`. System turns use `[#system]`
-and `SYSTEM:`. Older history uses `trim_quoted=True`, so a quote normally repeats
+Assistant messages use the bot name and `【You】`. System turns use `【#system】`
+and `SYSTEM:`. Only lenticular brackets `【 】` are structural; parentheses in
+names or message text are user content, not annotations. Older history uses
+`trim_quoted=True`, so a quote normally repeats
 only its ID. This saves tokens but loses quoted content once its source leaves
 the rolling window.
 

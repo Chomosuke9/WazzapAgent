@@ -5,7 +5,7 @@ Background: the model reliably decides *to* delegate, but it tended to pass the
 latest request/mention message's ID to ``context_msg_ids`` instead of the
 message that contains the file. The resolver then found no attachment and the
 sub-agent silently received nothing. ``_files_for_subagent_block`` removes that
-inference by listing the exact ``[#NNNNNN] -> file`` mapping.
+inference by listing the exact ``【#NNNNNN】 -> file`` mapping.
 """
 from bridge.history import WhatsAppMessage
 from bridge.llm.prompt import _files_for_subagent_block
@@ -26,9 +26,9 @@ def test_lists_only_messages_that_hold_a_file():
   ]
   block = _files_for_subagent_block(hist)
   assert block is not None
-  assert "[#000196]" in block          # the file-bearing message is listed
-  assert "[#000197]" not in block      # the request message is NOT listed
-  assert "[#000199]" not in block      # a REPLYING-TO-only message is NOT listed
+  assert "【#000196】" in block          # the file-bearing message is listed
+  assert "【#000197】" not in block      # the request message is NOT listed
+  assert "【#000199】" not in block      # a REPLYING-TO-only message is NOT listed
   assert "laporan.pdf" in block        # caption/filename surfaced for disambiguation
 
 
@@ -41,7 +41,7 @@ def test_stickers_are_available_to_subagents():
   hist = [_msg("000201", sender="A", sender_ref="a", media="sticker", text="<media:sticker=thumbs_up>")]
   block = _files_for_subagent_block(hist)
   assert block is not None
-  assert "[#000201]" in block
+  assert "【#000201】" in block
 
 
 def test_dedupes_and_includes_assistant_files():
@@ -52,8 +52,8 @@ def test_dedupes_and_includes_assistant_files():
   ]
   block = _files_for_subagent_block(hist)
   assert block is not None
-  assert block.count("[#000010]") == 1   # deduped
-  assert "[#000011]" in block            # assistant-sent file included (for revisions)
+  assert block.count("【#000010】") == 1   # deduped
+  assert "【#000011】" in block            # assistant-sent file included (for revisions)
 
 
 def test_lists_files_from_current_merged_burst_payload():
@@ -70,6 +70,6 @@ def test_lists_files_from_current_merged_burst_payload():
     ],
   })
   assert block is not None
-  assert "[#000201]" in block
+  assert "【#000201】" in block
   assert "current.pdf" in block
-  assert "[#000202]" not in block
+  assert "【#000202】" not in block

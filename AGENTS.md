@@ -796,7 +796,7 @@ Messages from muted users are completely invisible to LLM1/LLM2.
   smartwatch) so a WhatsApp notification arrives.
 - Request: `GET`/`POST` `/post?q=<prompt>&jid=<chat jid>&key=<api key>`. `q` is
   injected as a **`#system` history turn** (role `system`, rendered as
-  `[#system] … SYSTEM: …` by `history.py`), then LLM2 is re-invoked and the
+  `【#system】 … SYSTEM: …` by `history.py`), then LLM2 is re-invoked and the
   reply is dispatched to `jid`. A bare phone number for `jid` is normalised to
   `<digits>@s.whatsapp.net`. The key may also be sent via `X-Api-Key` or
   `Authorization: Bearer` (preferred — keeps it out of URLs/logs). Returns
@@ -890,7 +890,7 @@ The sub-agent system delegates complex tasks to an external service (WazzapSubAg
   tracks WhatsApp message IDs of sent quizzes. The Node inbound handler uses
   this set to distinguish quiz button replies (→ forward to LLM) from settings
   menu replies (→ handle locally, suppress LLM).
-- The Python bridge maintains a synthetic `[QUESTION SENT]` history entry so
+- The Python bridge maintains a synthetic `【QUESTION SENT】` history entry so
   LLM2 sees its own quiz on the next turn.
 
 ### Idle trigger

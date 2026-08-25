@@ -30,7 +30,7 @@ This module:
   - Stages input files into the cross-process exchange dir.
   - Detects the WhatsApp attachment ``kind`` from the file's MIME type.
   - Renders a human-readable file list to embed into the
-    ``[SUBTASK FINISHED]`` system message so LLM2 can reference the files
+    ``【SUBTASK FINISHED】`` system message so LLM2 can reference the files
     naturally in its text reply.
 """
 from __future__ import annotations
@@ -125,7 +125,7 @@ class StagedFile:
 class SkippedFile:
   source_path: str
   name: str
-  reason: str  # human-readable, embedded in [SUBTASK FINISHED]
+  reason: str  # human-readable, embedded in 【SUBTASK FINISHED】
 
 @dataclass(frozen=True)
 class StagedOutputs:
@@ -794,7 +794,7 @@ def cleanup_input_staging(session_id: str, *, base_dir: Path | None = None) -> N
     )
 
 def format_file_list(staged: list[StagedFile], skipped: list[SkippedFile]) -> str:
-  """Render staged + skipped files for embedding into ``[SUBTASK FINISHED]``.
+  """Render staged + skipped files for embedding into ``【SUBTASK FINISHED】``.
 
   Returns an empty string when there is nothing to mention.
   """

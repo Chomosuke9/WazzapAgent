@@ -13,7 +13,7 @@ The fixes rely on three context blocks that LLM2 sees:
   2. ``format_recent_finished()`` — for follow-up bursts after delivery,
      must mark the task as already-delivered so LLM2 does not redo it.
   3. The post-task re-invoke ``subagent_result_block`` (built in main.py)
-     uses ``[SUBTASK FINISHED]`` from the same tracker state. The recent-
+     uses ``【SUBTASK FINISHED】`` from the same tracker state. The recent-
      finished helper must keep that report intact.
 """
 

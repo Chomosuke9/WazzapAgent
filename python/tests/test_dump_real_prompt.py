@@ -97,7 +97,7 @@ def test_build_messages_includes_subagent_helper_and_real_history(monkeypatch):
     assert "Active sub-agent task" in text
     # 3) the execute_subtask file-ID helper (<files_in_chat>) listing the file
     assert "<files_in_chat>" in text
-    assert "[#000101]" in text
+    assert "【#000101】" in text
     assert "report.pdf" in text
 
     # --- real history, exactly as the model sees it ---

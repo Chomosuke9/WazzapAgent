@@ -191,7 +191,7 @@ def _normalize_context_msg_id(value: Optional[str], *, role: str = "user", media
 
 
 def _is_media_stub(text: str) -> bool:
-  """Return True if text is a generic <media:...> placeholder that duplicates the [media] prefix.
+  """Return True if text is a generic <media:...> placeholder that duplicates the 【media】 prefix.
 
   Named sticker stubs like <media:sticker=thumbs_up> are NOT suppressed —
   the sticker name is meaningful context for the LLM.
@@ -205,29 +205,33 @@ def _is_media_stub(text: str) -> bool:
 
 
 def _message_text(msg: WhatsAppMessage) -> str:
-  media_part = f"[{msg.media}]" if msg.media else ""
+  media_part = f"【{msg.media}】" if msg.media else ""
   text_part = msg.text or ""
-  # Named sticker stubs: render as "[sticker] name" instead of raw placeholder
+  # Named sticker stubs: render as "【sticker】 name" instead of raw placeholder
   if msg.media == "sticker" and text_part.startswith("<media:sticker=") and text_part.endswith(">"):
     sticker_name = text_part[len("<media:sticker="):-1]
     if sticker_name:
-      return f"[sticker] {sticker_name}"
-  # Suppress generic <media:...> placeholders that duplicate the [media] prefix.
+      return f"【sticker】 {sticker_name}"
+  # Suppress generic <media:...> placeholders that duplicate the 【media】 prefix.
   # Only suppress when msg.media is set — without media, the text is the
   # only content and must not be silently dropped.
   if msg.media and _is_media_stub(text_part):
     text_part = ""
   if media_part and text_part:
     return f"{media_part} {text_part}"
-  return media_part or text_part or "(empty)"
+  return media_part or text_part or "【empty】"
 
 
 def _format_role(is_admin: bool, is_super_admin: bool = False) -> str:
-  """Format admin role label for display in LLM context."""
+  """Format admin role label for display in LLM context.
+
+  Rendered glued right after the senderRef bracket (no leading space):
+  ``Nama 【u8k2d1】【admin】:``. Empty string for normal members.
+  """
   if is_super_admin:
-    return "(superadmin)"
+    return "【superadmin】"
   if is_admin:
-    return "(admin)"
+    return "【admin】"
   return ""
 
 
@@ -287,7 +291,7 @@ def _hydrate_from_hist_msg(msg: WhatsAppMessage, hist_msg: WhatsAppMessage) -> N
 
 def format_history(messages: Iterable[WhatsAppMessage], history: list[WhatsAppMessage] | None = None, trim_quoted: bool = False) -> str:
   # ponytail: trim_quoted drops the quoted sender+text on older history and
-  # keeps only the [#id] pointer — the quoted line is usually already in the
+  # keeps only the 【#id】 pointer — the quoted line is usually already in the
   # transcript at that id, so re-printing it is redundant tokens. Caveat: if
   # the quoted message is older than HISTORY_LIMIT it is NOT in the transcript
   # and its content is lost; flip this off (or keep q_content) if that bites.
@@ -308,13 +312,13 @@ def format_history(messages: Iterable[WhatsAppMessage], history: list[WhatsAppMe
     context_msg_id = _normalize_context_msg_id(msg.context_msg_id, role=msg.role, media=msg.media)
     time = format_context_time(msg.timestamp_ms)
 
-    # System-role messages are bridge-injected events (e.g. [SUBTASK FINISHED],
+    # System-role messages are bridge-injected events (e.g. 【SUBTASK FINISHED】,
     # /reset markers) — render them with a clearly-distinct prefix so the LLM
     # cannot confuse them for user content. Without this, format_history used
-    # to flatten them as "system (unknown): ..." which looked like a regular
+    # to flatten them as "system 【unknown】: ..." which looked like a regular
     # user message and caused the model to ignore the signal.
     if msg.role == "system":
-      lines.append(f"[#system] {time}")
+      lines.append(f"【#system】 {time}")
       message_text = _message_text(msg)
       # Indent multi-line system payloads (e.g. SUBTASK FINISHED reports) so
       # they read as a single coherent block rather than being mistaken for
@@ -331,26 +335,26 @@ def format_history(messages: Iterable[WhatsAppMessage], history: list[WhatsAppMe
     if msg.role == "blocked":
       sender = (_compact(msg.sender) or "unknown").lstrip("@")
       sender_ref = _compact(msg.sender_ref) or "unknown"
-      lines.append(f"[#system] {time}")
-      lines.append(f"@{sender} ({sender_ref}): {_message_text(msg)}")
+      lines.append(f"【#system】 {time}")
+      lines.append(f"@{sender} 【{sender_ref}】: {_message_text(msg)}")
       lines.append("")
       continue
 
     if msg.role == "assistant":
       sender = assistant_name()
       sender_ref = assistant_sender_ref()
-      role_label = ""  # (You) already identifies bot messages
+      role_label = ""  # 【You】 already identifies bot messages
     else:
       sender = _compact(msg.sender) or "unknown"
       sender_ref = _compact(msg.sender_ref) or "unknown"
       role_label = _format_role(msg.sender_is_admin, msg.sender_is_super_admin)
 
     # Header line
-    lines.append(f"[#{context_msg_id}] {time}")
-    
+    lines.append(f"【#{context_msg_id}】 {time}")
+
     # Reply line
     if msg.quoted_message_id and trim_quoted:
-      lines.append(f"REPLYING TO [#{_normalize_context_msg_id(msg.quoted_message_id)}]")
+      lines.append(f"REPLYING TO 【#{_normalize_context_msg_id(msg.quoted_message_id)}】")
     elif msg.quoted_message_id:
       q_id = _normalize_context_msg_id(msg.quoted_message_id)
       q_sender = _compact(msg.quoted_sender) or "someone"
@@ -358,15 +362,15 @@ def format_history(messages: Iterable[WhatsAppMessage], history: list[WhatsAppMe
       q_text = _compact(msg.quoted_text) or ""
       q_media = _compact(msg.quoted_media)
 
-      # Build sender display: "Name (ref) (role)"
+      # Build sender display: "Name 【ref】【role】"
       q_role_label = ""
       if msg.quoted_sender_is_super_admin:
-        q_role_label = " (superadmin)"
+        q_role_label = "【superadmin】"
       elif msg.quoted_sender_is_admin:
-        q_role_label = " (admin)"
+        q_role_label = "【admin】"
 
       if q_sender_ref:
-        q_sender_display = f"{q_sender} ({q_sender_ref}){q_role_label}"
+        q_sender_display = f"{q_sender} 【{q_sender_ref}】{q_role_label}"
       else:
         q_sender_display = f"{q_sender}{q_role_label}"
 
@@ -375,18 +379,17 @@ def format_history(messages: Iterable[WhatsAppMessage], history: list[WhatsAppMe
       if q_media and _is_media_stub(q_text):
         q_text = ""
 
-      q_content = f"[{q_media}] " if q_media else ""
+      q_content = f"【{q_media}】 " if q_media else ""
       if q_text:
         q_content += f'"{q_text}"'
       elif not q_media:
-        q_content = "(empty)"
+        q_content = "【empty】"
 
-      lines.append(f"REPLYING TO [#{q_id}] {q_sender_display}: {q_content}")
+      lines.append(f"REPLYING TO 【#{q_id}】 {q_sender_display}: {q_content}")
 
     # Content line
     message_text = _message_text(msg)
-    role_suffix = f" {role_label}" if role_label else ""
-    lines.append(f"{sender} ({sender_ref}){role_suffix}: {message_text}")
+    lines.append(f"{sender} 【{sender_ref}】{role_label}: {message_text}")
     lines.append("") # Empty line between messages
 
   return "\n".join(lines).strip()

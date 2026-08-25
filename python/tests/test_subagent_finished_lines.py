@@ -1,4 +1,4 @@
-"""Unit tests for ``_build_subtask_finished_lines`` — the ``[SUBTASK FINISHED]``
+"""Unit tests for ``_build_subtask_finished_lines`` — the ``【SUBTASK FINISHED】``
 block shown to LLM2 on the sub-agent re-invoke.
 
 Request-2 behaviour: a successful task that produced NO file gets a hint telling
@@ -27,7 +27,7 @@ def test_completed_without_file_adds_reinvoke_hint():
         content_dropped=False,
         has_staged_files=False,
     )
-    assert "[SUBTASK FINISHED]" in text
+    assert "【SUBTASK FINISHED】" in text
     assert "Success: True" in text
     assert _NO_FILE_MARKER in text
     assert "execute_subtask" in text

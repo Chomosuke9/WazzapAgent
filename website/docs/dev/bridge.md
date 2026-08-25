@@ -246,13 +246,19 @@ class WhatsAppMessage:
 ### History Format
 
 ```
-<000120>[14:30]Alice (u8k2d1):Hello everyone
-<000121>[14:31][Admin]Bob (u1m9qa):Group rules updated
-  > reply_to: from=Alice | id=000120 | quoted_text=Hello everyone
-<pending>[14:32]LLM (You):Hi! How can I help?
+【#000120】 14:30
+Alice 【u8k2d1】: Hello everyone
+
+【#000121】 14:31
+REPLYING TO 【#000120】 Alice 【u8k2d1】: "Hello everyone"
+Bob 【u1m9qa】【admin】: Group rules updated
+
+【#pending】 14:32
+LLM 【You】: Hi! How can I help?
 ```
 
-Format: `<contextMsgId>[HH:MM][Admin?]SenderName (senderRef):Text`
+Format: `【#contextMsgId】 HH:MM` header + `SenderName 【senderRef】【Role?】: Text`
+sender line. Roles: `【admin】`/`【superadmin】`; bot messages use `【You】`.
 
 ## Media Processing (`media/`)
 

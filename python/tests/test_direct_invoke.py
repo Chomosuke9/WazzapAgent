@@ -1,6 +1,6 @@
 """Direct-invoke endpoint tests — :class:`DirectInvokeServer` handler behaviour
 (auth / validation / jid normalization) and the shared :class:`ChatReinvoker`
-generalisation used for the ``[DIRECT INVOKE]`` re-invoke.
+generalisation used for the ``【DIRECT INVOKE】`` re-invoke.
 
 Discipline (matching the suite): NO pytest-asyncio — every coroutine is driven
 with ``asyncio.run`` wrapped in ``asyncio.wait_for`` so a hang fails fast. The
@@ -263,12 +263,12 @@ def test_reinvoker_injects_direct_invoke_system_turn_and_block(tmp_path):
       kwargs = responder.calls[0]["kwargs"]
       block = kwargs["scheduled_task_block"]
       assert "## Direct instruction firing now" in block
-      assert "[DIRECT INVOKE]" in block
+      assert "【DIRECT INVOKE】" in block
       assert "ping me from my watch" in block
       assert kwargs["chat_type"] == "private"  # @s.whatsapp.net
-      # the [DIRECT INVOKE] #system turn was appended to history
+      # the 【DIRECT INVOKE】 #system turn was appended to history
       sys_turns = [m for m in per_chat[chat_id] if m.role == "system"]
-      assert sys_turns and "[DIRECT INVOKE]" in (sys_turns[-1].text or "")
+      assert sys_turns and "【DIRECT INVOKE】" in (sys_turns[-1].text or "")
 
   asyncio.run(asyncio.wait_for(scenario(), timeout=10))
 

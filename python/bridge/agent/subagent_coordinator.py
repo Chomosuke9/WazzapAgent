@@ -152,7 +152,7 @@ def _build_subtask_finished_lines(
   content_dropped: bool,
   has_staged_files: bool,
 ) -> list[str]:
-  """Build the ``[SUBTASK FINISHED]`` block shown to LLM2 on the re-invoke.
+  """Build the ``【SUBTASK FINISHED】`` block shown to LLM2 on the re-invoke.
 
   Pure (no I/O) so it can be unit-tested in isolation. The block carries the
   sub-agent report, the success flag, and any output-file list, plus AT MOST
@@ -167,7 +167,7 @@ def _build_subtask_finished_lines(
     turn if so.
   """
   lines = [
-    "[SUBTASK FINISHED]",
+    "【SUBTASK FINISHED】",
     f"Result: {report or 'No report'}",
     f"Success: {completed}",
   ]

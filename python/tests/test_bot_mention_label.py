@@ -4,12 +4,12 @@ JID.
 
 Symptom (real history):
 
-    whoami (jamidd) (admin): @Vivy (bot) (bot) buatin quiz
+    whoami 【jamidd】【admin】: @Vivy (bot) (bot) buatin quiz
 
 The gateway resolved the bot's profile/push-name as ``Vivy (bot)`` (already
 suffixed) while ``ASSISTANT_NAME`` was ``Vivy``. ``_mention_label`` then
 appended another ``(bot)`` — producing the doubled, inconsistent tag. The fix
-makes the bot label always ``@<ASSISTANT_NAME> (bot)`` (matching ``(You)``
+makes the bot label always ``@<ASSISTANT_NAME> (bot)`` (matching ``【You】``
 turns and the mention token declared in the system prompt).
 """
 from __future__ import annotations

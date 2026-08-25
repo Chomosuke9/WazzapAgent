@@ -46,7 +46,7 @@ def test_kick_history_note_resolves_names_and_falls_back_to_ref():
   )
   assert note is not None
   assert note.startswith("Removed from the group:")
-  assert "Alice (u8k2d1)" in note
+  assert "Alice 【u8k2d1】" in note
   assert "abc123" in note  # unresolved senderRef rendered bare
 
 

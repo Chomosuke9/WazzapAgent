@@ -606,7 +606,7 @@ const handleSendQuiz: ActionHandler = async (entry, _payload, requestId) => {
   try {
     // Compatibility gate: in a tier that can't render quick-reply buttons
     // (safe — web/desktop/unknown) send a numbered text quiz instead. The LLM
-    // still sees its quiz (Python keeps the synthetic "[QUESTION SENT]" entry)
+    // still sees its quiz (Python keeps the synthetic "【QUESTION SENT】" entry)
     // and the user's typed answer is evaluated on the next turn.
     if (!tierAllows(resolveTier(ctx.repos, chatId), 'quick_reply')) {
       const result = await withJidQueue(ctx, chatId, () =>

@@ -4,7 +4,7 @@ Persists ``/schedule-task`` rows (via an injected
 :class:`~bridge.db.scheduled_tasks_repository.ScheduledTasksRepository`), arms an
 ``asyncio`` timer per task, and on fire RE-INVOKES LLM2 in the target chat —
 exactly like a finished sub-agent (:func:`bridge.agent.subagent_coordinator._deliver_subagent_result`):
-it appends a ``[SCHEDULED TASK]`` system message to the chat history deque, calls
+it appends a ``【SCHEDULED TASK】`` system message to the chat history deque, calls
 ``responder.generate(...)`` (always responding — no LLM1 gating), and dispatches
 the resulting actions through the gateway ``send_*`` helpers.
 
