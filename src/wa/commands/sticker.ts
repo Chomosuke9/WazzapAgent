@@ -29,6 +29,51 @@ const STICKER_EMOJI = config.stickerEmoji;
 const SUPPORTED_IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.bmp']);
 const SUPPORTED_VIDEO_EXT = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm', '.webp', '.3gp', '.gif']);
 
+// Meme text font. The bundled TTF (Anton, SIL OFL — an Impact-style face) is
+// embedded into every text overlay via @font-face so librsvg renders true
+// meme lettering even on hosts without Impact installed; without this it
+// silently falls back to a generic sans-serif. STICKER_FONT_PATH may point at
+// any other TTF (e.g. genuine impact.ttf) and takes priority.
+const MEME_FONT_FAMILY = 'WazzapMeme';
+const BUNDLED_MEME_FONT_URL = new URL('../assets/fonts/Anton-Regular.ttf', import.meta.url);
+
+type MemeFontCache = { key: string; css: string };
+let memeFontCache: MemeFontCache | null = null;
+
+/** Build (and memoize) the @font-face CSS for the embedded meme font. */
+function memeFontFaceCss(): string {
+  const configuredPath = config.stickerFontPath;
+  const candidates: Array<{ key: string; source: string; read: () => Buffer }> = [];
+  if (configuredPath) {
+    candidates.push({
+      key: `file:${configuredPath}`,
+      source: configuredPath,
+      read: () => fs.readFileSync(configuredPath),
+    });
+  }
+  candidates.push({
+    key: 'bundled',
+    source: BUNDLED_MEME_FONT_URL.href,
+    read: () => fs.readFileSync(BUNDLED_MEME_FONT_URL),
+  });
+
+  if (memeFontCache && memeFontCache.key === candidates[0].key) return memeFontCache.css;
+
+  let css = '';
+  for (const candidate of candidates) {
+    try {
+      const base64 = candidate.read().toString('base64');
+      css = `@font-face{font-family:'${MEME_FONT_FAMILY}';src:url(data:font/ttf;base64,${base64}) format('truetype');}`;
+      break;
+    } catch (err) {
+      logger.warn({ err, path: candidate.source }, 'failed to load /sticker meme font, trying next candidate');
+    }
+  }
+
+  memeFontCache = { key: candidates[0].key, css };
+  return css;
+}
+
 // ---------------------------------------------------------------------------
 // Argument parsing
 // ---------------------------------------------------------------------------
@@ -117,8 +162,9 @@ function fitFontSize(text: string, maxWidth: number, size: number): number {
   const MIN = Math.round(size * 0.035); // ≈ 18px at 512
   const MAX = Math.round(size * 0.10);  // ≈ 51px at 512
   if (!text.length) return MAX;
-  // Impact/Arial Black capitals average roughly 0.62em wide. Leave a little
-  // extra room for the 1px letter spacing used by the overlay.
+  // Meme fonts (Anton/Impact/Arial Black) capitals average roughly 0.62em
+  // wide. Leave a little extra room for the 1px letter spacing used by the
+  // overlay.
   const ideal = Math.floor((maxWidth - Math.max(0, text.length - 1)) / (text.length * 0.62));
   return Math.min(MAX, Math.max(MIN, ideal));
 }
@@ -185,6 +231,8 @@ function buildTextOverlaySvg(
 ): Buffer | null {
   if (!upperText && !lowerText) return null;
 
+  const fontFaceCss = memeFontFaceCss();
+
   const padding = Math.max(2, Math.round(Math.min(imageBounds.width, imageBounds.height) * 0.04));
   const escapeXml = (s: string) =>
     s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -203,7 +251,7 @@ function buildTextOverlaySvg(
     // textLength is enforced by the SVG renderer. It prevents font-metric
     // differences (or the minimum font size) from pushing text past the image.
     const textLength = Math.max(1, Math.min(Math.floor(estimatedWidth), maxWidth - strokeWidth * 2));
-    const attrs = `font-family="Impact, Arial Black, sans-serif" font-size="${fontSize}" font-weight="bold" text-anchor="middle" fill="white" stroke="black" stroke-width="${strokeWidth}" paint-order="stroke" letter-spacing="1" textLength="${textLength}" lengthAdjust="spacingAndGlyphs"`;
+    const attrs = `font-family="${MEME_FONT_FAMILY}, Impact, Arial Black, sans-serif" font-size="${fontSize}" font-weight="bold" text-anchor="middle" fill="white" stroke="black" stroke-width="${strokeWidth}" paint-order="stroke" letter-spacing="1" textLength="${textLength}" lengthAdjust="spacingAndGlyphs"`;
     const y = position === 'top'
       ? imageBounds.top + padding + fontSize
       : imageBounds.top + imageBounds.height - padding;
@@ -214,7 +262,8 @@ function buildTextOverlaySvg(
   if (upperText) addText(upperText, 'top');
   if (lowerText) addText(lowerText, 'bottom');
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">${textElements.join('')}</svg>`;
+  const defs = fontFaceCss ? `<defs><style>${fontFaceCss}</style></defs>` : '';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">${defs}${textElements.join('')}</svg>`;
   return Buffer.from(svg);
 }
 
@@ -483,6 +532,7 @@ export { handleSticker };
 
 // Exported for focused regression tests; not part of the command interface.
 export const stickerTextInternals = {
+  MEME_FONT_FAMILY,
   fitFontSize,
   containImageBounds,
   buildTextOverlaySvg,

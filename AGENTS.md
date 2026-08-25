@@ -547,6 +547,9 @@ single-account fallback.
 `STICKER_MAX_DURATION_SEC` (default 6), `STICKER_MAX_SIZE_KB` (default 1024),
 `STICKER_FPS` (default 15), `STICKER_QUALITY` (default 75),
 `STICKER_PACK_NAME` (default "WazzapAgents"), `STICKER_EMOJI` (default "🤖"),
+`STICKER_FONT_PATH` (optional custom TTF embedded as @font-face into `/sticker`
+meme text; default = bundled Impact-style font `src/wa/assets/fonts/Anton-Regular.ttf`,
+SIL OFL),
 `STICKER_UPLOAD_DIR` (user-uploaded sticker staging dir, default `<DATA_DIR>/stickers_user`)
 
 **Python Bridge:**

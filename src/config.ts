@@ -113,6 +113,7 @@ export interface Config {
   stickerQuality: number;
   stickerPackName: string;
   stickerEmoji: string;
+  stickerFontPath: string | null;
   requireActivation: boolean;
   activationNoticeEnabled: boolean;
   privateChatEnabled: boolean;
@@ -198,6 +199,10 @@ function buildConfig(): Config {
   stickerQuality: positiveInt(process.env.STICKER_QUALITY, 75),
   stickerPackName: process.env.STICKER_PACK_NAME || 'WazzapAgents',
   stickerEmoji: process.env.STICKER_EMOJI || '🤖',
+  // Optional custom TTF for /sticker meme text (embedded into the SVG overlay
+  // as @font-face). Empty → the bundled Impact-style font (src/wa/assets/fonts)
+  // is used so rendering never depends on host-installed fonts.
+  stickerFontPath: (process.env.STICKER_FONT_PATH || '').trim() || null,
   requireActivation: process.env.REQUIRE_ACTIVATION === 'true',
   // Whether to send the "not activated" notice to unactivated chats.
   activationNoticeEnabled: process.env.ACTIVATION_NOTICE_ENABLED !== 'false',

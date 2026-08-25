@@ -41,6 +41,13 @@ test('sticker text remains XML-safe', () => {
   assert.match(svg, /&lt;HELLO &amp; &quot;GOODBYE&quot;&gt;/);
 });
 
+test('sticker text embeds the bundled meme font', () => {
+  const svg = buildTextOverlaySvg(512, 'TOP TEXT', null)!.toString('utf8');
+
+  assert.match(svg, /<defs><style>@font-face\{font-family:'WazzapMeme';src:url\(data:font\/ttf;base64,/);
+  assert.match(svg, /font-family="WazzapMeme, Impact, Arial Black, sans-serif"/);
+});
+
 test('contain bounds handle tiny, extreme, and very large resolutions', () => {
   assert.deepEqual(containImageBounds(2, 2, 512), { left: 0, top: 0, width: 512, height: 512 });
   assert.deepEqual(containImageBounds(600, 100, 512), { left: 0, top: 213, width: 512, height: 85 });
