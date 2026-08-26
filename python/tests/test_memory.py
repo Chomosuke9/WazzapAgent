@@ -13,6 +13,10 @@ DB tests use a real per-tenant settings.db under a temp dir via
 ``tenant_db_context`` (mirrors test_scheduled_task.py); the memory rows are
 written directly with the shared connection since the writer lives on the Node
 side. The llm2 test monkeypatches the DB/IO seams so it stays hermetic.
+
+Note: the memory storage now uses 2-character random mem_id instead of integer
+index, so Node can safely delete by ID without shift bugs. Python only reads
+the text values, so no changes needed here.
 """
 from __future__ import annotations
 

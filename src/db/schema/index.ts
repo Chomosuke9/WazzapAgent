@@ -64,6 +64,15 @@ function getColumns(db: SqliteDb, tableName: string): Set<string> {
   return new Set(rows.map((r) => String(r.name)));
 }
 
+function generateRandomMemId(): string {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  let id = "";
+  for (let i = 0; i < 2; i++) {
+    id += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return id;
+}
+
 // ---------------------------------------------------------------------------
 // Table creation + per-table migrations
 // ---------------------------------------------------------------------------
@@ -276,9 +285,12 @@ function initSettingsTables(db: SqliteDb): void {
   // every chat sees. Written by Node (the /memory handler) and read by both
   // Node (list/delete) and the Python bridge (injected as the per-turn
   // long-term-memory block), so it lives in the shared settings.db (CONTRACT §8).
+  // `mem_id` is a 2-character random ID (e.g., 'a1', 'Bx') used for safe deletion
+  // without index-based confusion.
   db.run(`
     CREATE TABLE IF NOT EXISTS memories (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      mem_id      TEXT NOT NULL UNIQUE,
       scope_key   TEXT NOT NULL,
       text        TEXT NOT NULL,
       created_at  TEXT NOT NULL DEFAULT (datetime('now'))
@@ -287,6 +299,21 @@ function initSettingsTables(db: SqliteDb): void {
   db.run(
     `CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories (scope_key, id)`,
   );
+
+  // Migration: add mem_id column to existing memories table if it doesn't exist
+  const memoriesColumns = getColumns(db, "memories");
+  if (!memoriesColumns.has("mem_id")) {
+    db.run("ALTER TABLE memories ADD COLUMN mem_id TEXT UNIQUE");
+    // Generate random mem_id for existing rows
+    const existingMemories = queryRows<{ id: number }>(
+      db,
+      "SELECT id FROM memories WHERE mem_id IS NULL"
+    );
+    for (const row of existingMemories) {
+      const memId = generateRandomMemId();
+      db.run("UPDATE memories SET mem_id = ? WHERE id = ?", [memId, row.id]);
+    }
+  }
 
   // Mention bindings for memory text. The LID is the stable source of truth for
   // each `@Name (senderRef)` mention used inside a memory; storing it lets the
@@ -379,6 +406,7 @@ export {
   tableExists,
   hasRows,
   getColumns,
+  generateRandomMemId,
   initSettingsTables,
   initStatsTables,
   initModerationTables,

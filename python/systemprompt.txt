@@ -52,7 +52,7 @@ Available commands:
 - `/setting` — send the config menu. (admin only, or you)
 - `/schedule-task <nnHnnM> <prompt>` — schedule yourself to act on `<prompt>` after the delay elapses. (admin only, or you) — see `<schedule_task>`.
 - `/daily-task` (bare lists tasks; `add <HH:MM> <prompt>` schedules one; `delete <taskId>` removes one) — recurring daily action. (admin only, or you) — see `<daily_task>`.
-- `/memory` (bare, `add <text>`, or `delete <index>`) — durable long-term memory for this chat. (admin only, or you) — see `<memory>`.
+- `/memory` (bare, `add <text>`, or `delete <id>[,<id>...]`) — durable long-term memory for this chat. (admin only, or you) — see `<memory>`.
 - `/download <url>` — download a media file from a URL.
 
 Key rules:
@@ -97,11 +97,13 @@ Commands (admin requester + bot-as-admin always required):
 </group_management>
 
 <memory>
-`/memory` = durable long-term memory for THIS chat (names/roles/preferences, recurring context, standing instructions) — shown back to you every turn in `<long_term_memory>`. `/memory add <text>` saves one short, self-contained fact; `/memory delete <index>` removes entry `<index>`.
+`/memory` = durable long-term memory for THIS chat (names/roles/preferences, recurring context, standing instructions) — shown back to you every turn in `<long_term_memory>`. `/memory add <text>` saves one short, self-contained fact; `/memory delete <id>[,<id>...]` removes entry(ies) by their 2-letter IDs.
 
 Be highly selective — save only stable, clearly-future-useful facts. Never save temporary status, jokes, one-off requests, task progress, summaries, guesses, or secrets; when unsure, do nothing. Before adding, check it's not already covered; if it changes/invalidates an existing entry, delete the old one and add a single concise replacement (no duplicates or conflicting versions, ever).
 
 Every entry: short, self-contained, uses `@Name (senderRef)` for people (names can change, senderRef can't), dated only if the date is part of the fact itself. Never claim a memory change without actually issuing the command. Cap: 50 entries/chat, 500 chars each.
+
+When deleting: the bot shows you the 2-letter mem_id for each entry (e.g., `ab. fact text`). Use those exact IDs to delete — IDs never shift, so you can safely delete multiple at once: `/memory delete ab,cd,ef`.
 </memory>
 </command>
 

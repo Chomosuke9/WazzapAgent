@@ -1,7 +1,7 @@
 // memory.test.ts — long-term memory (/memory command).
 //
 // Covers:
-//   * SettingsRepository memory CRUD (add/list/count/delete-by-index).
+//   * SettingsRepository memory CRUD (add/list/count/delete-by-memId).
 //   * memory_mentions binding upsert + scoped lookup (chat preferred over global).
 //   * handleMemory: add/list/delete, owner-gated global scope, char cap, and the
 //     reliable invalidate_chat_settings frame.
@@ -79,7 +79,7 @@ function makeCtx(overrides: Record<string, unknown>) {
 // Repository layer
 // --------------------------------------------------------------------------- //
 
-test('memory CRUD: add / list / count / delete-by-index', () => {
+test('memory CRUD: add / list / count / delete-by-memId', () => {
   const dbDir = tmpTenant('wazzap-mem-crud-');
   const db = new Database(dbDir);
   try {
@@ -92,27 +92,28 @@ test('memory CRUD: add / list / count / delete-by-index', () => {
     repos.settings.addMemory(chat, 'second');
     repos.settings.addMemory(chat, 'third');
     assert.equal(repos.settings.countMemories(chat), 3);
+    const list = repos.settings.listMemories(chat);
     assert.deepEqual(
-      repos.settings.listMemories(chat).map((m) => m.text),
+      list.map((m) => m.text),
       ['first', 'second', 'third'],
     );
 
-    // delete the middle entry (1-based index 2 → "second")
-    assert.equal(repos.settings.deleteMemoryByIndex(chat, 2), 'second');
+    // delete the middle entry by its mem_id
+    const secondMemId = list[1]!.mem_id;
+    assert.equal(repos.settings.deleteMemoryByMemId(chat, secondMemId), 'second');
     assert.deepEqual(
       repos.settings.listMemories(chat).map((m) => m.text),
       ['first', 'third'],
     );
-    // out-of-range and invalid indices return null (no throw)
-    assert.equal(repos.settings.deleteMemoryByIndex(chat, 9), null);
-    assert.equal(repos.settings.deleteMemoryByIndex(chat, 0), null);
+    // unknown mem_id returns null (no throw)
+    assert.equal(repos.settings.deleteMemoryByMemId(chat, 'zz'), null);
   } finally {
     db.close();
     rmParent(dbDir);
   }
 });
 
-test('memory multi-delete: indices resolve against one snapshot (no shift bug)', () => {
+test('memory multi-delete: mem_ids resolve against one snapshot (no shift bug)', () => {
   const dbDir = tmpTenant('wazzap-mem-multi-');
   const db = new Database(dbDir);
   try {
@@ -121,10 +122,12 @@ test('memory multi-delete: indices resolve against one snapshot (no shift bug)',
     const chat = 'c@g.us';
     ['a', 'b', 'c', 'd', 'e'].forEach((t) => repos.settings.addMemory(chat, t));
 
-    // deleting 1,3,5 must remove a,c,e — not the shifted entries that a
-    // repeated single delete would hit.
+    const list = repos.settings.listMemories(chat);
+    const ids = [list[0]!.mem_id, list[2]!.mem_id, list[4]!.mem_id];
+
+    // deleting by the specific mem_ids must remove a,c,e
     assert.deepEqual(
-      repos.settings.deleteMemoriesByIndices(chat, [1, 3, 5]),
+      repos.settings.deleteMemoriesByMemIds(chat, ids),
       ['a', 'c', 'e'],
     );
     assert.deepEqual(
@@ -132,9 +135,10 @@ test('memory multi-delete: indices resolve against one snapshot (no shift bug)',
       ['b', 'd'],
     );
 
-    // mixed valid/invalid/duplicate indices: skip junk, no double-delete
+    // mixed valid/invalid/duplicate mem_ids: skip junk, no double-delete
+    const remaining = repos.settings.listMemories(chat);
     assert.deepEqual(
-      repos.settings.deleteMemoriesByIndices(chat, [2, 2, 9, 0]),
+      repos.settings.deleteMemoriesByMemIds(chat, [remaining[1]!.mem_id, remaining[1]!.mem_id, 'zz', '']),
       ['d'],
     );
     assert.deepEqual(
@@ -287,7 +291,12 @@ test('handleMemory list + delete round-trip', async () => {
     const listText = listed.sent.map((m) => m.text).join('\n');
     assert.ok(/one/.test(listText) && /two/.test(listText), 'list shows both entries');
 
-    const del = makeCtx({ args: 'delete 1', folderPath, repos });
+    // Extract the mem_id from the list output (format: "AB. text")
+    const match = listText.match(/^([a-zA-Z0-9]{2})\. one/m);
+    assert.ok(match, 'mem_id should be shown in list');
+    const memId = match![1];
+
+    const del = makeCtx({ args: `delete ${memId}`, folderPath, repos });
     await handleMemory(del.ctx);
     assert.deepEqual(
       repos.settings.listMemories('c@g.us').map((m) => m.text),
@@ -370,7 +379,8 @@ test('handleMemory captures a senderRef->LID binding from the LLM @Name (senderR
 
     assert.equal(repos.settings.countMemories(chatId), 1);
     // The @Name (senderRef) token is preserved verbatim in the stored text.
-    assert.match(repos.settings.listMemories(chatId)[0].text, new RegExp(`\\(${senderRef}\\)`));
+    const memories = repos.settings.listMemories(chatId);
+    assert.match(memories[0]!.text, new RegExp(`\\(${senderRef}\\)`));
     // And the stable LID behind it was persisted as a binding.
     assert.equal(repos.settings.getMemoryMentionLid(chatId, senderRef), lid);
   } finally {

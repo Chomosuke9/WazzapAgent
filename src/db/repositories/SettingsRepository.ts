@@ -13,6 +13,7 @@ import {
   DEFAULT_MODE,
   DEFAULT_TRIGGERS,
   GLOBAL_CHAT_ID,
+  generateRandomMemId,
   initSettingsTables,
 } from "../schema/index.js";
 import { BaseRepository } from "./BaseRepository.js";
@@ -679,20 +680,22 @@ export class SettingsRepository extends BaseRepository {
 
   /** Append a memory entry to a scope. */
   addMemory(scopeKey: string, text: string): void {
+    const memId = generateRandomMemId();
     this.runSettingsQuery(
-      "INSERT INTO memories (scope_key, text, created_at) VALUES (?, ?, datetime('now'))",
+      "INSERT INTO memories (mem_id, scope_key, text, created_at) VALUES (?, ?, ?, datetime('now'))",
+      memId,
       scopeKey,
       text,
     );
-    logger.info({ scopeKey, len: text.length }, "DB add_memory");
+    logger.info({ scopeKey, memId, len: text.length }, "DB add_memory");
   }
 
-  /** List a scope's memory entries, oldest first (1-based display order). */
-  listMemories(scopeKey: string): { id: number; text: string }[] {
-    return this.getAllFromState<{ id: number; text: string }>(
+  /** List a scope's memory entries, oldest first. */
+  listMemories(scopeKey: string): { mem_id: string; text: string }[] {
+    return this.getAllFromState<{ mem_id: string; text: string }>(
       this.settingsState,
       initSettingsTables,
-      "SELECT id, text FROM memories WHERE scope_key = ? ORDER BY id ASC",
+      "SELECT mem_id, text FROM memories WHERE scope_key = ? ORDER BY id ASC",
       scopeKey,
     );
   }
@@ -709,34 +712,52 @@ export class SettingsRepository extends BaseRepository {
   }
 
   /**
-   * Delete the entry at a 1-based index (oldest-first) within a scope.
-   * Returns the deleted entry's text, or null if the index was out of range.
+   * Delete the entry with a specific mem_id within a scope.
+   * Returns the deleted entry's text, or null if the mem_id was not found.
    */
-  deleteMemoryByIndex(scopeKey: string, index: number): string | null {
-    const [text] = this.deleteMemoriesByIndices(scopeKey, [index]);
-    return text ?? null;
+  deleteMemoryByMemId(scopeKey: string, memId: string): string | null {
+    const row = this.getOneFromState<{ text: string }>(
+      this.settingsState,
+      initSettingsTables,
+      "SELECT text FROM memories WHERE scope_key = ? AND mem_id = ?",
+      scopeKey,
+      memId,
+    );
+    if (!row) return null;
+    this.runSettingsQuery(
+      "DELETE FROM memories WHERE scope_key = ? AND mem_id = ?",
+      scopeKey,
+      memId,
+    );
+    logger.info({ scopeKey, memId }, "DB delete_memory");
+    return row.text;
   }
 
   /**
-   * Delete entries at 1-based indices (oldest-first) within a scope. All
-   * indices resolve against a SINGLE snapshot taken before any delete, so
-   * deleting [1,2,3] removes the originally-numbered entries — not whatever
-   * shifts up after the first delete. Returns the deleted entries' texts in
-   * the order the indices were given (out-of-range indices are skipped).
+   * Delete entries with specific mem_ids within a scope. All mem_ids resolve
+   * against a SINGLE snapshot taken before any delete, so deleting multiple
+   * at once works correctly without index-shift bugs. Returns the deleted
+   * entries' texts in the order the mem_ids were given (invalid mem_ids are
+   * skipped).
    */
-  deleteMemoriesByIndices(scopeKey: string, indices: number[]): string[] {
+  deleteMemoriesByMemIds(scopeKey: string, memIds: string[]): string[] {
     const snapshot = this.listMemories(scopeKey);
-    const seen = new Set<number>();
+    const snapshotMap = new Map(snapshot.map((m) => [m.mem_id, m.text]));
+    const seen = new Set<string>();
     const deleted: string[] = [];
-    for (const index of indices) {
-      if (!Number.isInteger(index) || index < 1 || index > snapshot.length) continue;
-      const row = snapshot[index - 1];
-      if (seen.has(row.id)) continue;
-      seen.add(row.id);
-      this.runSettingsQuery("DELETE FROM memories WHERE id = ?", row.id);
-      deleted.push(row.text);
+    for (const memId of memIds) {
+      if (!memId || seen.has(memId)) continue;
+      const text = snapshotMap.get(memId);
+      if (!text) continue;
+      seen.add(memId);
+      this.runSettingsQuery(
+        "DELETE FROM memories WHERE scope_key = ? AND mem_id = ?",
+        scopeKey,
+        memId,
+      );
+      deleted.push(text);
     }
-    if (deleted.length) logger.info({ scopeKey, indices }, "DB delete_memory");
+    if (deleted.length) logger.info({ scopeKey, memIds }, "DB delete_memory");
     return deleted;
   }
 
