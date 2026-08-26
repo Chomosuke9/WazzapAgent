@@ -303,16 +303,35 @@ function initSettingsTables(db: SqliteDb): void {
   // Migration: add mem_id column to existing memories table if it doesn't exist
   const memoriesColumns = getColumns(db, "memories");
   if (!memoriesColumns.has("mem_id")) {
-    db.run("ALTER TABLE memories ADD COLUMN mem_id TEXT UNIQUE");
-    // Generate random mem_id for existing rows
-    const existingMemories = queryRows<{ id: number }>(
+    // SQLite doesn't support adding UNIQUE constraint to existing tables directly.
+    // Use the standard migration pattern: create new table, copy data, swap.
+    db.run(`
+      CREATE TABLE memories_new (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        mem_id      TEXT NOT NULL UNIQUE,
+        scope_key   TEXT NOT NULL,
+        text        TEXT NOT NULL,
+        created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.run(`
+      INSERT INTO memories_new (id, mem_id, scope_key, text, created_at)
+      SELECT id, '', scope_key, text, created_at FROM memories
+    `);
+    // Generate unique mem_id for each row
+    const newMemories = queryRows<{ id: number }>(
       db,
-      "SELECT id FROM memories WHERE mem_id IS NULL"
+      "SELECT id FROM memories_new WHERE mem_id = ''"
     );
-    for (const row of existingMemories) {
+    for (const row of newMemories) {
       const memId = generateRandomMemId();
-      db.run("UPDATE memories SET mem_id = ? WHERE id = ?", [memId, row.id]);
+      db.run("UPDATE memories_new SET mem_id = ? WHERE id = ?", [memId, row.id]);
     }
+    db.run("DROP TABLE memories");
+    db.run("ALTER TABLE memories_new RENAME TO memories");
+    db.run(
+      `CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories (scope_key, id)`,
+    );
   }
 
   // Mention bindings for memory text. The LID is the stable source of truth for
