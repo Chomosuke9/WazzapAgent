@@ -261,11 +261,11 @@ export async function handleMemory(ctx: CommandContext): Promise<void> {
     }
     invalidate();
 
-    const count = repos.settings.countMemories(scopeKey);
+    const newCount = repos.settings.countMemories(scopeKey);
     await safeSend(
       sock,
       chatId,
-      `🧠 Saved${scopeSuffix(scope)} (#${count}):\n${previewText(renderStoredMentions(repos.settings, chatId, text))}`,
+      `🧠 Saved${scopeSuffix(scope)} (#${newCount}):\n${previewText(renderStoredMentions(repos.settings, chatId, text))}`,
       account,
     );
     return;
