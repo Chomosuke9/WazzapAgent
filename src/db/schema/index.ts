@@ -305,6 +305,7 @@ function initSettingsTables(db: SqliteDb): void {
   if (!memoriesColumns.has("mem_id")) {
     // SQLite doesn't support adding UNIQUE constraint to existing tables directly.
     // Use the standard migration pattern: create new table, copy data, swap.
+    db.run("DROP TABLE IF EXISTS memories_new");
     db.run(`
       CREATE TABLE memories_new (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -314,18 +315,20 @@ function initSettingsTables(db: SqliteDb): void {
         created_at  TEXT NOT NULL DEFAULT (datetime('now'))
       )
     `);
-    db.run(`
-      INSERT INTO memories_new (id, mem_id, scope_key, text, created_at)
-      SELECT id, '', scope_key, text, created_at FROM memories
-    `);
-    // Generate unique mem_id for each row
-    const newMemories = queryRows<{ id: number }>(
-      db,
-      "SELECT id FROM memories_new WHERE mem_id = ''"
-    );
-    for (const row of newMemories) {
+    // Get all existing memories and insert with generated unique mem_ids
+    const existingMemories = queryRows<{
+      id: number;
+      scope_key: string;
+      text: string;
+      created_at: string;
+    }>(db, "SELECT id, scope_key, text, created_at FROM memories");
+    
+    for (const row of existingMemories) {
       const memId = generateRandomMemId();
-      db.run("UPDATE memories_new SET mem_id = ? WHERE id = ?", [memId, row.id]);
+      db.run(
+        "INSERT INTO memories_new (id, mem_id, scope_key, text, created_at) VALUES (?, ?, ?, ?, ?)",
+        [row.id, memId, row.scope_key, row.text, row.created_at]
+      );
     }
     db.run("DROP TABLE memories");
     db.run("ALTER TABLE memories_new RENAME TO memories");
