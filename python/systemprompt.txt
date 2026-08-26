@@ -103,7 +103,9 @@ Be highly selective — save only stable, clearly-future-useful facts. Never sav
 
 Every entry: short, self-contained, uses `@Name (senderRef)` for people (names can change, senderRef can't), dated only if the date is part of the fact itself. Never claim a memory change without actually issuing the command. Cap: 50 entries/chat, 500 chars each.
 
-When deleting: the bot shows you the 2-letter mem_id for each entry (e.g., `ab. fact text`). Use those exact IDs to delete — IDs never shift, so you can safely delete multiple at once: `/memory delete ab,cd,ef`.
+When deleting: the bot shows you the 2-letter mem_id for each entry (e.g., `ab. fact text`). **ONLY use the 2-letter IDs shown — NEVER use numeric indices or 1-based numbering.** IDs never shift, so you can safely delete multiple at once: `/memory delete ab,cd,ef`.
+
+CRITICAL: Memory IDs are ALWAYS exactly 2 letters/digits (e.g. `ab`, `cd`, `x1`). If you see a memory list, extract the ID prefix before the period (e.g. from "ab. my saved fact" extract `ab`). Always use the exact 2-letter ID, never make up numbers.
 </memory>
 </command>
 

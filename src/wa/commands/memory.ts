@@ -245,7 +245,7 @@ export async function handleMemory(ctx: CommandContext): Promise<void> {
       await safeSend(
         sock,
         chatId,
-        `Memory is full (${MAX_MEMORIES} entries${scopeSuffix(scope)}). Delete some with \`/memory${isScoped ? " " + scope : ""} delete <index>\`.`,
+        `Memory is full (${MAX_MEMORIES} entries${scopeSuffix(scope)}). Delete some with \`/memory${isScoped ? " " + scope : ""} delete <id>\`.`,
       );
       return;
     }
