@@ -67,7 +67,7 @@ function getColumns(db: SqliteDb, tableName: string): Set<string> {
 function generateRandomMemId(): string {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   let id = "";
-  for (let i = 0; i < 2; i++) {
+  for (let i = 0; i < 8; i++) {
     id += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return id;
@@ -323,8 +323,14 @@ function initSettingsTables(db: SqliteDb): void {
       created_at: string;
     }>(db, "SELECT id, scope_key, text, created_at FROM memories");
     
+    const usedMemIds = new Set<string>();
     for (const row of existingMemories) {
-      const memId = generateRandomMemId();
+      let memId: string;
+      do {
+        memId = generateRandomMemId();
+      } while (usedMemIds.has(memId));
+      usedMemIds.add(memId);
+      
       db.run(
         "INSERT INTO memories_new (id, mem_id, scope_key, text, created_at) VALUES (?, ?, ?, ?, ?)",
         [row.id, memId, row.scope_key, row.text, row.created_at]
