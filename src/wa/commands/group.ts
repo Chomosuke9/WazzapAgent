@@ -79,15 +79,23 @@ async function requireBotModerationPermission(
 }
 
 export async function handleGroup(ctx: CommandContext): Promise<void> {
-  if (!ctx.botIsAdmin) {
-    await safeText(ctx, "The bot must be a group admin to use this command. ❌");
-    return;
-  }
-
   const raw = (ctx.args || "").trim();
   const splitAt = raw.search(/\s/);
   const sub = (splitAt === -1 ? raw : raw.slice(0, splitAt)).toLowerCase();
   const restRaw = splitAt === -1 ? "" : raw.slice(splitAt + 1).trim();
+
+  const botAdminOnlyCommands = new Set(["close", "open", "pin", "description"]);
+  const adminOrBotCommands = new Set(["delete", "kick", "mute"]);
+
+  if (botAdminOnlyCommands.has(sub) && !ctx.botIsAdmin) {
+    await safeText(ctx, "The bot must be a group admin to use this command. ❌");
+    return;
+  }
+
+  if (adminOrBotCommands.has(sub) && !ctx.botIsAdmin && !ctx.senderIsAdmin) {
+    await safeText(ctx, "You must be a group admin (or the bot must be an admin) to use this command. ❌");
+    return;
+  }
 
   try {
     if (sub === "close" || sub === "open") {
