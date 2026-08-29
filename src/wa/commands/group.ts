@@ -53,6 +53,25 @@ function repliedMessage(ctx: CommandContext) {
   return resolveQuotedMessage(ctx.account, ctx.chatId, ctx.quotedMessageId);
 }
 
+function getQuotedMessageType(ctx: CommandContext): string | null {
+  const contextInfo = (ctx.msg.message?.extendedTextMessage?.contextInfo ||
+    ctx.msg.message?.textMessage?.contextInfo ||
+    ctx.msg.message?.imageMessage?.contextInfo ||
+    ctx.msg.message?.videoMessage?.contextInfo ||
+    ctx.msg.message?.documentMessage?.contextInfo ||
+    ctx.msg.message?.audioMessage?.contextInfo ||
+    ctx.msg.message?.stickerMessage?.contextInfo) as any;
+  
+  if (!contextInfo?.quotedMessage) return null;
+  
+  const quotedMsg = contextInfo.quotedMessage as any;
+  if (quotedMsg.groupStatusMessageV2) return "groupStatusMessageV2";
+  if (quotedMsg.viewOnceMessage) return "viewOnceMessage";
+  if (quotedMsg.ephemeralMessage) return "ephemeralMessage";
+  
+  return null;
+}
+
 function botPermissionLevel(ctx: CommandContext): number {
   if (!ctx.fromMe) return 3;
   try {
@@ -132,6 +151,19 @@ export async function handleGroup(ctx: CommandContext): Promise<void> {
 
     if (sub === "delete") {
       if (!await requireBotModerationPermission(ctx, "delete")) return;
+      const quotedType = getQuotedMessageType(ctx);
+      if (quotedType === "groupStatusMessageV2") {
+        await safeText(ctx, "Cannot delete status updates. Only regular messages can be deleted.");
+        return;
+      }
+      if (quotedType === "viewOnceMessage") {
+        await safeText(ctx, "Cannot delete view-once messages.");
+        return;
+      }
+      if (quotedType === "ephemeralMessage") {
+        await safeText(ctx, "Cannot delete disappearing messages.");
+        return;
+      }
       const target = repliedMessage(ctx);
       if (!target?.key) {
         await safeText(ctx, "Reply to the message you want to delete, then use `/group delete`.");
