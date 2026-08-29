@@ -354,7 +354,19 @@ function resolveQuotedMessage(
   if (!target) return null;
   const maybeContext = normalizeContextMsgId(target);
   if (!maybeContext) {
-    return ctx.messageCache.get(target as string) || null;
+    const cached = ctx.messageCache.get(target as string);
+    if (cached) return cached;
+    if (!chatId) return null;
+    const contextMsgId = findContextMsgIdByMessageId(ctx, chatId, target as string);
+    if (contextMsgId) {
+      const entry = getIndexedMessageByContextId(ctx, chatId, contextMsgId);
+      if (entry) {
+        const msg = entry.id ? ctx.messageCache.get(entry.id) : null;
+        if (msg) return msg;
+        return { key: entry.key, message: { conversation: '' } };
+      }
+    }
+    return null;
   }
   const entry = getIndexedMessageByContextId(ctx, chatId, maybeContext);
   if (!entry) return null;
