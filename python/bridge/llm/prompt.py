@@ -664,18 +664,17 @@ def build_memory_block(chat_id: str | None) -> str | None:
     if not memories:
         return None
     listing = "\n".join(
-        f"【{mem['mem_id'].upper()}】 {render_stored_mentions(mem['text'], chat_id)}"
+        f"【{mem['mem_id']}】 {render_stored_mentions(mem['text'], chat_id)}"
         for mem in memories
     )
     return (
         "<long_term_memory>\n"
         "Durable facts and preferences you have saved for this chat via the "
         "/memory command. Treat them as long-term context that persists across "
-        "conversations. Each entry is marked with 【ID】 where ID is a 2-letter "
-        "identifier (e.g. 【AB】, 【CD】) — use these exact IDs (case-insensitive) "
-        "when you need to delete a memory with `/memory delete <id>`. When an entry "
-        "tags someone with the `@Name (senderRef)` format, reuse that exact token "
-        "to mention them.\n"
+        "conversations. Each entry is marked with 【ID】 where ID is a 2-character "
+        "identifier (e.g. 【aB】, 【Cd】, 【x1】) — use these exact IDs when you need "
+        "to delete a memory with `/memory delete <id>`. When an entry tags someone "
+        "with the `@Name (senderRef)` format, reuse that exact token to mention them.\n"
         f"{listing}\n"
         "</long_term_memory>"
     )

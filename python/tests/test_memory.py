@@ -111,15 +111,15 @@ def test_build_memory_block_formats_entries(monkeypatch):
     monkeypatch.setattr(
         db, "get_memories", lambda chat_id: [
             {"mem_id": "ab", "text": "Budi likes apple"},
-            {"mem_id": "cd", "text": "Reply in Indonesian"}
+            {"mem_id": "Cd", "text": "Reply in Indonesian"}
         ]
     )
     block = prompt_mod.build_memory_block("c@g.us")
     assert block is not None
     assert "<long_term_memory>" in block
     assert "</long_term_memory>" in block
-    assert "【AB】 Budi likes apple" in block
-    assert "【CD】 Reply in Indonesian" in block
+    assert "【ab】 Budi likes apple" in block
+    assert "【Cd】 Reply in Indonesian" in block
 
 
 # --------------------------------------------------------------------------- #
@@ -144,7 +144,7 @@ def test_memory_block_injected_as_humanmessage(monkeypatch):
     current = WhatsAppMessage(
         timestamp_ms=0, context_msg_id="000100", text="hi", sender="A", sender_ref="a1"
     )
-    block = "<long_term_memory>\n【AB】 Budi likes apple\n</long_term_memory>"
+    block = "<long_term_memory>\n【aB】 Budi likes apple\n</long_term_memory>"
     built = llm2_mod.build_llm2_messages(
         [],
         current,
