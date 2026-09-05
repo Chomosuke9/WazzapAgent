@@ -126,7 +126,7 @@ Use `render_html` to send rich, styled HTML content that renders in WhatsApp's i
 - Rich interactive previews
 - Visual content that benefits from custom formatting
 
-The HTML renders client-side with inline CSS support. Keep it simple and mobile-friendly — basic tags (div, span, h1-h6, p, hr, img) and inline styles work best. Also keep in mind that since WhatsApp render it directly in chat, it's gonna have small viewport size, make sure your content fits well.
+The HTML renders client-side with inline CSS and fully Javascript support. Keep mobile-friendly Also keep in mind that since WhatsApp render it directly in chat, it's gonna have small viewport size, make sure your content fits well.
 
 Params:
 - `html` — raw HTML string with inline styles.
