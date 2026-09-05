@@ -59,6 +59,9 @@ export interface SendCopyCodePayload {
 export interface RelayLottieStickerPayload {
   requestId: string; chatId: string; lottiePayload: string; replyTo?: string | null;
 }
+export interface RenderHtmlPayload {
+  requestId: string; chatId: string; html: string;
+}
 export interface NativeButton { name: string; buttonParams?: Record<string, unknown>; buttonParamsJson?: string; }
 export interface SendButtonsPayload {
   requestId: string; chatId: string; text: string; buttons: NativeButton[]; footer?: string;
@@ -83,7 +86,8 @@ export type InboundActionFrame =
   | { type: "send_buttons"; payload: SendButtonsPayload }
   | { type: "send_carousel"; payload: SendCarouselPayload }
   | { type: "run_command"; payload: RunCommandPayload }
-  | { type: "get_chat_context"; payload: GetChatContextPayload };
+  | { type: "get_chat_context"; payload: GetChatContextPayload }
+  | { type: "render_html"; payload: RenderHtmlPayload };
 
 export type InboundFrame = { type: "hello"; payload: HelloPayload } | InboundActionFrame;
 

@@ -96,6 +96,7 @@ import type {
   SendButtonsPayload,
   SendCarouselPayload,
   SendCopyCodePayload,
+  RenderHtmlPayload,
 } from '../protocol/types.js';
 
 
@@ -808,6 +809,73 @@ interface DownloadMediaPayload {
   messageId?: string;
 }
 
+const handleRenderHtml: ActionHandler = async (entry, _payload, requestId) => {
+  const ctx = entry.ctx;
+  const sock = entry.sock;
+  if (!sock) throw new Error('WhatsApp socket not ready');
+  const payload = _payload as unknown as RenderHtmlPayload;
+  const { chatId, html, requestId: rid } = payload;
+  try {
+    // Generate unique IDs for this HTML render
+    const id = `html-${Date.now()}`;
+    const responseId = `${id}-${Date.now()}`;
+    
+    // Construct the payload structure that WhatsApp expects for HTML rendering
+    const richPayload = {
+      response_id: responseId,
+      sections: [{
+        view_model: {
+          primitive: {
+            __typename: 'GenAIaeacdsnwHtmlPrimitive',
+            payload: html,
+            trusted_sources: ['testsource']
+          },
+          __typename: 'GenAISingleLayoutViewModel'
+        }
+      }]
+    };
+
+    // Relay the custom constructed message using the socket
+    await sock.relayMessage(chatId, {
+      messageContextInfo: {
+        deviceListMetadata: {},
+        deviceListMetadataVersion: 2,
+        botMetadata: {
+          messageDisclaimerText: '',
+          botResponseId: responseId
+        }
+      },
+      botForwardedMessage: {
+        message: {
+          richResponseMessage: {
+            messageType: 1,
+            submessages: [{ messageType: 2, messageText: 'HTML Content' }],
+            unifiedResponse: {
+              data: Buffer.from(JSON.stringify(richPayload)).toString('base64')
+            },
+            contextInfo: {
+              forwardingScore: 1,
+              isForwarded: true,
+              forwardedAiBotMessageInfo: { botJid: '867051314767696@bot' },
+              forwardOrigin: 4
+            }
+          }
+        }
+      }
+    }, {});
+
+    emitActionAck(entry, {
+      requestId: rid || requestId,
+      action: 'render_html',
+      ok: true,
+      detail: 'sent',
+      result: { responseId },
+    });
+  } catch (err) {
+    emitActionError(entry, { requestId: rid || requestId, action: 'render_html', err });
+  }
+};
+
 const handleDownloadMedia: ActionHandler = async (entry, _payload, requestId, deps) => {
   const ctx = entry.ctx;
   const payload = _payload as unknown as DownloadMediaPayload;
@@ -884,6 +952,7 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
   send_buttons: handleSendButtons,
   send_carousel: handleSendCarousel,
   send_copy_code: handleSendCopyCode,
+  render_html: handleRenderHtml,
   download_media: handleDownloadMedia,
 };
 

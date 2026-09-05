@@ -526,6 +526,16 @@ def _extract_actions_from_tool_calls(
         "footer": footer,
       })
 
+    elif name == "render_html":
+      html = str(args.get("html") or "").strip()
+      if not html:
+        logger.warning("render_html ignored: missing html content")
+        continue
+      actions.append({
+        "type": "render_html",
+        "html": html,
+      })
+
     elif name == "execute_subtask":
       instruction = str(args.get("instruction") or "").strip()
       confirmation_text = str(args.get("confirmation_text") or "").strip()

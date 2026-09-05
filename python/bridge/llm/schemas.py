@@ -423,6 +423,36 @@ LLM2_QUIZ_TOOL = {
     },
 }
 
+LLM2_RENDER_HTML_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "render_html",
+        "description": (
+            "Send a rich HTML message that will be rendered in the WhatsApp client. "
+            "Use this to display structured content like cards, styled announcements, "
+            "or interactive layouts. The HTML will be rendered using WhatsApp's internal "
+            "rendering engine."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "html": {
+                    "type": "string",
+                    "description": (
+                        "Raw HTML content to render. Can include inline CSS styles. "
+                        "Keep it simple and mobile-friendly. WhatsApp supports basic HTML tags "
+                        "like div, span, h1-h6, p, img, and inline styles."
+                    ),
+                    "minLength": 1,
+                },
+            },
+            "required": ["html"],
+            "additionalProperties": False,
+        },
+        "strict": True,
+    },
+}
+
 # Base tools always available to LLM2 (sticker tool is built dynamically per-chat).
 LLM2_BASE_TOOLS = [LLM2_REPLY_TOOL, LLM2_REACT_TOOL]
 
@@ -431,6 +461,7 @@ def build_llm2_tools(
     *,
     allow_subagent: bool = False,
     allow_quiz: bool = True,
+    allow_render_html: bool = True,
 ) -> list[dict]:
     """Build the LLM2 tool list based on current chat permissions."""
     tools = list(LLM2_BASE_TOOLS)
@@ -439,6 +470,8 @@ def build_llm2_tools(
         tools.append(LLM2_QUIZ_TOOL)
     if allow_subagent:
         tools.append(LLM2_SUBAGENT_TOOL)
+    if allow_render_html:
+        tools.append(LLM2_RENDER_HTML_TOOL)
     return tools
 
 
