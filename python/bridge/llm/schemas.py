@@ -428,10 +428,13 @@ LLM2_RENDER_HTML_TOOL = {
     "function": {
         "name": "render_html",
         "description": (
-            "Send a rich HTML message that will be rendered in the WhatsApp client. "
-            "Use this to display structured content like cards, styled announcements, "
-            "or interactive layouts. The HTML will be rendered using WhatsApp's internal "
-            "rendering engine."
+            "Send an HTML message rendered in WhatsApp's internal browser. "
+            "Choose the level of complexity that best fits the content — simple styled HTML "
+            "is fine for basic content, but for dashboards, reports, or interactive content "
+            "you are encouraged to use the full range of available features: CSS animations, "
+            "transitions, gradients, box-shadows, flexbox/grid layouts, and JavaScript for "
+            "interactivity (onclick handlers, timers, DOM manipulation). "
+            "WhatsApp supports HTML5 + CSS3 + ES5 JavaScript."
         ),
         "parameters": {
             "type": "object",
@@ -439,8 +442,9 @@ LLM2_RENDER_HTML_TOOL = {
                 "html": {
                     "type": "string",
                     "description": (
-                        "HTML content to render. Can include inline CSS styles or JavaScript. "
-                        "Keep it mobile-friendly. WhatsApp fully supports every HTML, CSS property and JavaScript."
+                        "HTML string to render. You can use inline CSS via <style> tags and "
+                        "JavaScript via <script> tags. Use viewport-relative units (vw, vh, rem) "
+                        "for mobile responsiveness. Keep content within ~360px viewport width."
                     ),
                     "minLength": 1,
                 },

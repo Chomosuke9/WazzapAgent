@@ -1384,9 +1384,8 @@ class BatchProcessor:
           action.get("html", ""),
           request_id=request_id,
         )
-        # Add compact history entry so LLM knows HTML was sent
-        _html_preview = action.get("html", "")[:100]
-        _html_history_text = f"【HTML SENT】\n{_html_preview}..."
+        # Add history entry so LLM knows HTML was sent (full content, not a preview)
+        _html_history_text = f"【HTML SENT】\n{action.get('html', '')}"
         _prov_html_msg = _assistant_provisional(
           _html_history_text,
           message_id=f"local-html-{request_id}",
