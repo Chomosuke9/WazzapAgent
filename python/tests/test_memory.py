@@ -36,8 +36,13 @@ from bridge.history import WhatsAppMessage
 
 def _insert(scope_key: str, text: str) -> None:
     conn = _get_settings_conn()
+    # Generate a random 2-char mem_id like the Node side does
+    import random
+    import string
+    mem_id = ''.join(random.choices(string.ascii_letters + string.digits, k=2))
     conn.execute(
-        "INSERT INTO memories (scope_key, text) VALUES (?, ?)", (scope_key, text)
+        "INSERT INTO memories (mem_id, scope_key, text) VALUES (?, ?, ?)",
+        (mem_id, scope_key, text)
     )
     conn.commit()
 
@@ -53,7 +58,11 @@ def test_get_memories_combines_global_then_chat_oldest_first(tmp_path):
         _insert("c@g.us", "chat-2")
         _insert(GLOBAL_CHAT_ID, "global-2")
         # global entries first (in insert order), then chat entries (in order).
-        assert get_memories("c@g.us") == ["global-1", "global-2", "chat-1", "chat-2"]
+        result = get_memories("c@g.us")
+        assert len(result) == 4
+        assert [m['text'] for m in result] == ["global-1", "global-2", "chat-1", "chat-2"]
+        # All entries have mem_id
+        assert all('mem_id' in m and len(m['mem_id']) == 2 for m in result)
 
 
 def test_get_memories_empty_is_empty_list(tmp_path):
@@ -66,21 +75,26 @@ def test_get_memories_other_chat_isolated_but_sees_global(tmp_path):
     with tenant_db_context(str(tmp_path)):
         _insert("a@g.us", "a-only")
         _insert(GLOBAL_CHAT_ID, "shared")
-        assert get_memories("a@g.us") == ["shared", "a-only"]
+        result_a = get_memories("a@g.us")
+        assert [m['text'] for m in result_a] == ["shared", "a-only"]
         # A different chat sees the global entry but NOT a@g.us's private one.
-        assert get_memories("b@g.us") == ["shared"]
+        result_b = get_memories("b@g.us")
+        assert [m['text'] for m in result_b] == ["shared"]
 
 
 def test_get_memories_cache_then_invalidation(tmp_path):
     with tenant_db_context(str(tmp_path)):
         _insert("c@g.us", "first")
-        assert get_memories("c@g.us") == ["first"]  # populates the cache
+        result1 = get_memories("c@g.us")
+        assert [m['text'] for m in result1] == ["first"]  # populates the cache
         # Insert a second row directly; the cached read still returns the old list.
         _insert("c@g.us", "second")
-        assert get_memories("c@g.us") == ["first"]
+        result2 = get_memories("c@g.us")
+        assert [m['text'] for m in result2] == ["first"]
         # invalidate_chat_settings clears the memory cache via this reset.
         reset_settings_connection()
-        assert get_memories("c@g.us") == ["first", "second"]
+        result3 = get_memories("c@g.us")
+        assert [m['text'] for m in result3] == ["first", "second"]
 
 
 # --------------------------------------------------------------------------- #
@@ -95,14 +109,17 @@ def test_build_memory_block_none_when_empty(monkeypatch):
 
 def test_build_memory_block_formats_entries(monkeypatch):
     monkeypatch.setattr(
-        db, "get_memories", lambda chat_id: ["Budi likes apple", "Reply in Indonesian"]
+        db, "get_memories", lambda chat_id: [
+            {"mem_id": "ab", "text": "Budi likes apple"},
+            {"mem_id": "cd", "text": "Reply in Indonesian"}
+        ]
     )
     block = prompt_mod.build_memory_block("c@g.us")
     assert block is not None
     assert "<long_term_memory>" in block
     assert "</long_term_memory>" in block
-    assert "- Budi likes apple" in block
-    assert "- Reply in Indonesian" in block
+    assert "【AB】 Budi likes apple" in block
+    assert "【CD】 Reply in Indonesian" in block
 
 
 # --------------------------------------------------------------------------- #
@@ -127,7 +144,7 @@ def test_memory_block_injected_as_humanmessage(monkeypatch):
     current = WhatsAppMessage(
         timestamp_ms=0, context_msg_id="000100", text="hi", sender="A", sender_ref="a1"
     )
-    block = "<long_term_memory>\n- Budi likes apple\n</long_term_memory>"
+    block = "<long_term_memory>\n【AB】 Budi likes apple\n</long_term_memory>"
     built = llm2_mod.build_llm2_messages(
         [],
         current,

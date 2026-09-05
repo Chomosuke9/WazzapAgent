@@ -32,8 +32,12 @@ def _set_name(chat_id: str, sender_ref: str, name: str) -> None:
 
 def _add_memory(scope_key: str, text: str) -> None:
     conn = _get_settings_conn()
+    import random
+    import string
+    mem_id = ''.join(random.choices(string.ascii_letters + string.digits, k=2))
     conn.execute(
-        "INSERT INTO memories (scope_key, text) VALUES (?, ?)", (scope_key, text)
+        "INSERT INTO memories (mem_id, scope_key, text) VALUES (?, ?, ?)",
+        (mem_id, scope_key, text)
     )
     conn.commit()
 

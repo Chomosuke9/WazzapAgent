@@ -152,14 +152,15 @@ def get_join_prompt() -> str:
   return get_bot_config('join_prompt') or "Introduce yourself to this group. Tell them your name and what you can do."
 
 @_db_resilient('settings')
-def get_memories(chat_id: str) -> list[str]:
+def get_memories(chat_id: str) -> list[dict]:
   """Return the effective long-term memory list for *chat_id*.
 
-  Combines the shared ``__global__`` memories (listed first) with the per-chat
-  memories (listed after), each ordered oldest-first — the same order the
-  ``/memory`` command displays. Written by the Node ``/memory`` handler into the
-  shared ``settings.db`` (CONTRACT §8); read here for the per-turn long-term
-  memory block injected into LLM2.
+  Returns a list of ``{"mem_id": <2-char id>, "text": <stored text>}`` dicts,
+  oldest-first, combining the shared ``__global__`` memories (listed first) with
+  the per-chat memories (listed after) — the same order the ``/memory`` command
+  displays. Written by the Node ``/memory`` handler into the shared
+  ``settings.db`` (CONTRACT §8); read here for the per-turn long-term memory
+  block injected into LLM2.
 
   Cached per ``(tenant, chat_id)``; the cache is cleared wholesale by
   :func:`bridge.db.core.reset_settings_connection` on any settings
@@ -170,18 +171,18 @@ def get_memories(chat_id: str) -> list[str]:
   with _cache_lock:
     cached = _memory_cache.get(_tenant_cache_key(chat_id), _MISSING)
   if cached is not _MISSING:
-    return list(cached)  # type: ignore[arg-type]
+    return [dict(item) for item in cached]  # type: ignore[arg-type]
   _ensure_split_ready()
   conn = _get_settings_conn()
   rows = conn.execute(
     """
-    SELECT text FROM memories
+    SELECT mem_id, text FROM memories
     WHERE scope_key IN (?, ?)
     ORDER BY (scope_key = ?) ASC, id ASC
     """,
     (GLOBAL_CHAT_ID, chat_id, chat_id),
   ).fetchall()
-  values = [row['text'] for row in rows]
+  values = [{'mem_id': row['mem_id'], 'text': row['text']} for row in rows]
   with _cache_lock:
     _memory_cache[_tenant_cache_key(chat_id)] = list(values)
   return values

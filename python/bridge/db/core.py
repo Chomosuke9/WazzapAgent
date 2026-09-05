@@ -740,6 +740,23 @@ def _ensure_settings_tables(conn: sqlite3.Connection) -> None:
     """
   )
 
+  # Migration: surface the stable 2-char `mem_id` that Node's schema assigns
+  # (settings.db is shared with Node; /memory delete uses these IDs). Bridge-
+  # created DBs that pre-date Node's mem_id migration have no column — add it
+  # and backfill each row with a random 2-char ID so the LLM-facing block can
+  # show the same IDs the /memory list shows.
+  memories_cols = {row['name'] for row in conn.execute('PRAGMA table_info(memories)')}
+  if 'mem_id' not in memories_cols:
+    conn.execute('ALTER TABLE memories ADD COLUMN mem_id TEXT')
+    conn.execute(
+      'UPDATE memories SET mem_id = substr(lower(hex(randomblob(2))), 1, 2) '
+      'WHERE mem_id IS NULL'
+    )
+    conn.execute(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_mem_id ON memories (mem_id)'
+    )
+  conn.commit()
+
 
 def _ensure_stats_tables(conn: sqlite3.Connection) -> None:
   conn.executescript(
