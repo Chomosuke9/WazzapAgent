@@ -103,6 +103,13 @@ class SendQuizAction:
 
 
 @dataclass(frozen=True)
+class RenderHtmlAction:
+    request_id: str
+    chat_id: str
+    html: str
+
+
+@dataclass(frozen=True)
 class SendCopyCodeAction:
     request_id: str
     chat_id: str
@@ -290,6 +297,7 @@ _FRAME_TABLE: tuple[tuple[type, str, bool], ...] = (
     (MarkReadAction, "mark_read", False),
     (SendPresenceAction, "send_presence", False),
     (SendQuizAction, "send_quiz", False),
+    (RenderHtmlAction, "render_html", False),
     (SendCopyCodeAction, "send_copy_code", False),
     (RelayLottieStickerAction, "relay_lottie_sticker", False),
     (SendButtonsAction, "send_buttons", False),

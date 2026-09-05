@@ -274,6 +274,25 @@ class WaSocket:
             frame, rid, caller_supplied=request_id is not None
         )
 
+    async def render_html(
+        self,
+        destination: str,
+        html: str,
+        *,
+        request_id: Optional[str] = None,
+    ) -> dict:
+        """Send a rich HTML message. Raises ``SendFailedError``,
+        ``InvalidTargetError`` or ``TimeoutError``."""
+        rid = request_id if request_id is not None else make_request_id("html")
+        frame = protocol.RenderHtmlAction(
+            request_id=rid,
+            chat_id=destination,
+            html=html,
+        )
+        return await self._dispatch_action(
+            frame, rid, caller_supplied=request_id is not None
+        )
+
     async def react(
         self,
         destination: str,

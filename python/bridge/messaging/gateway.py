@@ -362,6 +362,34 @@ async def send_quiz(
   )
 
 
+async def render_html(
+  ws,
+  chat_id: str,
+  html: str,
+  *,
+  request_id: str,
+):
+  """Send a rich HTML message that renders in WhatsApp's internal browser.
+
+  The Node gateway constructs a richResponseMessage with the HTML payload
+  encoded as base64 and sends it via botForwardedMessage relay.
+  """
+  logger.debug(
+    "outbound",
+    extra={
+      "chat_id": chat_id,
+      "action": "render_html",
+      "request_id": request_id,
+      "html_len": len(html or ""),
+    },
+  )
+  await ws.render_html(
+    chat_id,
+    html,
+    request_id=request_id,
+  )
+
+
 async def send_copy_code(
   ws,
   chat_id: str,

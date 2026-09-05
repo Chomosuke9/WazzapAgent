@@ -94,6 +94,7 @@ from ..messaging.gateway import (
   send_quiz,
   send_react_message,
   send_sticker,
+  render_html,
   typing_indicator,
 )
 
@@ -1372,6 +1373,25 @@ class BatchProcessor:
         )
         hydrate_quoted_from_history(_prov_quiz_msg, history)
         _append_history(history, _prov_quiz_msg)
+        session._dashboard.record_stat(chat_id, "responses_sent")
+        action_counts[action_type] += 1
+        continue
+      if action_type == "render_html":
+        request_id = _make_request_id("html")
+        await render_html(
+          ws,
+          chat_id,
+          action.get("html", ""),
+          request_id=request_id,
+        )
+        # Add compact history entry so LLM knows HTML was sent
+        _html_preview = action.get("html", "")[:100]
+        _html_history_text = f"【HTML SENT】\n{_html_preview}..."
+        _prov_html_msg = _assistant_provisional(
+          _html_history_text,
+          message_id=f"local-html-{request_id}",
+        )
+        _append_history(history, _prov_html_msg)
         session._dashboard.record_stat(chat_id, "responses_sent")
         action_counts[action_type] += 1
         continue
