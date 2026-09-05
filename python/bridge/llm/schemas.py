@@ -439,7 +439,7 @@ LLM2_RENDER_HTML_TOOL = {
                 "html": {
                     "type": "string",
                     "description": (
-                        "Raw HTML content to render. Can include inline CSS styles or JavaScript. "
+                        "HTML content to render. Can include inline CSS styles or JavaScript. "
                         "Keep it mobile-friendly. WhatsApp fully supports every HTML, CSS property and JavaScript."
                     ),
                     "minLength": 1,
